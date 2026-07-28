@@ -104,3 +104,26 @@ discussion.
 `spike-log.md` exists in this planning directory with: steps taken, exact
 working configuration (or exact failure + diagnosis), tier reached, and a
 recommendation. Review gate conversation held with the user.
+
+## Implementation Result
+
+Status: done (spike concluded — outcome: incompatibility diagnosed)
+Completed: 2026-07-27
+Commit: pending
+
+- Changed: `spike-log.md` written (full step-by-step log, findings,
+  conclusions, tier, recommendations). No code changes; no durable edits
+  under `kolbot/` (only GUI-side profile creation, stored in kolbot's own
+  gitignored `data/profile.json`).
+- Validated: empirically on the Windows machine — stock kolbot vs PD2
+  Game.exe (1.13c): pre-launch abort; vs vanilla base install: crash loop,
+  root-caused to base install being 1.14b not 1.14d. Community research
+  (blizzhackers FAQ/forums, GitHub) confirms no public PD2-compatible
+  D2BS exists.
+- Deviations: baseline sanity test could not fully validate the toolchain
+  (vanilla install is 1.14b, not a kolbot-supported version); skipped
+  patching it per phase-file time-box guidance.
+- Tier reached: below T0. Per phase file, a precise failure diagnosis is
+  a successful spike outcome. Review gate: pending user decision
+  (recommendation: resurrect from-scratch memory-reader plan, mining
+  kolbot scripts as behavioral reference).

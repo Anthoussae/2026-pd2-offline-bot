@@ -2,11 +2,20 @@
 kind: plan
 size: lg
 depth: roadmap
-status: active
+status: superseded
+superseded-by: docs/plans/2026-07-28-bot-from-scratch/
+superseded-date: 2026-07-28
 repo: 2026-pd2-offline-bot
 created: 2026-07-28
 adr: possible
 ---
+
+> **Superseded 2026-07-28** after M1's spike verdict: kolbot cannot run
+> on PD2 (1.13c unsupported; community bridge dead — see
+> `spike-log.md`). M1 itself completed successfully (diagnosis
+> delivered). M2–M5 never started. Successor plan:
+> `docs/plans/2026-07-28-bot-from-scratch/` (from-scratch Python
+> memory-reader + synthetic input).
 
 # PD2 offline kolbot — roadmap plan
 
