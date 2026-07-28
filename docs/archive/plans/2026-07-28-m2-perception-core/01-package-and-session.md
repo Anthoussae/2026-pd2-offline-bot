@@ -85,3 +85,29 @@ Package imports cleanly, `GameSession` attaches to the live client and
 resolves the module base, both error paths give actionable messages,
 lint and tests pass, and `offsets.py` holds every constant with BH
 citations.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-07-28
+Commit: e859128
+
+- Changed: `pyproject.toml`, `pd2bot/{__init__,offsets,memory}.py`,
+  `tests/{conftest,test_offsets,test_memory}.py`, `.gitignore`, `README.md`.
+- Validated: 49 tests pass overall; `GameSession` attached to the live
+  client (pid 24996) and resolved D2Client.dll at 0x6FAB0000; the
+  unelevated path produced the intended "run as Administrator" message
+  (this is how the elevation requirement was discovered in M1 and it is
+  now a first-class error).
+- Deviations, all environment-driven:
+  1. **No editable install.** `pip install -e .` crawls the repo, which
+     sits on OneDrive beside the large gitignored `kolbot/` clone, and
+     hung for >10 minutes. The package is imported from the repo root via
+     pytest's `pythonpath` instead; `[build-system]` was removed with a
+     comment explaining why.
+  2. **The venv lives outside the repo** (`~/.venvs/pd2bot`) for the same
+     reason — thousands of files in a synced folder made installs crawl.
+     Documented in the README.
+  3. **ruff could not be installed** — see `_DONE.md`; PyPI's file CDN
+     times out on the 11.9 MB wheel. A stopgap AST check (unused imports,
+     line length) was run instead and is clean. Real lint still owed.

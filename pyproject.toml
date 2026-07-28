@@ -1,0 +1,26 @@
+[project]
+name = "pd2bot"
+version = "0.1.0"
+description = "Out-of-process bot for Project Diablo 2 (offline single player)"
+requires-python = ">=3.12"
+dependencies = ["pymem>=1.14"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+# Deliberately no [build-system]: the package is not installed, it is imported
+# from the repo root (see `pythonpath` below and the README). An editable
+# install crawls this directory, which contains the large gitignored kolbot/
+# reference clone on OneDrive, and takes many minutes for no benefit.
+
+[tool.ruff]
+line-length = 100
+# spike/ is M1's historical record, deliberately throwaway. Not live code.
+exclude = ["spike", "kolbot", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

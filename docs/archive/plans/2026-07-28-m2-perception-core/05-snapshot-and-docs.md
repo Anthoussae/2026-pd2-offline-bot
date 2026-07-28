@@ -76,3 +76,25 @@ None here; P2 may already have produced one.
 pass, `docs/architecture/perception.md` and the README are written, the
 cleanup sweep is done, the teach explainer and glossary are updated, and
 `_DONE.md` records the milestone per the yona-implement convention.
+
+## Implementation Result
+
+Status: done (except real lint — see `_DONE.md`)
+Completed: 2026-07-28
+Commit: e859128
+
+- Changed: `pd2bot/snapshot.py` (`GameSnapshot`, `Perception`),
+  `pd2bot/dump.py` (`python -m pd2bot.dump [--watch] [-v]`),
+  `tests/test_snapshot.py`, `docs/architecture/perception.md`,
+  `README.md`, `docs/learning/2026-07-28-from-script-to-package.md`,
+  `docs/learning/glossary.md`.
+- Validated: 49 tests pass. The dump ran against the live client and
+  produced correct output including the post-fix
+  `ui: nothing open   can act: yes`.
+- Cleanup sweep: no TODOs, debug prints, commented-out code, disabled
+  tests or suppressed warnings in `pd2bot/` or `tests/`. `spike/` left
+  alone deliberately as M1's record. Stopgap lint clean.
+- Teach step done: explainer covers packages, virtualenvs, lint/format,
+  what tests can and cannot verify, dataclasses, and defensive reading of
+  a live process. Glossary gained package/module, virtual environment,
+  linter/formatter, dataclass.

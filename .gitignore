@@ -8,3 +8,6 @@ kolbot/
 .venv*/
 __pycache__/
 *.pyc
+
+# Build artifacts from the abandoned editable install (see pyproject.toml)
+*.egg-info/

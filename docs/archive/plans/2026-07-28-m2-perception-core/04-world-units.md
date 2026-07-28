@@ -109,3 +109,31 @@ commitment.)
 Monsters and ground items around the player are enumerated correctly and
 verified against what is visible on screen, traversal is bounded and
 survives transient reads, and tests plus lint pass.
+
+## Implementation Result
+
+Status: done, with one verification gap (below)
+Completed: 2026-07-28
+Commit: e859128
+
+- Changed: `pd2bot/units.py` (unit primitives, room traversal, `Monster`,
+  `GroundItem`, `scan_units`), `tests/test_units.py`.
+- **Live verification, monsters**: in act 2 the dump reported 4 monsters
+  with distinct plausible positions near the player, all at 100% hp, one
+  correctly flagged `minion`; in town it reported none. Positions and
+  counts tracked the player's movement between areas.
+- **Verification gap — ground items.** No items happened to be lying on
+  the floor during observation, so item enumeration is covered by tests
+  (including the carried-vs-on-the-floor distinction via `ItemLocation`)
+  but **not yet confirmed live**. Cheap to close: drop an item, run the
+  dump, pick it up. Carried forward to M2's follow-ups.
+- **Bug found while writing the tests**: the room-walk generator's own
+  pointer read sat outside `scan_units`'s try block, so a dangling
+  `pRoomNext` would have propagated instead of being handled — exactly
+  the torn-read case the design claims to survive. `iter_units` and
+  `nearby_rooms` now fail closed, and a test drives a unit list into
+  unmapped memory to prove it.
+- Traversal bounds are tested by driving a self-referential unit list
+  (`MAX_UNITS_PER_ROOM`) and an absurd neighbour count.
+- Deviations: none of substance. Resistances stayed out of scope as
+  instructed.

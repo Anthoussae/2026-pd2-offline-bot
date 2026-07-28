@@ -12,11 +12,18 @@ instruction manual (`docs/manual/`), and architecture documentation
 *behavioral reference only* (never edited, never executed — it is
 incompatible with PD2's 1.13c client; see the archived plan).
 
-Active roadmap: `docs/plans/2026-07-28-bot-from-scratch/` (M1 done —
-perception + input proven). Current milestone plan:
-`docs/plans/2026-07-28-m2-perception-core/`. Read both `plan.md`s and
-their `notes.md` before non-trivial work. Superseded kolbot roadmap
-(incl. its completed spike): `docs/archive/plans/2026-07-28-pd2-offline-bot/`.
+Active roadmap: `docs/plans/2026-07-28-bot-from-scratch/` — read its
+`plan.md` and `notes.md` before non-trivial work. **M1 done** (perception
++ input proven); **M2 done** (the `pd2bot/` package: live game-state
+snapshots — see `docs/architecture/perception.md` and the archived
+`docs/archive/plans/2026-07-28-m2-perception-core/_DONE.md`, which lists
+two open caveats). Next up is M3 (navigation), which needs its own
+`yona-plan` pass. Superseded kolbot roadmap:
+`docs/archive/plans/2026-07-28-pd2-offline-bot/`.
+
+Perception is done; **nothing sends input yet**. When M3 adds it, it must
+gate on `pd2bot.uistate.can_act()` *and* the game window being in the
+foreground — see the ADRs in `docs/adr/`.
 This repo is developed from two machines (Mac = planning/docs, Windows =
 the machine with PD2 + the live bot); keep state in git and planning
 artifacts so sessions on either side can resume.

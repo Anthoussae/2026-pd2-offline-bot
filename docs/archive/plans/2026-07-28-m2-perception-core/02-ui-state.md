@@ -117,3 +117,51 @@ was tried and what the next options are. Do not proceed to a heuristic.
 situations listed under Validation, the discovery method and its
 sanity-checks are documented in code, tests pass, and the review-gate
 conversation has been held.
+
+## Implementation Result
+
+Status: done (code + offline verification); **live verification pending**
+Completed: 2026-07-28
+Commit: e859128
+
+- **The primary approach worked on the first try.** `GetUiVar_I` turned out
+  to be a 44-byte function: a bounds check (`cmp eax, 0x26`), an assert
+  path, then `8B 04 85 <abs32>` = `mov eax, [eax*4 + 0x6FBAAD80]`, `ret`.
+  The UI array is at **D2Client + 0xFAD80**, DWORD entries indexed by BH's
+  UI enum. No differential scan was needed.
+- **Independent cross-check found and used as a runtime sanity check.**
+  BH separately documents `AutomapOn` at 0xFADA8 (D2Ptrs.h:185). That is
+  exactly `0xFAD80 + UI_AUTOMAP * 4`. Two unrelated BH facts agreeing is
+  strong evidence the array is the right one, so `find_ui_array()` refuses
+  any candidate that fails this identity as well as any address outside
+  the module.
+- Changed: `pd2bot/uistate.py` (`find_ui_array`, `read_ui_state`,
+  `is_in_game`, `can_act`, `UIState.blocks_input`), `tests/test_uistate.py`
+  (parser tested against the real instruction bytes, captured as a
+  fixture), offsets for the function and the UI enum.
+- Validated offline: the parser recovers 0x6FBAAD80 from the live client's
+  actual bytes; rejects an in-range-looking address that fails the automap
+  identity; rejects a function body with no indexed load. The M1 incident
+  is encoded as a test (`test_esc_menu_blocks_input`).
+- **Live calibration done** (user toggling panels, agent sent no input).
+  Observed transitions:
+
+  | Slot | Behaviour observed | Verdict |
+  |---|---|---|
+  | 0x01 inventory | on/off exactly with the panel | real panel, blocking |
+  | 0x02 character | on/off exactly with the panel | real panel, blocking |
+  | **0x09 esc menu** | **on/off exactly with the panel** | **real, blocking — the M1 culprit, now confirmed** |
+  | 0x0A automap | on/off exactly with the panel | real, but world stays clickable → not blocking |
+  | 0x00 UI_GAME | always 1 while in a game | state flag, not a panel |
+  | 0x06, 0x13 | always 1, never moved | internal |
+  | 0x23 | on during play, **off while the esc menu is up** | "gameplay running" flag |
+  | 0x14 | on at rest, drifts on its own | not a display flag |
+
+- **Second, stronger confirmation of the array.** The automap slot is the
+  address BH documents separately as `AutomapOn`; watching it move in
+  lockstep with the automap key confirms empirically what the arithmetic
+  cross-check only implied.
+- **Bug caught by this calibration**: the first implementation treated every
+  nonzero slot as an open panel, so `can_act()` returned NO during ordinary
+  play (the always-on slots). Fixed by excluding them, with the table above
+  recorded in the code.
