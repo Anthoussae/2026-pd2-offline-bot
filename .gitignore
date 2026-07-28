@@ -1,0 +1,4 @@
+# Stock kolbot clone — intentionally untracked (overlay approach, see
+# docs/plans/2026-07-28-pd2-offline-bot/plan.md). Refresh with:
+#   git clone --depth 1 https://github.com/blizzhackers/kolbot kolbot
+kolbot/
