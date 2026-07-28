@@ -12,9 +12,11 @@ instruction manual (`docs/manual/`), and architecture documentation
 *behavioral reference only* (never edited, never executed — it is
 incompatible with PD2's 1.13c client; see the archived plan).
 
-Active plan: `docs/plans/2026-07-28-bot-from-scratch/` — read `plan.md`
-and `notes.md` before non-trivial work. Superseded kolbot roadmap (incl.
-its completed M1 spike): `docs/archive/plans/2026-07-28-pd2-offline-bot/`.
+Active roadmap: `docs/plans/2026-07-28-bot-from-scratch/` (M1 done —
+perception + input proven). Current milestone plan:
+`docs/plans/2026-07-28-m2-perception-core/`. Read both `plan.md`s and
+their `notes.md` before non-trivial work. Superseded kolbot roadmap
+(incl. its completed spike): `docs/archive/plans/2026-07-28-pd2-offline-bot/`.
 This repo is developed from two machines (Mac = planning/docs, Windows =
 the machine with PD2 + the live bot); keep state in git and planning
 artifacts so sessions on either side can resume.

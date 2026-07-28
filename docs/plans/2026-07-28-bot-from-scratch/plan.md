@@ -96,7 +96,7 @@ areas (explicit check in M3).
 | Milestone | Size | Summary | Needs own planning? |
 |---|---|---|---|
 | M1 | sm | Perception + input spike: attach to live PD2 client, read player name/HP/position via BH-derived offsets, one synthetic click moves the character. Phase file: [01-perception-input-spike.md](01-perception-input-spike.md) | No — executable now. **Review gate at end** |
-| M2 | md | Perception core: player, monsters, ground items, map seed, area, menu/in-game state detection | Yes — `yona-plan` after M1 |
+| M2 | md | Perception core: player, monsters, ground items, map seed, area, menu/in-game state detection | **Planned** → [docs/plans/2026-07-28-m2-perception-core/](../2026-07-28-m2-perception-core/plan.md) |
 | M3 | md | Navigation: input layer, map-gen service (d2mapapi), A*, walk-to/path-following, **PD2 map fidelity check** | Yes |
 | M4 | md | Game cycle: create/leave SP game via menus, death/error handling, chicken logic, run-loop skeleton | Yes |
 | M5 | md | Trial run end-to-end: FSM + necro combat module + pickit + stash — Cold Plains clearance (Hell) | Yes |
