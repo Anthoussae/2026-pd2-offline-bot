@@ -108,3 +108,26 @@ click produces movement. Capture terminal output samples into the log.
 `spike-log.md` in this planning directory (steps, offsets + citations,
 tier reached, surprises, recommendation); spike script(s) in `spike/`;
 review-gate conversation held.
+
+## Implementation Result
+
+Status: done — **spike passes (T3, all tiers)**
+Completed: 2026-07-28
+Commit: pending
+
+- Changed: `spike/` (m1_spike.py consolidated + probe_*.py step probes,
+  venv gitignored), `spike-log.md`, this file, `.gitignore`,
+  `docs/adr/2026-07-28-python-out-of-process-perception.md`.
+- Validated empirically against the live Season 13 client: correct
+  reads of name/level/act/position/stats; position tracked at 10 Hz
+  through a walk; synthetic click moved the character.
+- Deviations: (a) used the pre-existing Python 3.8.2 rather than
+  waiting on the 3.12 install (3.12.10 is now installed for M2+);
+  (b) an early test click landed on "Save and Exit Game" because the
+  ESC menu was open — no data lost (normal save), and it produced the
+  milestone's most valuable finding (input must be UI-state gated);
+  (c) the max-HP read was semantically wrong at first (base vs full
+  stat array) — caught by the user, fixed, both arrays documented.
+- Requirements carried to M2/M3: readable UI-state indicator before any
+  input work; Administrator requirement documented + startup check;
+  input layer refuses to act unless foreground + UI_GAME + in-game.

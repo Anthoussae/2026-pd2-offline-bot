@@ -1,4 +1,10 @@
-# Stock kolbot clone — intentionally untracked (overlay approach, see
-# docs/plans/2026-07-28-pd2-offline-bot/plan.md). Refresh with:
+# Stock kolbot clone — intentionally untracked. Reference only: it cannot run
+# on PD2 (see docs/archive/plans/2026-07-28-pd2-offline-bot/spike-log.md).
+# Refresh with:
 #   git clone --depth 1 https://github.com/blizzhackers/kolbot kolbot
 kolbot/
+
+# Python
+.venv*/
+__pycache__/
+*.pyc

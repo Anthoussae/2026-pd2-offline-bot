@@ -109,7 +109,7 @@ recommendation. Review gate conversation held with the user.
 
 Status: done (spike concluded — outcome: incompatibility diagnosed)
 Completed: 2026-07-27
-Commit: pending
+Commit: a29bc77
 
 - Changed: `spike-log.md` written (full step-by-step log, findings,
   conclusions, tier, recommendations). No code changes; no durable edits
