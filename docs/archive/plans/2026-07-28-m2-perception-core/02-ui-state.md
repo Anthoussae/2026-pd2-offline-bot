@@ -122,7 +122,7 @@ conversation has been held.
 
 Status: done (code + offline verification); **live verification pending**
 Completed: 2026-07-28
-Commit: e859128
+Commit: f5359ee
 
 - **The primary approach worked on the first try.** `GetUiVar_I` turned out
   to be a 44-byte function: a bounds check (`cmp eax, 0x26`), an assert

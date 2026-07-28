@@ -114,7 +114,7 @@ survives transient reads, and tests plus lint pass.
 
 Status: done, with one verification gap (below)
 Completed: 2026-07-28
-Commit: e859128
+Commit: f5359ee
 
 - Changed: `pd2bot/units.py` (unit primitives, room traversal, `Monster`,
   `GroundItem`, `scan_units`), `tests/test_units.py`.

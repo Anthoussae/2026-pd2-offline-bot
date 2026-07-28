@@ -95,7 +95,7 @@ not-in-a-game and transition states as `None`, and tests plus lint pass.
 
 Status: done
 Completed: 2026-07-28
-Commit: e859128
+Commit: f5359ee
 
 - Changed: `pd2bot/player.py`, `pd2bot/world.py`, `tests/test_player.py`.
 - **Live verification** (`python -m pd2bot.dump -v`, two runs while the

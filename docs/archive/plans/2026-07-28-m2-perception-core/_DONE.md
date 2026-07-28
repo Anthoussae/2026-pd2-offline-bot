@@ -4,7 +4,7 @@ status: done
 repo: 2026-pd2-offline-bot
 plan: plan.md
 completed: 2026-07-28
-commit: e859128
+commit: f5359ee
 adrs:
   - docs/adr/2026-07-28-runtime-offset-discovery.md
 ---

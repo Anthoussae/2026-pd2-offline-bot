@@ -81,7 +81,7 @@ cleanup sweep is done, the teach explainer and glossary are updated, and
 
 Status: done (except real lint — see `_DONE.md`)
 Completed: 2026-07-28
-Commit: e859128
+Commit: f5359ee
 
 - Changed: `pd2bot/snapshot.py` (`GameSnapshot`, `Perception`),
   `pd2bot/dump.py` (`python -m pd2bot.dump [--watch] [-v]`),

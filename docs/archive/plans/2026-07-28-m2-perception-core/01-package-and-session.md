@@ -90,7 +90,7 @@ citations.
 
 Status: done
 Completed: 2026-07-28
-Commit: e859128
+Commit: f5359ee
 
 - Changed: `pyproject.toml`, `pd2bot/{__init__,offsets,memory}.py`,
   `tests/{conftest,test_offsets,test_memory}.py`, `.gitignore`, `README.md`.

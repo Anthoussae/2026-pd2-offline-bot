@@ -4,7 +4,7 @@ size: md
 depth: implementation
 status: done
 completed: 2026-07-28
-commit: e859128
+commit: f5359ee
 repo: 2026-pd2-offline-bot
 created: 2026-07-28
 adr: possible
