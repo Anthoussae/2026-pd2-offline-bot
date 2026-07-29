@@ -93,6 +93,24 @@ def _send_key(vk: int, flags: int) -> None:
     user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(_INPUT))
 
 
+_KEYEVENTF_UNICODE = 0x0004
+
+
+def _send_char(char: str) -> None:
+    """Type one character via KEYEVENTF_UNICODE (layout-independent).
+
+    Used by chat.py to type text into the in-game chat box; no VK mapping,
+    so any character the game font can show can be sent.
+    """
+    code = ord(char)
+    down = _INPUT(type=_INPUT_KEYBOARD)
+    down.union.ki = _KEYBDINPUT(0, code, _KEYEVENTF_UNICODE, 0, None)
+    user32.SendInput(1, ctypes.byref(down), ctypes.sizeof(_INPUT))
+    up = _INPUT(type=_INPUT_KEYBOARD)
+    up.union.ki = _KEYBDINPUT(0, code, _KEYEVENTF_UNICODE | _KEY_UP, 0, None)
+    user32.SendInput(1, ctypes.byref(up), ctypes.sizeof(_INPUT))
+
+
 class GatedInput:
     """All input goes through here, and the gate runs on every send."""
 

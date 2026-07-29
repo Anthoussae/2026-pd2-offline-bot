@@ -18,6 +18,7 @@ import pymem.process
 
 PROCESS_NAME = "Game.exe"
 CLIENT_MODULE = "d2client.dll"
+WIN_MODULE = "d2win.dll"  # owns the out-of-game menu controls (M4)
 
 
 class GameNotRunning(RuntimeError):
@@ -65,6 +66,9 @@ class GameSession:
                 f"{CLIENT_MODULE} is not loaded in {process_name} — "
                 "is this really the Diablo II client?"
             )
+        # Resolved on first use (see win()): everything before M4 lives in
+        # D2Client, and the fakes in tests never need to know D2Win exists.
+        self._win_base: int | None = None
 
     # -- setup helpers ------------------------------------------------------
 
@@ -88,6 +92,17 @@ class GameSession:
     def client(self, offset: int) -> int:
         """Absolute address of a D2Client.dll-relative offset."""
         return self.client_base + offset
+
+    def win(self, offset: int) -> int:
+        """Absolute address of a D2Win.dll-relative offset (menu controls)."""
+        if self._win_base is None:
+            base = self._module_base(WIN_MODULE)
+            if base is None:
+                raise RuntimeError(
+                    f"{WIN_MODULE} is not loaded — cannot read menu controls."
+                )
+            self._win_base = base
+        return self._win_base + offset
 
     # -- typed reads --------------------------------------------------------
 
@@ -114,6 +129,12 @@ class GameSession:
     def cstring(self, address: int, max_length: int) -> str:
         raw = self._pm.read_bytes(address, max_length)
         return raw.split(b"\x00", 1)[0].decode("ascii", errors="replace")
+
+    def wstring(self, address: int, max_chars: int) -> str:
+        """A NUL-terminated wchar_t (UTF-16LE) string, e.g. menu button text."""
+        raw = self._pm.read_bytes(address, max_chars * 2)
+        text = raw.decode("utf-16-le", errors="replace")
+        return text.split("\x00", 1)[0]
 
     def struct_at(self, address: int, fmt: str) -> tuple:
         """Unpack a little-endian struct in one read (cheaper than field-by-field)."""

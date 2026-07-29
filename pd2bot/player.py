@@ -15,6 +15,7 @@ class Player:
     level: int
     act: int  # 1-5 as players count them, not the 0-based value in memory
     position: tuple[int, int]
+    mode: int  # UNIT_MODE: animation state; 0/17 mean dead (offsets.PLAYER_MODE_*)
     hp: int
     max_hp: int
     mana: int
@@ -60,6 +61,7 @@ def read_player(session: GameSession) -> Player | None:
         level=stats.get(offsets.STAT_LEVEL, 0),
         act=session.u32(unit + offsets.UNIT_ACT_NO) + 1,
         position=position,
+        mode=session.u32(unit + offsets.UNIT_MODE),
         hp=stats.get(offsets.STAT_HP, 0),
         max_hp=stats.get(offsets.STAT_MAX_HP, 0),
         mana=stats.get(offsets.STAT_MANA, 0),

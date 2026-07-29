@@ -96,3 +96,49 @@ def read_map_seed(session: GameSession) -> int | None:
     if act is None:
         return None
     return session.u32(act + offsets.ACT_MAP_SEED)
+
+
+# BH exposes difficulty only as a function (D2Ptrs.h:152, GetDifficulty),
+# because BH runs in-process and can call it. Same answer as uistate's UI
+# array: parse the function's own code for the byte it reads. The likely
+# encodings for `return <byte at absolute address>` in a 32-bit build:
+_DIFFICULTY_LOAD_PATTERNS = (
+    b"\xa0",  # mov al,  [abs32]  (short form)
+    b"\x8a\x05",  # mov al,  [abs32]  (ModRM form)
+    b"\x0f\xb6\x05",  # movzx eax, byte [abs32]
+)
+_DIFFICULTY_SCAN_BYTES = 24
+
+
+class DifficultyNotFound(RuntimeError):
+    """GetDifficulty's code did not match any known encoding."""
+
+
+def _find_difficulty_byte(session: GameSession) -> int:
+    """Locate the difficulty byte by parsing GetDifficulty. Absolute address."""
+    code = session.raw(session.client(offsets.GET_DIFFICULTY_FN), _DIFFICULTY_SCAN_BYTES)
+    for pattern in _DIFFICULTY_LOAD_PATTERNS:
+        index = code.find(pattern)
+        if index == -1 or index + len(pattern) + 4 > len(code):
+            continue
+        start = index + len(pattern)
+        address = int.from_bytes(code[start : start + 4], "little")
+        # Sanity: the variable must live inside D2Client's image, like the
+        # UI array. A wrong match reads garbage forever; refuse instead.
+        if 0 < address - session.client_base < 0x200000:
+            return address
+    raise DifficultyNotFound(
+        "Could not find the byte load inside GetDifficulty. The client's code "
+        "may have changed; re-derive from BH's headers."
+    )
+
+
+def read_difficulty(session: GameSession) -> int | None:
+    """0 normal / 1 nightmare / 2 hell, or None when not in a game.
+
+    The cycle (M4) reads this after every game entry as the wrong-difficulty
+    guard: a misclicked difficulty popup must never poison the Hell atlas.
+    """
+    if player_unit(session) is None:
+        return None
+    return session.u8(_find_difficulty_byte(session))

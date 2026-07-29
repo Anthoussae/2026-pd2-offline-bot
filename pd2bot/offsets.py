@@ -26,6 +26,17 @@ PLAYER_UNIT_PTR = 0x11BBFC
 # A function, not a variable — P2 parses its code to locate the UI array.
 GET_UI_VAR_FN = 0xBE400
 
+# D2Ptrs.h:152  FUNCPTR(D2CLIENT, GetDifficulty, BYTE __stdcall, (void), 0x41930, 0x42980)
+# BH exposes difficulty only as a function (it runs in-process and can call
+# it). Same drill as GetUiVar_I: oog/world parses the function's code to find
+# the byte it reads, so a patch that moves the variable is picked up
+# automatically. Values: 0 normal, 1 nightmare, 2 hell (kolbot sdk.difficulty).
+GET_DIFFICULTY_FN = 0x41930
+DIFFICULTY_NORMAL = 0
+DIFFICULTY_NIGHTMARE = 1
+DIFFICULTY_HELL = 2
+DIFFICULTY_NAMES = {0: "normal", 1: "nightmare", 2: "hell"}
+
 # D2Ptrs.h  VARPTR(D2CLIENT, pUnitTable, POINT, 0x10A608, 0x1047B8)
 # The client's unit hash table: UNIT_TYPE_COUNT tables of HASH_BUCKETS
 # entries, each the head of a chain linked by UNIT_LIST_NEXT.
@@ -330,3 +341,77 @@ UI_NAMES = {
     UI_MINIPANEL: "minipanel",
     UI_PARTY: "party",
 }
+
+# --- Player unit modes and towns (M4 safety monitor) -------------------------
+
+# Player UNIT_MODE values (kolbot sdk/types/sdk.d.ts:1550, sdk.player.mode):
+# 0 = Death (the dying animation), 17 = Dead. Either means the character is
+# gone; the safety monitor treats both as dead (false positives acceptable,
+# false negatives not).
+PLAYER_MODE_DEATH = 0
+PLAYER_MODE_DEAD = 17
+
+# Town area ids (kolbot sdk/types/sdk.d.ts sdk.areas: RogueEncampment:1,
+# LutGholein:40, KurastDocktown:75, PandemoniumFortress:103, Harrogath:109).
+# Towns have no hostile monsters; kolbot suppresses chicken there and so do
+# we (configurable, for the zero-risk live chicken test).
+TOWN_AREAS = frozenset({1, 40, 75, 103, 109})
+
+# --- D2Win: the out-of-game control list (M4) --------------------------------
+#
+# The menus (main menu, char select, difficulty popup, error popups) are not
+# panels in the in-game UI array — they are a linked list of *controls*
+# (buttons, textboxes, images) owned by D2Win.dll. Reading that list is how
+# the bot knows which menu screen is up and where its buttons are; it is the
+# same structure D2BS's getLocation()/clickControl built kolbot's whole
+# out-of-game layer on.
+#
+# Offsets below are relative to D2Win.dll's runtime base (NOT D2Client's).
+
+# D2Ptrs.h:624  VARPTR(D2WIN, FirstControl, Control*, 0x214A0, 0x8DB34)
+# 1.13c first, as with every BH macro. Null when no menu is up (in a game).
+D2WIN_FIRST_CONTROL = 0x214A0
+
+# Control struct: BH CommonStructs.h:567-585 (primary, PD2's own header) —
+# cross-checked against noah-/d2bs D2Structs.h:132-168, which agrees on every
+# field we read. Menu coordinates are in the 800x600 menu render space;
+# dwPosY is the control's BOTTOM edge (D2BS clicks at y - height/2).
+CONTROL_TYPE = 0x00  # dwType, see CONTROL_TYPE_* below
+CONTROL_STATE = 0x08  # dwState: 5 enabled, 4 disabled, <4 not visible
+CONTROL_POS_X = 0x0C  # dwPosX, left edge
+CONTROL_POS_Y = 0x10  # dwPosY, BOTTOM edge
+CONTROL_SIZE_X = 0x14  # dwSizeX
+CONTROL_SIZE_Y = 0x18  # dwSizeY
+CONTROL_NEXT = 0x3C  # Control* pNext
+
+# Button text: BH CommonStructs.h:665 (struct Button : Control, wchar_t
+# wText[256] at 0x64). d2bs's union layout lands on the same 0x64 by
+# arithmetic (0x5C + two DWORDs), though its inline comment miscounts it as
+# 0x6C — the BH subtype math is the one we trust.
+CONTROL_BUTTON_TEXT = 0x64
+CONTROL_BUTTON_TEXT_CHARS = 256
+
+# Control types, from BH CommonStructs.h's subtype comments
+# ("struct EditBox : Control ... CONTROL_EDITBOX: 1", etc.)
+CONTROL_TYPE_EDITBOX = 1
+CONTROL_TYPE_IMAGE = 2
+CONTROL_TYPE_ANIMIMAGE = 3
+CONTROL_TYPE_TEXTBOX = 4
+CONTROL_TYPE_SCROLLBAR = 5
+CONTROL_TYPE_BUTTON = 6
+CONTROL_TYPE_LIST = 7
+
+CONTROL_TYPE_NAMES = {
+    CONTROL_TYPE_EDITBOX: "editbox",
+    CONTROL_TYPE_IMAGE: "image",
+    CONTROL_TYPE_ANIMIMAGE: "animimage",
+    CONTROL_TYPE_TEXTBOX: "textbox",
+    CONTROL_TYPE_SCROLLBAR: "scrollbar",
+    CONTROL_TYPE_BUTTON: "button",
+    CONTROL_TYPE_LIST: "list",
+}
+
+# The menus draw in a fixed 800x600 space regardless of window size (the
+# window scale factor is measured live, navdemo-style, before clicks use it).
+MENU_WIDTH = 800
+MENU_HEIGHT = 600

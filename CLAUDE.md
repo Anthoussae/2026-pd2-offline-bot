@@ -22,22 +22,42 @@ per character+difficulty, so the bot persists every room grid it reads —
 A* + the walk loop; acceptance walk passed 5/5 live; see
 `docs/architecture/navigation.md` and the archived
 `docs/archive/plans/2026-07-28-m3-navigation/_DONE.md`; the offline map
-generator was built but is blocked by PD2's DLLs and deferred). Next up
-is M4 (game cycle), which needs its own `yona-plan` pass.
+generator was built but is blocked by PD2's DLLs and deferred). **M4
+done** (game cycle: menu perception via the D2Win control list, the
+separately-guarded `MenuInput`, autonomous create/leave with an
+unconditional Hell-verification guard on every entry, chicken +
+death-latch safety monitor, in-game chat channel; acceptance 3/3
+unattended cycles — see `docs/architecture/game-cycle.md` and the
+archived `docs/archive/plans/2026-07-28-m4-game-cycle/_DONE.md`). Next
+up is M5 (trial run: FSM + necro combat + survival reflex ladder +
+pickit — Cold Plains), which needs its own `yona-plan` pass; its
+planning inputs (the survival toolkit, robustness-before-live-runs) are
+recorded in the archived M4 notes.md.
 
 **User request protocol**: every instruction to the user is issued as
 `🔶 R<n> [type]` and logged in `docs/instruction-log.md` — see the
 convention in the agent-toolkit skills; continue IDs from that log. Superseded kolbot roadmap:
 `docs/archive/plans/2026-07-28-pd2-offline-bot/`.
 
-Perception and navigation are done and live-verified. All input goes
-through `pd2bot.input.GatedInput`, whose single send path checks
-`pd2bot.uistate.can_act()` *and* the game window being in the foreground,
-and refuses otherwise — there is no bypass, and M4's menu clicking must
-add its own separately-guarded method rather than weaken this one (see
-`docs/architecture/navigation.md` and the ADRs). Live checks against the
-game need an **elevated terminal with a human present** (the client runs
-elevated); every ask to the user goes through the request protocol above.
+Perception, navigation, and the game cycle are done and live-verified.
+Input goes through guarded send paths with **no bypass**: world input
+via `pd2bot.input.GatedInput` (guard: `can_act()` AND foreground),
+menu input via `pd2bot.menuinput.MenuInput` (guard: the complement —
+not in a game, or the ESC menu open), chat via `pd2bot.chat.Chat`
+(types only while the chat console is verified open). M4 kept the M1
+contract: `GatedInput`'s guard was not touched. Safety invariant: after
+a detected death the bot sends no input of any kind, permanently
+(`pd2bot.safety`, the death latch) — do not add recovery behavior
+without an explicit user decision (see
+`docs/architecture/game-cycle.md`). Live checks against the
+game need **Administrator rights** (the client runs elevated; UIPI also
+blocks synthetic input from normal processes). The agent runs elevated
+commands itself via the **bridge**: the user starts
+`tools/elevated-bridge.ps1` in a run-as-admin PowerShell once per
+session; the agent then drops `<id>.cmd.ps1` files into
+`%LOCALAPPDATA%\pd2bot-bridge` and reads `<id>.out.txt` back (protocol
+in the script header). A human still needs to be at the machine for
+game-side actions; those asks go through the request protocol above.
 Development happens on this Windows machine (the one with PD2). The repo
 is maintained on GitHub as standard practice — keep state in git and
 planning artifacts so any session, anywhere, can resume — but no special

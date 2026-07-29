@@ -26,10 +26,10 @@ So input is structural, not conventional:
   game). Either failing raises `InputRefused` with the reason; nothing is
   sent.
 - There is **no bypass**: no "unsafe" method, no testing flag. Unit tests
-  fake the OS layer. When M4 needs menu clicks (game creation happens
-  *outside* a game, where `can_act` is rightly false), it adds a separate
-  menu-scoped method with its own narrower guard — it does not weaken
-  this one.
+  fake the OS layer. M4's menu clicking (game creation happens *outside*
+  a game, where `can_act` is rightly false) kept this contract: it is a
+  separate path with the complement guard — see `menuinput.py` and
+  [game-cycle.md](game-cycle.md) — and this gate was not touched.
 - The check runs **twice** per click (before the cursor move and again
   before the button event): the tiny check-then-send race is accepted and
   documented rather than pretended away — the game can spontaneously
@@ -85,8 +85,9 @@ Two things are deliberate:
   knows the difference when deciding whether reality disagreed.
 
 Walkability masks kolbot's `BlockWalk` (0x1805: wall | ranged-blocker |
-closed door | floor object). Closed doors count as walls until M4 learns
-to open them.
+closed door | floor object). Closed doors count as walls until a later
+milestone teaches the bot to open them (deferred out of M4 — the game
+cycle never meets a door, and neither does the Cold Plains route).
 
 `python -m pd2bot.collision` prints the stitched neighbourhood as ASCII
 (`@` player, `.` open, `#` blocked, space unknown) — the eyeball tool

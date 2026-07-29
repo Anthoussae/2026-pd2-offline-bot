@@ -30,6 +30,10 @@ Perception.snapshot() pd2bot/snapshot.py  one coherent view per tick
 Everything above perception consumes `GameSnapshot`. Nothing else in the
 codebase should read memory or know an offset.
 
+(As of M4, the *menus* are perceived too — which screen is up, where its
+buttons are — via the D2Win control list, out of the player-unit world
+this document describes. See [game-cycle.md](game-cycle.md).)
+
 ## Attaching
 
 `GameSession` opens `Game.exe` and resolves `D2Client.dll`'s base address at

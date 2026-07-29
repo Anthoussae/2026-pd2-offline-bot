@@ -12,6 +12,7 @@ import struct
 from pd2bot.memory import GameSession
 
 CLIENT_BASE = 0x6FAB0000
+WIN_BASE = 0x6F8E0000
 
 
 class FakeMemory:
@@ -44,9 +45,15 @@ class FakeMemory:
 class FakeSession(GameSession):
     """A GameSession backed by FakeMemory instead of a real process."""
 
-    def __init__(self, memory: FakeMemory, client_base: int = CLIENT_BASE) -> None:
+    def __init__(
+        self,
+        memory: FakeMemory,
+        client_base: int = CLIENT_BASE,
+        win_base: int = WIN_BASE,
+    ) -> None:
         self.memory = memory
         self.client_base = client_base
+        self._win_base = win_base
 
     def raw(self, address: int, size: int) -> bytes:
         return self.memory.read(address, size)
@@ -68,6 +75,15 @@ class FakeSession(GameSession):
 
     def cstring(self, address: int, max_length: int) -> str:
         return self.raw(address, max_length).split(b"\x00", 1)[0].decode("ascii", "replace")
+
+    def wstring(self, address: int, max_chars: int) -> str:
+        text = self.raw(address, max_chars * 2).decode("utf-16-le", "replace")
+        return text.split("\x00", 1)[0]
+
+
+def wchars(text: str, total_chars: int) -> bytes:
+    """Encode a wchar_t[total_chars] buffer holding `text` NUL-terminated."""
+    return (text + "\x00" * (total_chars - len(text))).encode("utf-16-le")
 
 
 def u32(value: int) -> bytes:

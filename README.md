@@ -47,6 +47,29 @@ Input never bypasses the gate: every send checks `can_act()` and that the
 game window is foreground, and refuses otherwise (see
 `docs/architecture/navigation.md`).
 
+## Game cycle tools (M4)
+
+The bot creates and leaves single-player games by itself — menus are read
+from memory (the D2Win control list) and clicked through a second,
+separately-guarded input path. Every game entry is memory-verified as the
+configured difficulty before anything else runs, and a per-tick safety
+monitor chickens out of games on vitals thresholds and halts permanently
+(no further input, loud alert) if the character dies. See
+`docs/architecture/game-cycle.md`.
+
+```bash
+python -m pd2bot.oog                  # which menu screen is up + its controls
+python -m pd2bot.cycle --games 3      # unattended create/verify/dwell/leave cycles
+python -m pd2bot.chat "hello"         # post a message to the in-game chat
+```
+
+`pd2bot.cycle` takes `--dwell`, `--life-chicken`, `--mana-chicken`, and
+`--chicken-in-town` (the last is a live-test aid). Menu clicking relies on
+two calibrations recorded in `pd2bot/cycle.py` and `pd2bot/menuinput.py`
+(the pillarboxed menu scale is derived from the window; the Save-and-Exit
+position was hover-measured) — re-check them after changing window size or
+resolution.
+
 ## Map knowledge: the explored-map atlas
 
 Single-player maps are fixed per character per difficulty, so the bot

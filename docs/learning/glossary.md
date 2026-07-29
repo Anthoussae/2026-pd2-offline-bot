@@ -31,8 +31,25 @@ reuses the game's own map-building code without running the game.
 
 **calibration** — deriving a constant by measuring the running system
 instead of trusting a spec or a config file. Our click math assumed 16
-pixels per subtile; measuring real walks gave 20. First seen in
+pixels per subtile; measuring real walks gave 20 — and the menu scale
+repeated the lesson in M4 (stretch model missed by 140 px; the
+pillarbox model was hover-confirmed to ±2 px before use). First seen in
 [when reality corrects the docs](2026-07-28-when-reality-corrects-the-docs.md).
+
+**chicken** — botting jargon (from kolbot) for fleeing the game the
+moment a vitals threshold is crossed, e.g. "life below 50% → leave".
+Cheap and absolute in offline single player, where ESC pauses the game
+instantly. A threshold like this is a *floor trigger*: it fires on the
+first observation at-or-below the line, which after a burst of damage
+can be well below it. First seen in
+[the game cycle](2026-07-29-the-game-cycle.md).
+
+**complement guard** — a second guarded path whose allowed condition is
+the logical opposite of the first's, so between them every state has
+exactly one legal actor and a bypass flag never needs to exist. Our
+world-input gate allows "in a game, no panel"; the menu-input gate
+allows "not in a game, or the ESC menu open". First seen in
+[the game cycle](2026-07-29-the-game-cycle.md).
 
 **closed-loop control** — act, observe the actual result, correct,
 repeat — as opposed to "open-loop" (act and hope). The walk loop clicks,
@@ -91,11 +108,24 @@ of modules imported under one name (here, `pd2bot`). The boundaries you draw
 between them become the vocabulary the rest of the code uses. First seen in
 [from script to package](2026-07-28-from-script-to-package.md).
 
+**fail-stop** — the design choice to halt completely on a serious
+failure instead of attempting recovery: no further actions, loud alert,
+state left untouched for a human. The opposite pole is fail-recover;
+choosing between them per failure class is a real engineering decision.
+Our death latch is fail-stop by explicit user decision. First seen in
+[the game cycle](2026-07-29-the-game-cycle.md).
+
 **guard clause / gate** — a check placed *inside* the one function that
 performs a risky action, so no caller can skip it by forgetting. Our
 input gate re-verifies "safe to click?" at the moment of clicking; there
 is deliberately no way around it. First seen in
 [when reality corrects the docs](2026-07-28-when-reality-corrects-the-docs.md).
+
+**latch** — a state flag that, once set, stays set regardless of later
+observations — reset only by a human restart. Used where "things look
+fine again" is not evidence of safety: our death halt is a latch, so a
+fresh healthy-looking game cannot resurrect the bot's confidence. First
+seen in [the game cycle](2026-07-29-the-game-cycle.md).
 
 **human-in-the-loop (HITL)** — any workflow step where a person must act
 before software can continue. We now log every such request (type and
@@ -109,11 +139,25 @@ skills under `~/.claude/skills/` are copies made by the installer, never
 edited directly. Most sync bugs in any system are two "sources of truth"
 disagreeing.
 
+**polling** — repeatedly checking a condition ("has the screen changed
+yet?") at an interval, instead of being notified. Almost always paired
+with a timeout (give up after N seconds) and often with bounded retries
+of the triggering action; without those bounds, polling turns a stuck
+system into a silently stuck watcher. First seen in
+[the game cycle](2026-07-29-the-game-cycle.md).
+
 **spike** — a short, deliberately throwaway investigation whose deliverable
 is knowledge rather than shippable code: "is this even possible?" A spike
 that returns "no" is a success — it prevents a large investment in a dead
 end. First seen in
 [reading a program from the outside](2026-07-28-reading-a-program-from-outside.md).
+
+**state machine** — a design where the program is always in exactly one
+named state and moves only along defined transitions; crucially, an
+input that fits no known state is an error, not a guess. Our game cycle
+is one: main menu, char select, difficulty popup, loading, in game —
+and `UNKNOWN` stops everything with a description. First seen in
+[the game cycle](2026-07-29-the-game-cycle.md).
 
 **transient vs persistent state** — data with a short lifetime (a
 monster's position this instant) versus data that stays true (a wall).
