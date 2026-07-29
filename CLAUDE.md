@@ -38,9 +38,10 @@ add its own separately-guarded method rather than weaken this one (see
 `docs/architecture/navigation.md` and the ADRs). Live checks against the
 game need an **elevated terminal with a human present** (the client runs
 elevated); every ask to the user goes through the request protocol above.
-This repo is developed from two machines (Mac = planning/docs, Windows =
-the machine with PD2 + the live bot); keep state in git and planning
-artifacts so sessions on either side can resume.
+Development happens on this Windows machine (the one with PD2). The repo
+is maintained on GitHub as standard practice — keep state in git and
+planning artifacts so any session, anywhere, can resume — but no special
+accommodation for other machines is needed.
 
 ## Development workflow (agent-toolkit)
 

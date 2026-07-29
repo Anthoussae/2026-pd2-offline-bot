@@ -98,8 +98,9 @@ git clone https://github.com/Anthoussae/agent-toolkit && ./agent-toolkit/install
 git clone https://github.com/Anthoussae/2026-pd2-offline-bot && cd 2026-pd2-offline-bot && git clone --depth 1 https://github.com/blizzhackers/kolbot kolbot
 ```
 
-## Working across machines
+## Keeping state in git
 
-Mac = planning/docs; Windows = the machine with PD2 and the live bot. All state
-lives in git and the planning artifacts under `docs/plans/` — push after each
-session so the other machine can resume.
+Development happens on the Windows machine with PD2 installed. All state
+lives in git and the planning artifacts under `docs/plans/` — commit and
+push after each working session, standard practice, so the project can be
+picked up from anywhere.

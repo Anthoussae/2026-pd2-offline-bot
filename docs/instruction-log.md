@@ -56,6 +56,12 @@ milestones' planning dirs.
 | R23 | execute | Verify hash-table enumeration | `dump -v` and `dump --items` with skeletons out and an item dropped, then after pickup | **Ground items fixed and confirmed**: the same unit reads `mode=3` at world (5274,5725), then `mode=0` at inventory slot (7,3) after pickup. Also revealed why the original filter failed — ground items carry `loc@0x45=247`, not 255, so it rejected real drops while accepting belt potions. **New defect found**: the hash table is global (whole stash, other levels, expired summons), so the ally list showed phantoms (`summon 0`, `summon 6`) and the merc was missing. Added a perception-radius filter (80 subtiles) and a `--monsters` diagnostic. |
 | R24 | execute | Verify locality filter; locate the merc | `dump -v` then `dump --monsters` with merc and skeletons out | **PASS** — `yours: 3 (summon, summon, rogue 8%) (+3 dead)`. Merc found. But the raw dump showed heavy duplication (49 rows for ~13 units): units are reachable from several bucket heads, so the iterator now de-duplicates by unit id. |
 | R25 | execute | Confirm de-duplication | `dump --monsters` and `dump -v` | **PASS** — 49 → 14 rows, each unit once; merc explicit as `271 … MERC rogue, ally` at 128/1620 hp (7.9%, matching the 8% summary); 6 allies + 8 dead hostiles = 14, fully consistent with the `-v` view. Perception verified end to end. |
+
+### Post-milestone housekeeping
+
+| ID | Type | Title | Asked | Outcome |
+|---|---|---|---|---|
+| R26 | decision | Relocate agent-toolkit to `C:\dev\agent-toolkit`? | Move the cross-project toolkit out of the pd2 workspace folder, or leave it | **Move it.** Moved; repo intact; `install.sh` verified from the new home; path pointers updated in `~/.claude/CLAUDE.md` and memory. Same conversation also established: Windows-only development (Mac framing removed from project docs), toolkit = single source of truth with pull-first editing, and the multi-machine update model documented in the toolkit README (`287f82a`). |
 | R18 | decision | Commit M3? | Approve the single conventional commit of the milestone (repo) and a separate commit of the agent-toolkit protocol changes | **Yes to both.** Project: `fa81028` on main (43 files, +6002/−89). agent-toolkit: `d585250`. Both worktrees clean; neither pushed. |
 
 ## Observations so far (for the reduction analysis)

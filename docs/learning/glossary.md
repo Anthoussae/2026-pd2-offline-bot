@@ -102,6 +102,13 @@ before software can continue. We now log every such request (type and
 outcome) in `docs/instruction-log.md`, so the load can be measured and
 engineered down instead of guessed at.
 
+**single source of truth (SSOT)** — the one authoritative place a piece
+of information lives; every other copy is derived from it and disposable.
+Our agent-toolkit repo is the SSOT for agent workflow: the installed
+skills under `~/.claude/skills/` are copies made by the installer, never
+edited directly. Most sync bugs in any system are two "sources of truth"
+disagreeing.
+
 **spike** — a short, deliberately throwaway investigation whose deliverable
 is knowledge rather than shippable code: "is this even possible?" A spike
 that returns "no" is a success — it prevents a large investment in a dead
