@@ -132,6 +132,15 @@ before software can continue. We now log every such request (type and
 outcome) in `docs/instruction-log.md`, so the load can be measured and
 engineered down instead of guessed at.
 
+**SHA (commit hash)** — every git commit is identified by a fingerprint
+computed from its entire content (files, message, parent, author) using
+a hash function called SHA-1 — a 40-character hex string like
+`e6dabec4...`. Change anything and the fingerprint changes, which is
+what makes git history tamper-evident. People quote just the first ~7
+characters (`e6dabec`) because that's almost always unique within one
+repository; our planning artifacts stamp it so a document can point at
+the exact code state it describes.
+
 **single source of truth (SSOT)** — the one authoritative place a piece
 of information lives; every other copy is derived from it and disposable.
 Our agent-toolkit repo is the SSOT for agent workflow: the installed
