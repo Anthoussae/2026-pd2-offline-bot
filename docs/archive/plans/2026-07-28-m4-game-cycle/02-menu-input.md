@@ -135,7 +135,7 @@ pass; instruction log updated.
 
 Status: done
 Completed: 2026-07-29
-Commit: pending
+Commit: e6dabec
 
 - Changed: `pd2bot/menuinput.py` (new — MenuInput with the complement
   guard, menu_to_screen projection, click/click_menu/click_control/

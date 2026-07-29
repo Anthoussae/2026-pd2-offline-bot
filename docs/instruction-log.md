@@ -137,7 +137,7 @@ would turn text into hotkey presses; re-verified per character.
 | ID | Type | Title | Asked | Outcome |
 |---|---|---|---|---|
 | R45 | inform | Carried-vitals chicken loop risk | User flagged post-acceptance: PD2 does not heal between games, so below-threshold vitals at entry → chicken → new game → chicken, ad infinitum; also explains the demo's "instant" trip (mana spent in the *previous* game carried in) | **Confirmed real** (M4's dwell loop was safe only via town suppression; M5's real runs were exposed). Fixed before commit: `max_consecutive_chickens` backstop (default 2) halts the loop loudly, streak resets on any clean run; +2 tests (195 total). Durable fix assigned to M5: town-heal preamble (healer NPC before leaving town, kolbot-style) — recorded in `_DONE.md` follow-ups and game-cycle.md. |
-| R44 | decision | Commit M4? | Approve one conventional commit of the milestone (code + docs + archived plan; now 195 tests green incl. the R45 backstop) | *Open.* |
+| R44 | decision | Commit M4? | Approve one conventional commit of the milestone (code + docs + archived plan; now 195 tests green incl. the R45 backstop) | **Yes, commit and push.** Milestone: `e6dabec` on main (35 files, +4360/−19), followed by a docs chore commit stamping the SHA into the archived plan; both pushed to origin/main. (The first SHA-stamping attempt mangled UTF-8 via PowerShell's ANSI default — restored from the commit and redone with Python; lesson consistent with the bridge's quoting defect: text transforms on this repo go through Python, not PowerShell string ops.) |
 
 ## Observations so far (for the reduction analysis)
 

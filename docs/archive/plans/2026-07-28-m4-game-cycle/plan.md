@@ -4,7 +4,7 @@ size: md
 depth: implementation
 status: done
 completed: 2026-07-29
-commit: pending
+commit: e6dabec
 repo: 2026-pd2-offline-bot
 created: 2026-07-28
 adr: possible

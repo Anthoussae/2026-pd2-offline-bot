@@ -116,7 +116,7 @@ both-true precedence); tests + lint green; instruction log updated.
 
 Status: done
 Completed: 2026-07-29
-Commit: pending
+Commit: e6dabec
 
 - Changed: `pd2bot/safety.py` (new — SafetyConfig, SafetyMonitor,
   ChickenExit/DeathHalt, latched alert), `pd2bot/cycle.py` (chicken =

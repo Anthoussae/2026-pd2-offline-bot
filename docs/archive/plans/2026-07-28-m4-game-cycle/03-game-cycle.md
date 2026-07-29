@@ -135,7 +135,7 @@ tests + lint green; instruction log updated.
 
 Status: done
 Completed: 2026-07-29
-Commit: pending
+Commit: e6dabec
 
 - Changed: `pd2bot/cycle.py` (new — CycleConfig, GameCycle with
   leave/create/ensure_at_char_select, the unconditional difficulty

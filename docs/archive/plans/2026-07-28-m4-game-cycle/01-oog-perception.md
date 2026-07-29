@@ -136,7 +136,7 @@ green; instruction log updated.
 
 Status: done
 Completed: 2026-07-28
-Commit: pending
+Commit: e6dabec
 
 - Changed: `pd2bot/oog.py` (new — control-list walk, MenuControl,
   Screen classification by kolbot-mined fingerprints, dump CLI),
