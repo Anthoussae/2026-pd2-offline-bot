@@ -31,7 +31,8 @@ class GameSnapshot:
     player: Player | None = None
     area: Area | None = None
     map_seed: int | None = None
-    monsters: tuple[Monster, ...] = ()
+    monsters: tuple[Monster, ...] = ()  # hostiles only
+    allies: tuple[Monster, ...] = ()  # mercenary, summons, friendly NPCs
     ground_items: tuple[GroundItem, ...] = ()
     skipped_units: int = 0
 
@@ -73,6 +74,7 @@ class Perception:
             area=read_area(session),
             map_seed=read_map_seed(session),
             monsters=tuple(scan.monsters),
+            allies=tuple(scan.allies),
             ground_items=tuple(scan.ground_items),
             skipped_units=scan.skipped,
         )

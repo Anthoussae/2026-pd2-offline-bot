@@ -18,7 +18,7 @@ Game.exe (PD2 client, 32-bit, elevated)
 GameSession          pd2bot/memory.py     attach, resolve module base, typed reads
    |
    +-- offsets       pd2bot/offsets.py    every constant, each citing its source
-   +-- units         pd2bot/units.py      unit primitives + room traversal
+   +-- units         pd2bot/units.py      unit primitives + hash-table sweep
    +-- player        pd2bot/player.py     the character's own state
    +-- world         pd2bot/world.py      current area, map seed
    +-- uistate       pd2bot/uistate.py    which panels are open, may we act
@@ -93,31 +93,43 @@ them silently yields zero. `offsets.FIXED_POINT_STATS` is the authority;
 
 ## Finding monsters and items
 
-D2 stores units per room, so enumeration walks the game's own room structures:
+Enumeration goes through the client's **unit hash table**
+(`D2CLIENT.pUnitTable`, BH `D2Ptrs.h`): one table per unit type, each a row
+of buckets whose chains are linked by `UnitAny.pListNext`.
 
-```
-player -> Path.pRoom1        the room the player is in
-Room1.pUnitFirst             first unit in it
-UnitAny.pRoomNext            next unit in the same room
-Room1.pRoomsNear             adjacent rooms (dwRoomsNear of them)
-```
+M2 originally walked rooms instead (`Room1.pUnitFirst` → `pRoomNext` across
+`pRoomsNear`), on the reasoning that BH documents the room chain and not the
+table. That was wrong, and the live client said so during M3 closeout: with a
+mercenary, two skeletons and an item on the floor, the room walk found **one**
+type-1 unit and **zero** items. Rooms are the right structure for collision
+maps and the wrong one for units.
 
-The alternative — D2's unit hash table — is not documented in BH, because BH
-runs inside the game and calls its functions instead. The room chain is fully
-documented, so we use it.
+Three consequences worth knowing:
 
-Two consequences worth knowing:
+- **The table is global, so locality is our job.** It lists everything the
+  client knows — the whole stash, units from elsewhere, expired summons.
+  `scan_units` filters to `PERCEPTION_RADIUS` (80 subtiles) around the player;
+  without that the dump reported a stash's worth of ground items.
+- **The same unit is reachable from several bucket heads**, so
+  `iter_units_of_type` de-duplicates by unit id. Before it did, a sweep
+  returned 49 rows for ~13 real units.
+- **Reads race the game.** Structures mutate while we walk them, so traversal
+  is bounded and unreadable units are skipped and counted rather than raising.
+  A nonzero `skipped` is occasionally normal; a large one means trouble.
 
-- **Range is "nearby", not "the level".** We see the player's room and its
-  neighbours. That is the right scope for combat and looting; global routing is
-  navigation's problem (M3), solved with generated maps rather than by seeing
-  further.
-- **Reads race the game.** These structures mutate while we walk them, so
-  traversal is bounded (`MAX_ROOMS`, `MAX_UNITS_PER_ROOM`) and unreadable units
-  are skipped and counted rather than raising. A nonzero `skipped` is normal
-  occasionally; a large one means something is wrong.
+Two classification traps, both found live:
 
-Corpses stay in the room list. `Monster.is_alive` exposes that rather than
+- **Mercenaries and summons are unit type 1**, exactly like hostiles. Only
+  `STAT_ALIGNMENT` (172; friendly == 2) separates them, so scans return
+  `monsters` (hostile) and `allies` (merc, summons, friendly NPCs) as separate
+  lists. Reporting a player's own Rogue as a nearby monster is what surfaced
+  this.
+- **"On the floor" is the item's unit mode** (3 on-ground, 5 dropping), *not*
+  the ItemData location byte BH's header suggests: a dropped item reads 247
+  there, while belt and equipped items read 255. Filtering on that byte both
+  hid real drops and invented phantom ones at inventory grid coordinates.
+
+Corpses stay in the table. `Monster.is_alive` exposes that rather than
 filtering silently, so callers decide.
 
 ## Knowing when it is safe to act

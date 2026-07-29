@@ -4,6 +4,10 @@ Source of truth: Project-Diablo-2/BH @ main (the PD2 team's own open-source
 maphack), fetched 2026-07-28. Each entry cites the BH file and line it came
 from so it can be re-verified after a season patch.
 
+BH is the primary source but not the sole one: the CollMap block below is
+absent from BH and is cited from two independent community sources instead
+(see that section). Non-BH entries carry their own citations.
+
 PD2's client is Diablo II **1.13c**. BH's VARPTR/FUNCPTR macros list offsets
 per version with 1.13c first (D2Ptrs.h:82-89), so the *first* address in each
 macro is ours.
@@ -21,6 +25,19 @@ PLAYER_UNIT_PTR = 0x11BBFC
 # D2Ptrs.h:156  FUNCPTR(D2CLIENT, GetUiVar_I, ..., 0xBE400, 0x17C50)
 # A function, not a variable — P2 parses its code to locate the UI array.
 GET_UI_VAR_FN = 0xBE400
+
+# D2Ptrs.h  VARPTR(D2CLIENT, pUnitTable, POINT, 0x10A608, 0x1047B8)
+# The client's unit hash table: UNIT_TYPE_COUNT tables of HASH_BUCKETS
+# entries, each the head of a chain linked by UNIT_LIST_NEXT.
+#
+# This is the authoritative way to enumerate units. Walking rooms
+# (Room1.pUnitFirst -> pRoomNext) does NOT list them all: with a merc and
+# two skeletons out and an item on the floor, room traversal found one
+# type-1 unit and zero items (instruction log R20). Rooms remain the right
+# structure for collision maps, not for units.
+UNIT_TABLE_PTR = 0x10A608
+UNIT_HASH_BUCKETS = 128
+UNIT_TYPE_COUNT = 6  # player, monster, object, missile, item, tile
 
 # --- UnitAny (D2Structs.h:690) ---------------------------------------------
 
@@ -89,6 +106,22 @@ STAT_LEVEL = 12
 STAT_EXPERIENCE = 13
 STAT_GOLD = 14
 STAT_GOLD_BANK = 15
+# Alignment separates friend from foe. D2 has no separate unit type for
+# mercenaries, summons or friendly NPCs — they are all dwType 1 ("monster")
+# — so this stat is the only thing distinguishing your skeletons from the
+# things trying to kill you. kolbot filters on exactly this
+# (Prototypes.js:90, :2370; sdk.d.ts:1169 Alignment: 172).
+STAT_ALIGNMENT = 172
+ALIGNMENT_FRIENDLY = 2
+
+# Mercenary class ids (kolbot sdk.d.ts:2721-2724). Not needed for the
+# friend/foe test — alignment covers it — but useful for naming what we see.
+MERC_CLASS_IDS = {
+    271: "rogue",
+    338: "desert_guard",
+    359: "iron_wolf",
+    561: "barbarian",
+}
 
 # Only these are stored fixed-point and need `>> 8`. Applying the shift to the
 # others (level, attributes, gold, experience) silently zeroes them.
@@ -111,6 +144,103 @@ ROOM1_COLL = 0x20  # CollMap* (M3: layout is NOT in BH, source it elsewhere)
 ROOM1_ROOMS_NEAR_COUNT = 0x24  # dwRoomsNear
 ROOM1_UNIT_FIRST = 0x74  # pUnitFirst -> walk via UNIT_ROOM_NEXT
 ROOM1_ROOM_NEXT = 0x7C
+
+# --- CollMap (NOT in BH — sources corrected against the live client) --------
+#
+# Room1.Coll (ROOM1_COLL above) points here. BH's D2Structs.h stops at the
+# pointer, so the layout came from two separately maintained lineages,
+# fetched and diffed 2026-07-28 (they agree field-for-field):
+#   (1) noah-/d2bs D2Structs.h (the D2BS engine kolbot ran on), struct CollMap
+#   (2) jankowskib/d2server d2warden-pvp/D2Structs_111B.h, struct CollMap
+#
+# Both end with `WORD* pMapStart; //0x20` and `WORD* pMapEnd; //0x22`, and
+# 0x22 cannot be right for a pointer following a pointer at 0x20. Reading
+# 0x24 as pMapEnd instead was ALSO wrong, and the live client said so
+# (`python -m pd2bot.collision --debug`, 2026-07-28): every room reported
+# pMapStart == Coll + 0x24, i.e. the grid is stored **inline right after a
+# 0x24-byte header**, and the dword at 0x24 is the first two collision
+# cells (observed 0x00010001 = two blocked, 0x00000000 = two open) — not a
+# pointer at all. There is no usable pMapEnd; the grid's extent comes from
+# the size fields. Treat the community headers as a starting hypothesis for
+# this struct, not as truth.
+#
+# The grid: one WORD of collision flags per subtile, row-major,
+# dwSizeGameX wide by dwSizeGameY tall, starting at pMapStart. dwPosGameX/Y
+# is the grid's origin in world subtiles.
+#
+# The room fields give a strong structural check, verified live: game
+# (subtile) values are exactly 5x the room (tile) values — observed
+# posRoom 1184x1144 -> posGame 5920x5720, sizeRoom 8x8 -> sizeGame 40x40.
+# collision.py validates that instead of the bogus pointer arithmetic.
+
+COLLMAP_POS_GAME_X = 0x00  # dwPosGameX — grid origin, world subtiles
+COLLMAP_POS_GAME_Y = 0x04
+COLLMAP_SIZE_GAME_X = 0x08  # dwSizeGameX — grid width in subtiles
+COLLMAP_SIZE_GAME_Y = 0x0C
+COLLMAP_POS_ROOM_X = 0x10  # dwPosRoomX — the same origin in tiles
+COLLMAP_POS_ROOM_Y = 0x14
+COLLMAP_SIZE_ROOM_X = 0x18  # dwSizeRoomX — the same size in tiles
+COLLMAP_SIZE_ROOM_Y = 0x1C
+COLLMAP_MAP_START = 0x20  # WORD* pMapStart — points at Coll+0x24 (inline)
+COLLMAP_HEADER_SIZE = 0x24  # where the inline grid begins
+
+# Collision flag words (kolbot sdk/types/sdk.d.ts:70-95 `sdk.collision`;
+# same values in D2 community headers). We only *name* what we use:
+COLL_BLOCK_WALL = 0x0001
+COLL_RANGED = 0x0004  # blocks walking but not missiles (e.g. water edges)
+COLL_PLAYERS = 0x0080
+COLL_MONSTERS = 0x0100
+COLL_ITEMS = 0x0200
+COLL_CLOSED_DOOR = 0x0800
+COLL_IS_ON_FLOOR = 0x1000  # something occupies the subtile
+COLL_FRIENDLY_NPC = 0x2000
+COLL_DEAD_BODIES = 0x8000
+
+# Walkability mask = kolbot's sdk.collision.BlockWalk (0x1805): the mask its
+# pathing treats as "you cannot walk here" *right now*. Doors count as
+# blocked until M4 learns to open them.
+COLL_UNWALKABLE_MASK = (
+    COLL_BLOCK_WALL | COLL_RANGED | COLL_CLOSED_DOOR | COLL_IS_ON_FLOOR
+)
+
+# Bits that describe *occupancy*, not terrain: they change second to second
+# as monsters walk, items drop, and corpses pile up. Live reads want them;
+# the persistent atlas (mapstore.py) must strip them, for two reasons found
+# during the first survey walk (2026-07-28):
+#   1. churn — a monster taking one step rewrote the room's bytes, so a
+#      single area re-saved 247 times instead of a few dozen;
+#   2. worse, IS_ON_FLOOR is inside the walkability mask, so a corpse or a
+#      dropped item present during a survey would be frozen into the atlas
+#      as a permanent wall that no later visit could clear.
+COLL_TRANSIENT_MASK = (
+    COLL_PLAYERS
+    | COLL_MONSTERS
+    | COLL_ITEMS
+    | COLL_IS_ON_FLOOR
+    | COLL_FRIENDLY_NPC
+    | COLL_DEAD_BODIES
+)
+
+# For diagnostics: naming a bit beats printing a bare hex value when asking
+# "why did this room change?". Names follow kolbot's sdk.collision.
+COLL_FLAG_NAMES = {
+    COLL_BLOCK_WALL: "block_wall",
+    0x0002: "line_of_sight",
+    COLL_RANGED: "ranged",
+    0x0008: "player_to_walk",
+    0x0010: "dark_area",
+    0x0020: "casting",
+    0x0040: "unknown_40",
+    COLL_PLAYERS: "players",
+    COLL_MONSTERS: "monsters",
+    COLL_ITEMS: "items",
+    0x0400: "objects",
+    COLL_CLOSED_DOOR: "closed_door",
+    COLL_IS_ON_FLOOR: "is_on_floor",
+    COLL_FRIENDLY_NPC: "friendly_npc",
+    0x4000: "unknown_4000",
+    COLL_DEAD_BODIES: "dead_bodies",
+}
 
 # --- Room2 (D2Structs.h:333) — static/preset room layer --------------------
 
@@ -139,8 +269,19 @@ MONSTER_FLAG_MINION = 1 << 4
 ITEM_QUALITY = 0x00  # dwQuality
 ITEM_FLAGS = 0x0C  # dwItemFlags
 ITEM_LEVEL = 0x2C  # dwItemLevel
-ITEM_LOCATION = 0x45  # ItemLocation; 0xFF when not in an inventory slot
+# ITEM_LOCATION (0x45, per BH's header) is NOT trusted: the live check
+# (2026-07-28, instruction log R17) showed a carried item reading 0xFF
+# there — it appeared as a ground item at its inventory grid slot (5, 0).
+# On-the-floor detection uses the unit's mode instead; see below.
+ITEM_LOCATION = 0x45
 ITEM_LOCATION_NONE = 0xFF
+
+# Item unit modes (UNIT_MODE for dwType==4), kolbot sdk `sdk.items.mode`:
+# inStorage=0, equipped=1, inBelt=2, onGround=3, onCursor=4, dropping=5,
+# socketed=6. "On the floor" = onGround or mid-drop. Verified live (R17/R19):
+# mode correctly distinguishes carried from dropped where 0x45 did not.
+ITEM_MODE_ON_GROUND = 3
+ITEM_MODE_DROPPING = 5
 
 # Item quality (D2 standard values)
 QUALITY_NAMES = {

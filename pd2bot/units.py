@@ -21,7 +21,7 @@ cannot make sense of rather than raising.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pd2bot import offsets
 from pd2bot.memory import GameSession
@@ -30,6 +30,11 @@ from pd2bot.memory import GameSession
 # pointer from becoming an infinite loop.
 MAX_ROOMS = 64
 MAX_UNITS_PER_ROOM = 256
+
+# How far around the player counts as "nearby", in subtiles. Roughly what
+# the old room-neighbourhood covered, and comfortably beyond one screen
+# (~24 subtiles) so nothing the player can see is missed.
+PERCEPTION_RADIUS = 80
 MAX_STATS = 256
 
 
@@ -144,6 +149,14 @@ def iter_units(session: GameSession, room: int) -> Iterator[int]:
 
 @dataclass(frozen=True)
 class Monster:
+    """Any dwType==1 unit: hostile monsters *and* your own side.
+
+    D2 files mercenaries, summons and friendly NPCs under the same unit
+    type as everything hostile; `alignment` is what tells them apart (see
+    `is_ally`). Scans return the two groups in separate lists so nothing
+    downstream has to remember the distinction.
+    """
+
     unit_id: int
     kind: int  # dwTxtFileNo — which monster type
     position: tuple[int, int]
@@ -152,10 +165,21 @@ class Monster:
     is_champion: bool
     is_boss: bool
     is_minion: bool
+    alignment: int = 0
 
     @property
     def is_alive(self) -> bool:
         return self.hp > 0
+
+    @property
+    def is_ally(self) -> bool:
+        """Your merc, your summons, friendly NPCs — never a target."""
+        return self.alignment == offsets.ALIGNMENT_FRIENDLY
+
+    @property
+    def merc_kind(self) -> str | None:
+        """Which mercenary this is, if it is one."""
+        return offsets.MERC_CLASS_IDS.get(self.kind)
 
     @property
     def hp_fraction(self) -> float | None:
@@ -176,11 +200,18 @@ class GroundItem:
 
 @dataclass(frozen=True)
 class UnitScan:
-    """What one sweep of the nearby rooms found."""
+    """What one sweep of the nearby rooms found.
+
+    `monsters` is hostiles only. Your mercenary and summons are in
+    `allies` — counting them as monsters made the dump report a threat
+    when the only thing nearby was the player's own Rogue (instruction
+    log R21).
+    """
 
     monsters: list[Monster]
     ground_items: list[GroundItem]
     skipped: int  # units that could not be read; nonzero is worth noticing
+    allies: list[Monster] = field(default_factory=list)
 
 
 def _read_monster(session: GameSession, unit: int) -> Monster | None:
@@ -196,6 +227,7 @@ def _read_monster(session: GameSession, unit: int) -> Monster | None:
         position=position,
         hp=stats.get(offsets.STAT_HP, 0),
         max_hp=stats.get(offsets.STAT_MAX_HP, 0),
+        alignment=stats.get(offsets.STAT_ALIGNMENT, 0),
         is_champion=bool(flags & offsets.MONSTER_FLAG_CHAMPION),
         is_boss=bool(flags & offsets.MONSTER_FLAG_BOSS),
         is_minion=bool(flags & offsets.MONSTER_FLAG_MINION),
@@ -206,9 +238,13 @@ def _read_ground_item(session: GameSession, unit: int) -> GroundItem | None:
     data = session.ptr(unit + offsets.UNIT_DATA)
     if data is None:
         return None
-    # Items held in an inventory or equipped are in these lists too; only ones
-    # with no inventory slot are actually lying on the floor.
-    if session.u8(data + offsets.ITEM_LOCATION) != offsets.ITEM_LOCATION_NONE:
+    # Items held in an inventory or equipped are in these lists too. The
+    # reliable "actually lying on the floor" signal is the unit's MODE
+    # (ground / mid-drop) — the ItemData location byte at 0x45 lied to us
+    # live: a carried item read 0xFF there and showed up as a ground item
+    # at its inventory grid slot (instruction log R17).
+    mode = session.u32(unit + offsets.UNIT_MODE)
+    if mode not in (offsets.ITEM_MODE_ON_GROUND, offsets.ITEM_MODE_DROPPING):
         return None
     position = unit_position(session, unit, offsets.UNIT_TYPE_ITEM)
     if position is None:
@@ -221,34 +257,94 @@ def _read_ground_item(session: GameSession, unit: int) -> GroundItem | None:
     )
 
 
-def scan_units(session: GameSession) -> UnitScan:
-    """Sweep the player's room and its neighbours for monsters and ground items."""
+def iter_units_of_type(session: GameSession, unit_type: int) -> Iterator[int]:
+    """Every distinct unit of one type the client knows about.
+
+    Two guards, both earned live (instruction log R23, R24):
+
+    - each unit's own `dwType` must match the table it came from, so a
+      wrong layout assumption fails visibly instead of returning nonsense;
+    - units are de-duplicated by id, because walking `pListNext` from every
+      bucket head re-encounters units that are themselves bucket heads —
+      the raw sweep returned 49 rows for ~13 real units. De-duplicating
+      here rather than in each caller keeps every consumer honest.
+    """
+    base = session.client(offsets.UNIT_TABLE_PTR)
+    yielded: set[int] = set()
+    for bucket in range(offsets.UNIT_HASH_BUCKETS):
+        try:
+            unit = session.ptr(base + (unit_type * offsets.UNIT_HASH_BUCKETS + bucket) * 4)
+        except Exception:
+            continue
+        seen = 0
+        while unit is not None and seen < MAX_UNITS_PER_ROOM:
+            seen += 1
+            try:
+                if session.u32(unit + offsets.UNIT_TYPE) == unit_type:
+                    unit_id = session.u32(unit + offsets.UNIT_ID)
+                    if unit_id not in yielded:
+                        yielded.add(unit_id)
+                        yield unit
+                unit = session.ptr(unit + offsets.UNIT_LIST_NEXT)
+            except Exception:
+                break  # torn read mid-chain: abandon this bucket, keep the rest
+
+
+def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitScan:
+    """Everything worth knowing about near the player.
+
+    The hash table lists every unit the client knows about — the whole
+    stash, units from other levels, expired summons — so "near the player"
+    has to be enforced here. Room traversal used to supply that locality
+    for free; losing it made the dump report a stash's worth of items and
+    phantom allies (instruction log R23). `radius` is in subtiles;
+    positionless units are dropped, since we cannot say where they are.
+    """
+    try:
+        player = player_unit(session)
+        origin = (
+            unit_position(session, player, offsets.UNIT_TYPE_PLAYER)
+            if player is not None
+            else None
+        )
+    except Exception:
+        origin = None  # mid-transition: report everything rather than nothing
+
+    def near(position: tuple[int, int]) -> bool:
+        if origin is None:
+            return True  # cannot judge distance; do not silently hide things
+        return abs(position[0] - origin[0]) <= radius and abs(position[1] - origin[1]) <= radius
+
     monsters: list[Monster] = []
+    allies: list[Monster] = []
     items: list[GroundItem] = []
     skipped = 0
     seen_ids: set[int] = set()
 
-    for room in nearby_rooms(session):
-        for unit in iter_units(session, room):
-            try:
-                unit_type = session.u32(unit + offsets.UNIT_TYPE)
-                unit_id = session.u32(unit + offsets.UNIT_ID)
-                if unit_id in seen_ids:
-                    continue
+    for unit in iter_units_of_type(session, offsets.UNIT_TYPE_MONSTER):
+        try:
+            unit_id = session.u32(unit + offsets.UNIT_ID)
+            if unit_id in seen_ids:
+                continue
+            monster = _read_monster(session, unit)
+            if monster is not None and near(monster.position):
+                seen_ids.add(unit_id)
+                (allies if monster.is_ally else monsters).append(monster)
+        except Exception:
+            # The game mutates these structures as we read them; a malformed
+            # unit is expected occasionally, not exceptional.
+            skipped += 1
 
-                if unit_type == offsets.UNIT_TYPE_MONSTER:
-                    monster = _read_monster(session, unit)
-                    if monster is not None:
-                        seen_ids.add(unit_id)
-                        monsters.append(monster)
-                elif unit_type == offsets.UNIT_TYPE_ITEM:
-                    item = _read_ground_item(session, unit)
-                    if item is not None:
-                        seen_ids.add(unit_id)
-                        items.append(item)
-            except Exception:
-                # The game is mutating these structures as we read them; a
-                # malformed unit is expected occasionally, not exceptional.
-                skipped += 1
+    for unit in iter_units_of_type(session, offsets.UNIT_TYPE_ITEM):
+        try:
+            unit_id = session.u32(unit + offsets.UNIT_ID)
+            if unit_id in seen_ids:
+                continue
+            item = _read_ground_item(session, unit)
+            if item is not None and near(item.position):
+                seen_ids.add(unit_id)
+                items.append(item)
+        except Exception:
+            skipped += 1
 
-    return UnitScan(monsters=monsters, ground_items=items, skipped=skipped)
+    return UnitScan(monsters=monsters, ground_items=items, skipped=skipped, allies=allies)

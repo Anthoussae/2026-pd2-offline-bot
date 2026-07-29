@@ -16,14 +16,28 @@ Active roadmap: `docs/plans/2026-07-28-bot-from-scratch/` — read its
 `plan.md` and `notes.md` before non-trivial work. **M1 done** (perception
 + input proven); **M2 done** (the `pd2bot/` package: live game-state
 snapshots — see `docs/architecture/perception.md` and the archived
-`docs/archive/plans/2026-07-28-m2-perception-core/_DONE.md`, which lists
-two open caveats). Next up is M3 (navigation), which needs its own
-`yona-plan` pass. Superseded kolbot roadmap:
+`docs/archive/plans/2026-07-28-m2-perception-core/_DONE.md`). **M3 done** (navigation:
+gated input, live collision, the explored-map atlas — SP maps are fixed
+per character+difficulty, so the bot persists every room grid it reads —
+A* + the walk loop; acceptance walk passed 5/5 live; see
+`docs/architecture/navigation.md` and the archived
+`docs/archive/plans/2026-07-28-m3-navigation/_DONE.md`; the offline map
+generator was built but is blocked by PD2's DLLs and deferred). Next up
+is M4 (game cycle), which needs its own `yona-plan` pass.
+
+**User request protocol**: every instruction to the user is issued as
+`🔶 R<n> [type]` and logged in `docs/instruction-log.md` — see the
+convention in the agent-toolkit skills; continue IDs from that log. Superseded kolbot roadmap:
 `docs/archive/plans/2026-07-28-pd2-offline-bot/`.
 
-Perception is done; **nothing sends input yet**. When M3 adds it, it must
-gate on `pd2bot.uistate.can_act()` *and* the game window being in the
-foreground — see the ADRs in `docs/adr/`.
+Perception and navigation are done and live-verified. All input goes
+through `pd2bot.input.GatedInput`, whose single send path checks
+`pd2bot.uistate.can_act()` *and* the game window being in the foreground,
+and refuses otherwise — there is no bypass, and M4's menu clicking must
+add its own separately-guarded method rather than weaken this one (see
+`docs/architecture/navigation.md` and the ADRs). Live checks against the
+game need an **elevated terminal with a human present** (the client runs
+elevated); every ask to the user goes through the request protocol above.
 This repo is developed from two machines (Mac = planning/docs, Windows =
 the machine with PD2 + the live bot); keep state in git and planning
 artifacts so sessions on either side can resume.

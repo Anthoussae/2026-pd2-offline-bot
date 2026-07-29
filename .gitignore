@@ -11,3 +11,7 @@ __pycache__/
 
 # Build artifacts from the abandoned editable install (see pyproject.toml)
 *.egg-info/
+
+# The explored-map atlas (pd2bot/mapstore.py): collision grids recorded from
+# THIS machine's live game — save-data, regenerable by walking the area again.
+maps/

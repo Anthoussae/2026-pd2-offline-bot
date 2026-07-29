@@ -97,7 +97,7 @@ areas (explicit check in M3).
 |---|---|---|---|
 | M1 | sm | Perception + input spike: attach to live PD2 client, read player name/HP/position via BH-derived offsets, one synthetic click moves the character. Phase file: [01-perception-input-spike.md](01-perception-input-spike.md) | No — executable now. **Review gate at end** |
 | M2 | md | Perception core: player, monsters, ground items, map seed, area, menu/in-game state detection | **Done 2026-07-28** → [docs/archive/plans/2026-07-28-m2-perception-core/](../../archive/plans/2026-07-28-m2-perception-core/plan.md) |
-| M3 | md | Navigation: input layer, map-gen service (d2mapapi), A*, walk-to/path-following, **PD2 map fidelity check** | Yes |
+| M3 | md | Navigation: gated input layer, live collision, explored-map atlas (replaced map-gen service — user decision at the P3 gate), A*, walk-to | **Done 2026-07-28** → [docs/archive/plans/2026-07-28-m3-navigation/](../../archive/plans/2026-07-28-m3-navigation/plan.md) |
 | M4 | md | Game cycle: create/leave SP game via menus, death/error handling, chicken logic, run-loop skeleton | Yes |
 | M5 | md | Trial run end-to-end: FSM + necro combat module + pickit + stash — Cold Plains clearance (Hell) | Yes |
 | M6 | md | Countess flagship: multi-area travel, Tower descent, boss kill, expanded pickit | Light planning |

@@ -1,0 +1,99 @@
+"""Finding and watching the game's window.
+
+Input only means what we intend when it lands in the game's window while that
+window is the one receiving input. A click delivered anywhere else is at best
+lost and at worst does something in another application. This module answers
+the input gate's second question (the first is `uistate.can_act`): is the game
+window the foreground window *right now*?
+
+Only this module and `input.py` touch user32; everything else stays OS-free,
+mirroring how only `memory.py` knows about pymem.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import time
+from ctypes import wintypes
+from dataclasses import dataclass
+
+user32 = ctypes.windll.user32
+
+_SW_RESTORE = 9  # ShowWindow: un-minimize without changing a normal window
+
+
+class WindowNotFound(RuntimeError):
+    """No visible top-level window belongs to the game process."""
+
+
+@dataclass(frozen=True)
+class ClientRect:
+    """The window's drawable area, in screen coordinates."""
+
+    left: int
+    top: int
+    width: int
+    height: int
+
+    @property
+    def center(self) -> tuple[int, int]:
+        return (self.left + self.width // 2, self.top + self.height // 2)
+
+    def contains(self, x: int, y: int) -> bool:
+        return (
+            self.left <= x < self.left + self.width
+            and self.top <= y < self.top + self.height
+        )
+
+
+def _windows_of_process(process_id: int) -> list[int]:
+    handles: list[int] = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def callback(hwnd, _lparam):
+        owner_pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+        if owner_pid.value == process_id and user32.IsWindowVisible(hwnd):
+            handles.append(hwnd)
+        return True
+
+    user32.EnumWindows(callback, 0)
+    return handles
+
+
+class GameWindow:
+    """A handle on the game's top-level window, looked up by process id."""
+
+    def __init__(self, process_id: int) -> None:
+        handles = _windows_of_process(process_id)
+        if not handles:
+            raise WindowNotFound(
+                f"process {process_id} has no visible window — is the game "
+                "still starting, or running on another desktop?"
+            )
+        self.hwnd = handles[0]
+
+    def client_rect(self) -> ClientRect:
+        """The drawable area right now. Re-queried every call: the user may
+        move the window between two of our actions, and a cached rect would
+        turn every projected click into a lie."""
+        rect = wintypes.RECT()
+        user32.GetClientRect(self.hwnd, ctypes.byref(rect))
+        origin = wintypes.POINT(0, 0)
+        user32.ClientToScreen(self.hwnd, ctypes.byref(origin))
+        return ClientRect(origin.x, origin.y, rect.right, rect.bottom)
+
+    def is_foreground(self) -> bool:
+        return user32.GetForegroundWindow() == self.hwnd
+
+    def bring_to_foreground(self, settle_seconds: float = 0.3) -> bool:
+        """Try to focus the game window; True if it actually took.
+
+        Windows is allowed to refuse focus stealing, so the result is
+        verified with GetForegroundWindow rather than assumed — callers must
+        treat False as "do not send input".
+        """
+        user32.ShowWindow(self.hwnd, _SW_RESTORE)
+        user32.SetForegroundWindow(self.hwnd)
+        time.sleep(settle_seconds)
+        return self.is_foreground()

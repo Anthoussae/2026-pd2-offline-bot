@@ -31,6 +31,33 @@ Add `--watch` to keep printing at ~5 Hz, or `-v` for more detail. This is the
 tool for checking that the bot sees the game correctly: run it, look at the
 game, and confirm the numbers agree.
 
+## Navigation tools (M3)
+
+All from an elevated terminal at the repo root, game running:
+
+```bash
+python -m pd2bot.navdemo gate         # is input allowed right now, and why not
+python -m pd2bot.navdemo click-test   # projection calibration (--send to click)
+python -m pd2bot.collision            # ASCII walkability around the player
+python -m pd2bot.navigate --survey    # record rooms into the atlas while YOU walk
+python -m pd2bot.navigate --demo      # acceptance walk (see --help)
+```
+
+Input never bypasses the gate: every send checks `can_act()` and that the
+game window is foreground, and refuses otherwise (see
+`docs/architecture/navigation.md`).
+
+## Map knowledge: the explored-map atlas
+
+Single-player maps are fixed per character per difficulty, so the bot
+*remembers* the collision grids it reads instead of generating maps:
+they accumulate under `maps/` (gitignored save-data, regenerable by
+walking). Walk each new area once with `--survey` (you steer, the bot
+records); from then on the bot plans routes across the whole area. A
+dormant offline map generator exists for maps never walked
+(`pd2bot/mapdata.py`; blocked on this machine by PD2's modified DLLs) —
+see `docs/adr/2026-07-28-hybrid-map-knowledge.md`.
+
 ## Development setup
 
 Requires Python 3.12+. The virtualenv deliberately lives **outside** this
