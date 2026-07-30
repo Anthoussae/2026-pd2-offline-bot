@@ -131,3 +131,36 @@ def test_automap_does_not_block(sent):
     """The automap overlays the world but the world stays clickable."""
     gated(make_session(open_panels=(offsets.UI_AUTOMAP,))).click_screen(400, 300)
     assert ("mouse", 0x0002) in sent
+
+
+def test_stand_still_wraps_the_click_in_shift(sent):
+    """The attack-in-place modifier: shift down before the mouse, up after."""
+    gated(make_session()).click_screen(400, 300, stand_still=True)
+    assert sent.index(("key", 0x10, 0)) < sent.index(("mouse", 0x0002))
+    assert sent.index(("mouse", 0x0004)) < sent.index(("key", 0x10, 0x0002))
+
+
+def test_stand_still_shift_released_when_the_click_fails(sent, monkeypatch):
+    """A stuck shift would corrupt all later input; release must survive
+    a mid-click failure."""
+
+    def explode(flag):
+        sent.append(("mouse", flag))
+        raise OSError("SendInput failed")
+
+    monkeypatch.setattr("pd2bot.input._send_mouse_flag", explode)
+    with pytest.raises(OSError):
+        gated(make_session()).click_screen(400, 300, stand_still=True)
+    assert ("key", 0x10, 0x0002) in sent
+
+
+def test_stand_still_click_world_passes_the_modifier_through(sent):
+    gated(make_session()).click_world(5010, 5000, stand_still=True)
+    assert ("key", 0x10, 0) in sent and ("key", 0x10, 0x0002) in sent
+
+
+def test_refused_stand_still_click_sends_no_shift(sent):
+    """A refusal before the click must not leave any key event behind."""
+    with pytest.raises(InputRefused):
+        gated(make_session(in_game=False)).click_screen(400, 300, stand_still=True)
+    assert sent == []

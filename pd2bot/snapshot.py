@@ -10,10 +10,11 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from pd2bot import offsets
 from pd2bot.memory import GameSession
-from pd2bot.player import Player, read_player
+from pd2bot.player import ActiveSkills, Player, read_active_skills, read_player
 from pd2bot.uistate import UIState, find_ui_array, is_in_game, read_ui_state
-from pd2bot.units import GroundItem, Monster, scan_units
+from pd2bot.units import GameObject, GroundItem, Monster, scan_units
 from pd2bot.world import Area, read_area, read_map_seed
 
 
@@ -34,6 +35,9 @@ class GameSnapshot:
     monsters: tuple[Monster, ...] = ()  # hostiles only
     allies: tuple[Monster, ...] = ()  # mercenary, summons, friendly NPCs
     ground_items: tuple[GroundItem, ...] = ()
+    corpses: tuple[Monster, ...] = ()  # dead type-1 units: revive fuel (M5)
+    objects: tuple[GameObject, ...] = ()  # waypoints, stash, doors (M5)
+    skills: ActiveSkills | None = None  # active left/right skill ids (M5)
     skipped_units: int = 0
 
     @property
@@ -45,6 +49,34 @@ class GameSnapshot:
         """Input would reach the world. Callers sending input must also check
         that the game window is in the foreground."""
         return self.in_game and self.ui is not None and not self.ui.blocks_input
+
+    @property
+    def in_town(self) -> bool:
+        return self.area is not None and self.area.level_no in offsets.TOWN_AREAS
+
+    @property
+    def merc(self) -> Monster | None:
+        """The hireling, alive, or None. A dead merc has left the ally list
+        (its corpse routes to `corpses`), so absence means dead-or-none."""
+        for ally in self.allies:
+            if ally.merc_kind is not None and ally.is_alive:
+                return ally
+        return None
+
+    @property
+    def revives(self) -> tuple[Monster, ...]:
+        """Revived monsters currently following the player.
+
+        Only meaningful outside town: in town the friendly-NPC population
+        shares the ally list and would pollute the count, so town reports
+        none rather than a lie. (Caveat, noted for the day F4 gets used:
+        a cast bone wall may also appear as allied units.)
+        """
+        if self.in_town:
+            return ()
+        return tuple(
+            a for a in self.allies if a.merc_kind is None and a.is_alive
+        )
 
 
 class Perception:
@@ -76,6 +108,9 @@ class Perception:
             monsters=tuple(scan.monsters),
             allies=tuple(scan.allies),
             ground_items=tuple(scan.ground_items),
+            corpses=tuple(scan.corpses),
+            objects=tuple(scan.objects),
+            skills=read_active_skills(session),
             skipped_units=scan.skipped,
         )
 

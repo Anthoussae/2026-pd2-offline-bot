@@ -268,13 +268,16 @@ def _record_visible_rooms(session, store, difficulty: int, stats: dict | None = 
     return store.open(seed, difficulty, area.level_no).record(local, per_area)
 
 
-def _live_navigator(session, store, difficulty: int = 2) -> Navigator:
+def live_navigator(session, store, difficulty: int = 2) -> Navigator:
     """Wire the navigator to the live game: positions from memory, clicks
     through the gate, and on every (re-)plan the explored-map atlas under
     the live room grids (live is ground truth where loaded). The position
     reader doubles as the recorder: roughly once a second while walking,
     the rooms currently in view are merged into the atlas — so the bot
-    surveys as a side effect of going anywhere."""
+    surveys as a side effect of going anywhere.
+
+    Public because everything above navigation needs this exact wiring:
+    the M3 CLI, M5's town drills, and P4's behaviour engine."""
     from pd2bot import offsets
     from pd2bot.collision import read_local_collision
     from pd2bot.pathing import OverlayGrid
@@ -384,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     try:
-        navigator = _live_navigator(session, store, args.difficulty)
+        navigator = live_navigator(session, store, args.difficulty)
     except WindowNotFound as exc:
         print(exc, file=sys.stderr)
         return 1

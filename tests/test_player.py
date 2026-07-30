@@ -3,9 +3,9 @@
 import pytest
 
 from pd2bot import offsets
-from pd2bot.player import read_player
+from pd2bot.player import read_active_skills, read_player
 from pd2bot.world import Area, read_area, read_map_seed
-from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, stat_array, u32
+from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, stat_array, u16, u32
 
 UNIT = 0x0AF00000
 PLAYER_DATA = 0x0AF01000
@@ -16,6 +16,11 @@ ACT = 0x0AF05000
 ROOM1 = 0x0AF06000
 ROOM2 = 0x0AF07000
 LEVEL = 0x0AF08000
+INFO = 0x0AF09000
+LEFT_SKILL = 0x0AF0A000
+RIGHT_SKILL = 0x0AF0B000
+LEFT_TXT = 0x0AF0C000
+RIGHT_TXT = 0x0AF0D000
 
 # The real character read during M1/M2, including the stats that exposed the
 # base-vs-full array trap: max_hp 1141 (full) rather than 920 (base).
@@ -51,6 +56,7 @@ def build(in_game: bool = True) -> FakeSession:
             offsets.UNIT_ACT: u32(ACT),
             offsets.UNIT_PATH: u32(PATH),
             offsets.UNIT_STATS: u32(STAT_LIST),
+            offsets.UNIT_INFO: u32(0),  # no skill chain until add_skills()
         },
     )
     mem.write(PLAYER_DATA, b"MaqiuDoubing\x00\x00\x00\x00")
@@ -165,3 +171,56 @@ def test_area_containment_against_real_observed_values():
 
 def test_reads_the_map_seed():
     assert read_map_seed(build()) == 0x1A2B3C4D
+
+
+def add_skills(session, left_id=74, right_id=68):
+    """Wire the Info chain onto the built player: pInfo -> left/right
+    Skill -> SkillsTxt -> wSkillId."""
+    session.memory.regions[UNIT][offsets.UNIT_INFO : offsets.UNIT_INFO + 4] = u32(INFO)
+    session.memory.write_fields(
+        INFO,
+        {
+            offsets.INFO_LEFT_SKILL: u32(LEFT_SKILL),
+            offsets.INFO_RIGHT_SKILL: u32(RIGHT_SKILL),
+        },
+    )
+    session.memory.write_fields(LEFT_SKILL, {offsets.SKILL_TXT: u32(LEFT_TXT)})
+    session.memory.write_fields(RIGHT_SKILL, {offsets.SKILL_TXT: u32(RIGHT_TXT)})
+    session.memory.write(LEFT_TXT, u16(left_id))
+    session.memory.write(RIGHT_TXT, u16(right_id))
+
+
+def test_reads_the_active_skill_ids():
+    session = build()
+    add_skills(session, left_id=74, right_id=68)
+    skills = read_active_skills(session)
+    assert skills is not None
+    assert (skills.left_id, skills.right_id) == (74, 68)
+
+
+def test_active_skills_none_outside_a_game():
+    assert read_active_skills(build(in_game=False)) is None
+
+
+def test_a_null_skill_slot_reads_as_none_not_a_guess():
+    """Mid-switch the slot pointer can be null; the caller must see 'unknown'
+    — a wrong id here would let an unverified cast through (M5's verified-
+    switch pattern depends on this being honest)."""
+    session = build()
+    add_skills(session)
+    session.memory.write_fields(
+        INFO,
+        {
+            offsets.INFO_LEFT_SKILL: u32(LEFT_SKILL),
+            offsets.INFO_RIGHT_SKILL: u32(0),
+        },
+    )
+    skills = read_active_skills(session)
+    assert skills is not None
+    assert skills.left_id == 74
+    assert skills.right_id is None
+
+
+def test_no_info_chain_reads_as_none():
+    """The player unit exists during loading before pInfo does."""
+    assert read_active_skills(build()) is None

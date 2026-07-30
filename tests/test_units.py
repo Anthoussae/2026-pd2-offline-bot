@@ -17,7 +17,9 @@ ROOM_B = 0x0B002000
 NEAR_ARRAY = 0x0B003000
 
 
-def add_monster(mem, address, unit_id, kind, pos, hp, max_hp, flags=0, alignment=0):
+def add_monster(mem, address, unit_id, kind, pos, hp, max_hp, flags=0, alignment=0, mode=1):
+    # mode defaults to 1 (Standing): mode 0 is the Death animation, and a
+    # fake that leaves the field unwritten would read as a corpse.
     path = address + 0x100
     data = address + 0x200
     stats = address + 0x300
@@ -28,6 +30,7 @@ def add_monster(mem, address, unit_id, kind, pos, hp, max_hp, flags=0, alignment
             offsets.UNIT_TYPE: u32(offsets.UNIT_TYPE_MONSTER),
             offsets.UNIT_TXT_FILE_NO: u32(kind),
             offsets.UNIT_ID: u32(unit_id),
+            offsets.UNIT_MODE: u32(mode),
             offsets.UNIT_DATA: u32(data),
             offsets.UNIT_PATH: u32(path),
             offsets.UNIT_STATS: u32(stats),
@@ -108,7 +111,8 @@ def build() -> FakeSession:
 
     boss = add_monster(mem, 0x0B010000, 101, 55, (100, 200), 500, 1000,
                        flags=offsets.MONSTER_FLAG_BOSS)
-    corpse = add_monster(mem, 0x0B011000, 102, 56, (110, 210), 0, 800)
+    corpse = add_monster(mem, 0x0B011000, 102, 56, (110, 210), 0, 800,
+                         mode=offsets.MONSTER_MODE_DEAD)
     link(mem, boss, corpse)
 
     item = add_item(mem, 0x0B020000, 201, 12, (120, 220), 7)
@@ -151,7 +155,7 @@ def test_walks_the_players_room_and_its_neighbours():
 
 def test_finds_monsters_across_rooms_with_their_class_and_health():
     scan = scan_units(build())
-    assert len(scan.monsters) == 2
+    assert len(scan.monsters) == 1  # the corpse routes to scan.corpses
 
     boss = next(m for m in scan.monsters if m.unit_id == 101)
     assert boss.is_boss and not boss.is_champion
@@ -161,12 +165,16 @@ def test_finds_monsters_across_rooms_with_their_class_and_health():
     assert boss.is_alive
 
 
-def test_dead_monsters_are_returned_but_marked_not_alive():
-    """Corpses stay in the room; callers decide, we do not filter silently."""
+def test_dead_monsters_route_to_corpses_not_targets():
+    """A dead type-1 unit is revive fuel (M5), never a combat target and
+    never an ally — it gets its own list so neither consumer can trip on
+    a body."""
     scan = scan_units(build())
-    corpse = next(m for m in scan.monsters if m.unit_id == 102)
-    assert not corpse.is_alive
-    assert corpse not in [m for m in scan.monsters if m.is_alive]
+    assert [c.unit_id for c in scan.corpses] == [102]
+    corpse = scan.corpses[0]
+    assert corpse.is_corpse and not corpse.is_alive
+    assert all(m.unit_id != 102 for m in scan.monsters)
+    assert all(a.unit_id != 102 for a in scan.allies)
 
 
 def build_with_allies():
@@ -363,3 +371,47 @@ def test_empty_table_means_no_units():
     hash_table(mem, {})
     scan = scan_units(FakeSession(mem))
     assert scan.monsters == [] and scan.ground_items == [] and scan.allies == []
+    assert scan.corpses == [] and scan.objects == []
+
+
+def add_object(mem, address, unit_id, kind, pos, mode=0):
+    path = address + 0x100
+    mem.write_fields(
+        address,
+        {
+            offsets.UNIT_TYPE: u32(offsets.UNIT_TYPE_OBJECT),
+            offsets.UNIT_TXT_FILE_NO: u32(kind),
+            offsets.UNIT_ID: u32(unit_id),
+            offsets.UNIT_MODE: u32(mode),
+            offsets.UNIT_DATA: u32(0),
+            offsets.UNIT_PATH: u32(path),
+            offsets.UNIT_ROOM_NEXT: u32(0),
+        },
+    )
+    mem.write_fields(
+        path,
+        {offsets.OBJECT_PATH_X: u32(pos[0]), offsets.OBJECT_PATH_Y: u32(pos[1])},
+    )
+    return address
+
+
+def test_objects_are_scanned_with_dword_positions_and_names():
+    """Waypoints and the stash chest are type-2 units (M5): world-DWORD
+    coordinates like items, named only when their kind is in the table."""
+    mem = FakeMemory()
+    mem.write(CLIENT_BASE + offsets.PLAYER_UNIT_PTR, u32(PLAYER))
+    mem.write_fields(PLAYER, {offsets.UNIT_PATH: u32(PLAYER_PATH)})
+    mem.write_fields(
+        PLAYER_PATH, {offsets.PATH_X: u32(100)[:2], offsets.PATH_Y: u32(200)[:2]}
+    )
+    waypoint = add_object(mem, 0x0B080000, 701, offsets.OBJ_WAYPOINT_A1, (110, 205))
+    scenery = add_object(mem, 0x0B081000, 702, 9999, (105, 195))
+    far_stash = add_object(mem, 0x0B082000, 703, offsets.OBJ_STASH, (900, 900))
+    hash_table(mem, {offsets.UNIT_TYPE_OBJECT: [waypoint, scenery, far_stash]})
+
+    scan = scan_units(FakeSession(mem))
+    by_id = {o.unit_id: o for o in scan.objects}
+    assert by_id[701].name == "waypoint"
+    assert by_id[701].position == (110, 205)
+    assert by_id[702].name is None  # unnamed scenery is present but anonymous
+    assert 703 not in by_id  # locality applies to objects too

@@ -78,6 +78,40 @@ UNIT_TYPE_TILE = 5
 PLAYER_NAME = 0x00  # szName, char[16]
 PLAYER_NAME_LEN = 16
 
+# --- Skills: the Info chain (M5) -------------------------------------------
+#
+# UnitAny.pInfo (D2Structs.h:737, Info* at 0xA8) leads to the unit's skill
+# state: Info (D2Structs.h:503-508) holds the known-skill list and, crucially,
+# the two *active* slots — pLeftSkill/pRightSkill. Reading the right slot is
+# how a hotkey switch is verified before any cast click (the difficulty-guard
+# pattern applied to skills: never trust that a keypress took).
+#
+# Skill.pSkillInfo (D2Structs.h:488-489) points at SkillsTxt, which BH leaves
+# opaque; the id offset comes from the second lineage, noah-/d2bs
+# D2Structs.h:454-456 (struct SkillInfo { WORD wSkillId; //0x00 }) — the
+# engine kolbot's unit.getSkill() ran on. Verified live (R52 drill A,
+# 2026-07-29): every F1-F6 press read back a distinct, stable id.
+
+UNIT_INFO = 0xA8  # Info*
+INFO_FIRST_SKILL = 0x04  # Skill* — head of the known-skill list
+INFO_LEFT_SKILL = 0x08  # Skill* — the active left slot
+INFO_RIGHT_SKILL = 0x0C  # Skill* — the active right slot
+SKILL_TXT = 0x00  # Skill.pSkillInfo -> SkillsTxt*
+SKILL_NEXT = 0x04  # Skill.pNextSkill — walk the known-skill list
+SKILLTXT_ID = 0x00  # SkillsTxt.wSkillId, WORD (d2bs lineage)
+
+# The necro kit's skill ids, captured live (R52 drill A: the user pressed
+# each hotkey while the right slot was read; left slot observed constant).
+# 73/68/78/95 match classic 1.13c necro ids; 367 (Blood Warp) and 83
+# (Desecrate) are PD2's own; 220 is the tome-of-town-portal book skill.
+SKILL_POISON_STRIKE = 73  # the permanent left skill (classic Poison Dagger slot)
+SKILL_BONE_ARMOR = 68  # F1
+SKILL_BLOOD_WARP = 367  # F2
+SKILL_TP_TOME = 220  # F3 (unused in M5)
+SKILL_BONE_WALL = 78  # F4 (unused in M5)
+SKILL_DESECRATE = 83  # F5
+SKILL_REVIVE = 95  # F6
+
 # --- Path (D2Structs.h:396) — for units that move --------------------------
 
 PATH_X = 0x02  # xPos, WORD (world coords)
@@ -88,6 +122,13 @@ PATH_ROOM1 = 0x1C  # Room1*
 
 ITEM_PATH_X = 0x0C  # dwPosX, DWORD
 ITEM_PATH_Y = 0x10  # dwPosY, DWORD
+
+# --- ObjectPath (D2Structs.h:645-651) — waypoints, stash, doors, shrines ----
+# Objects are static; their path keeps Room1* at 0x00 and DWORD world
+# coordinates at the same 0x0C/0x10 slots ItemPath uses. Kept as separate
+# names anyway: the structs are different and only happen to agree today.
+OBJECT_PATH_X = 0x0C  # dwPosX, DWORD
+OBJECT_PATH_Y = 0x10  # dwPosY, DWORD
 
 # --- StatList (D2Structs.h:435) --------------------------------------------
 #
@@ -117,6 +158,23 @@ STAT_LEVEL = 12
 STAT_EXPERIENCE = 13
 STAT_GOLD = 14
 STAT_GOLD_BANK = 15
+# Bone Armor's remaining/maximum absorb (the small square by the HP orb).
+# kolbot sdk/types/sdk.d.ts:1203-1205 (SkillBoneArmor: 132,
+# SkillBoneArmorMax: 133). Verified live (R52 drill B, 2026-07-29): both
+# present on the armored character, fixed-point, equal at full
+# (raw 221696 = 866 << 8). The remaining check — 132 falling as the armor
+# absorbs hits — needs a live hit and is deferred to the first supervised
+# combat stage (P6); the <75% upkeep rule is a ratio, unaffected either way.
+STAT_BONE_ARMOR = 132
+STAT_BONE_ARMOR_MAX = 133
+# Item durability (kolbot sdk/types/sdk.d.ts, sdk.stats Durability/MaxDurability).
+# Read off ITEM units, not the player. Items with no maximum (rings, charms,
+# amulets) simply lack these — absence means "indestructible or not
+# applicable", never "broken". Verified live (T18, R72): exactly 7 worn
+# items carried a maximum — helm, armour, weapon, shield, boots, gloves,
+# belt, with rings/amulet/charms correctly absent — and all read 100%.
+STAT_DURABILITY = 72
+STAT_MAX_DURABILITY = 73
 # Alignment separates friend from foe. D2 has no separate unit type for
 # mercenaries, summons or friendly NPCs — they are all dwType 1 ("monster")
 # — so this stat is the only thing distinguishing your skeletons from the
@@ -135,9 +193,20 @@ MERC_CLASS_IDS = {
 }
 
 # Only these are stored fixed-point and need `>> 8`. Applying the shift to the
-# others (level, attributes, gold, experience) silently zeroes them.
+# others (level, attributes, gold, experience) silently zeroes them. The bone
+# armor pair joined on live evidence: raw 221696 = 866 << 8 with a zero low
+# byte, and 221696 absorb is absurd where 866 is exactly right (R52 drill B).
 FIXED_POINT_STATS = frozenset(
-    {STAT_HP, STAT_MAX_HP, STAT_MANA, STAT_MAX_MANA, STAT_STAMINA, STAT_MAX_STAMINA}
+    {
+        STAT_HP,
+        STAT_MAX_HP,
+        STAT_MANA,
+        STAT_MAX_MANA,
+        STAT_STAMINA,
+        STAT_MAX_STAMINA,
+        STAT_BONE_ARMOR,
+        STAT_BONE_ARMOR_MAX,
+    }
 )
 
 # --- Act (D2Structs.h:387) -------------------------------------------------
@@ -287,12 +356,136 @@ ITEM_LEVEL = 0x2C  # dwItemLevel
 ITEM_LOCATION = 0x45
 ITEM_LOCATION_NONE = 0xFF
 
-# Item unit modes (UNIT_MODE for dwType==4), kolbot sdk `sdk.items.mode`:
-# inStorage=0, equipped=1, inBelt=2, onGround=3, onCursor=4, dropping=5,
-# socketed=6. "On the floor" = onGround or mid-drop. Verified live (R17/R19):
-# mode correctly distinguishes carried from dropped where 0x45 did not.
+# Carried-item classification (M5). Three ItemData bytes describe where an
+# item lives; BH's own header comments rank their trustworthiness:
+#   BodyLocation 0x44 (D2Structs.h:525) — equip slot, "Not always cleared"
+#   ItemLocation 0x45 (D2Structs.h:526) — the byte that lied live (R17)
+#   GameLocation 0x68 — unnamed filler in BH (`_11`, D2Structs.h:534); named
+#     by the d2bs lineage (D2Structs.h:502) as kolbot's `unit.location`
+#   NodePage     0x69 (D2Structs.h:535) — "Actual location, this is the most
+#     reliable by far" (BH's comment, same text in d2bs)
+# Classification therefore leans on the unit MODE first (proven live, R17/
+# R19) with GameLocation distinguishing the storage containers; NodePage is
+# read and dumped as the cross-check. Verified live (R52 drill C,
+# 2026-07-29): one potion moved inventory -> belt -> stash -> back read
+# consistent mode/loc/node triples at every hop ((0,3,1), (2,2,2), (0,7,1)),
+# with correct grid coordinates in each container and the belt-column
+# cascade confirming slot%4 arithmetic. One surprise: an item HELD ON THE
+# CURSOR leaves the inventory chain entirely — it is reachable only through
+# Inventory.pCursorItem (INVENTORY_CURSOR_ITEM), which items.py reads
+# separately.
+ITEM_BODY_LOCATION = 0x44
+ITEM_GAME_LOCATION = 0x68
+ITEM_NODE_PAGE = 0x69
+ITEM_NEXT_INV = 0x64  # ItemData.pNextInvItem (D2Structs.h:533) — inventory chain
+
+# Inventory struct (D2Structs.h:466-478), pointed at by UNIT_INVENTORY.
+INVENTORY_FIRST_ITEM = 0x0C  # UnitAny* pFirstItem
+INVENTORY_LAST_ITEM = 0x10  # UnitAny* pLastItem
+INVENTORY_CURSOR_ITEM = 0x20  # UnitAny* pCursorItem
+
+# The STORE array (D2Structs.h:472-473 pStores/dwStoresCount, and
+# InventoryStore at :456-464). Each store is a grid the character can hold
+# items in — inventory, stash, cube — with its own width and height.
+#
+# Why this matters (R75 Q5): the bot must know WHICH stash tab is showing,
+# and T15 proved the raw UI array does not move across a tab toggle, so
+# there is no panel flag to read. The store array was the next place to
+# look, and it answered (T22, R77): the stash store's ITEM-CHAIN HEAD goes
+# null exactly while the materials tab is displayed, and returns when the
+# regular tab comes back — six toggles, six times, with the grid pointer
+# and dimensions untouched throughout.
+#
+# The same dump identified every store this character has, which is worth
+# recording because three of them corroborate findings we reached the hard
+# way:
+#
+#     store 0   13x1    equipment (13 body locations)
+#     store 1   16x1    the belt — exactly the 16 slots R47.6 described
+#     store 2   10x8    inventory AND charm space in ONE grid: the usable
+#                       10x4 sits on top of the charm 10x4, which is why
+#                       they share a container and only the cell
+#                       coordinate separates them (R60, confirmed here)
+#     store 6   10x15   the stash
+#     stores 3-5 0x0, store 7 127x127 — unused/garbage past the real end
+#
+# Also seen: item location byte 8, absent from kolbot's storage table and
+# present in BOTH tab states. Unidentified; possibly the materials tab or
+# a shared-stash page. Nothing depends on it yet.
+INVENTORY_STORES = 0x14  # InventoryStore* [dwStoresCount]
+INVENTORY_STORES_COUNT = 0x18
+STORE_SIZE = 0x10  # sizeof(InventoryStore)
+STORE_FIRST_ITEM = 0x00
+STORE_LAST_ITEM = 0x04
+STORE_WIDTH = 0x08  # BYTE
+STORE_HEIGHT = 0x09  # BYTE
+STORE_GRID = 0x0C  # UnitAny* [height][width]
+MAX_STORES = 16  # sanity bound; this character reports 8, not all valid
+# The stash is found by its shape rather than its index, so a PD2 update
+# that reorders the array fails loudly instead of silently reading the
+# belt. Measured live (T22).
+STASH_STORE_SIZE = (10, 15)
+
+# GameLocation values = kolbot `sdk.storage` (libs/modules/sdk.js:2635-2642).
+STORAGE_EQUIPPED = 1
+STORAGE_BELT = 2
+STORAGE_INVENTORY = 3
+STORAGE_TRADE = 5
+STORAGE_CUBE = 6
+STORAGE_STASH = 7
+STORAGE_NAMES = {
+    STORAGE_EQUIPPED: "equipped",
+    STORAGE_BELT: "belt",
+    STORAGE_INVENTORY: "inventory",
+    STORAGE_TRADE: "trade",
+    STORAGE_CUBE: "cube",
+    STORAGE_STASH: "stash",
+}
+
+# NodePage values = kolbot `sdk.node` (libs/modules/sdk.js:2644-2650).
+NODE_NOT_ON_PLAYER = 0
+NODE_STORAGE = 1
+NODE_BELT = 2
+NODE_EQUIPPED = 3
+NODE_CURSOR = 4
+
+# The belt is 4 columns wide; a belt item's ItemPath x is its slot index,
+# column = slot % 4 (kolbot Town.checkColumns uses exactly this). Rows vary
+# by belt; this character wears a 4-row belt (16 slots, R47.6).
+BELT_COLUMNS = 4
+
+# The USABLE inventory grid: 10x4, cells (0,0)..(9,3). Measured live by the
+# four-corner calibration (R60, 2026-07-30) with the user defining the
+# corners.
+#
+# This rectangle is load-bearing, not cosmetic. PD2 puts a CHARM INVENTORY
+# directly below the main grid, and the live probe showed those slots share
+# the SAME container and the SAME ItemData bytes as ordinary inventory —
+# game_location=3 (STORAGE_INVENTORY), node_page=1, mode=0, identical in
+# every field we read. The ONLY thing separating locked charm space from
+# usable space is the cell coordinate: y >= INVENTORY_ROWS is charm space.
+#
+# The character's 24 existing "inventory" items all live at y 4..7, so a
+# consumer that trusted the container alone would have walked two dozen
+# untouchable items — computing pixels for them, failing every transfer,
+# and tripping the full-stash halt over a stash that was never full. The
+# user flagged the charm space before it could happen (R56/R60); every
+# consumer filters on this rectangle.
+INVENTORY_COLS = 10
+INVENTORY_ROWS = 4
+
+# Item unit modes (UNIT_MODE for dwType==4), kolbot sdk `sdk.items.mode`
+# (sdk/types/sdk.d.ts:2794-2801): inStorage=0, equipped=1, inBelt=2,
+# onGround=3, onCursor=4, dropping=5, socketed=6. "On the floor" = onGround
+# or mid-drop. Verified live (R17/R19): mode correctly distinguishes carried
+# from dropped where 0x45 did not.
+ITEM_MODE_IN_STORAGE = 0
+ITEM_MODE_EQUIPPED = 1
+ITEM_MODE_IN_BELT = 2
 ITEM_MODE_ON_GROUND = 3
+ITEM_MODE_ON_CURSOR = 4
 ITEM_MODE_DROPPING = 5
+ITEM_MODE_SOCKETED = 6
 
 # Item quality (D2 standard values)
 QUALITY_NAMES = {
@@ -306,6 +499,95 @@ QUALITY_NAMES = {
     8: "crafted",
 }
 
+# --- Item kind tables (dwTxtFileNo values, M5) ------------------------------
+#
+# PD2 RENUMBERED the potions — kolbot's classic ids (healing 587-591, mana
+# 592-596, rejuv 515/516) do not exist on this client. These ids were
+# captured from the character's belt (R52 drill C) and the type attribution
+# was PROVEN by effect, not layout lore (R54, 2026-07-29): key 1 consumed a
+# kind-611 potion and the mana orb refilled 246->378. Belt layout is
+# permanent per the user (R53): key 1 mana, key 2 rejuv, keys 3+4 health.
+# Tier differences within a type are irrelevant for our purposes (R53), so
+# names carry the kind id, nothing more. Only observed tiers are listed —
+# extend as more are seen.
+
+HEALING_POTION_KINDS = {
+    606: "healing_606",
+}
+MANA_POTION_KINDS = {
+    610: "mana_610",
+    611: "mana_611",
+}
+REJUV_POTION_KINDS = {
+    530: "rejuv_530",
+    531: "rejuv_531",
+}
+POTION_KINDS = {**HEALING_POTION_KINDS, **MANA_POTION_KINDS, **REJUV_POTION_KINDS}
+
+# Gold's kind: kolbot sdk/types/sdk.d.ts:3467 says 523, but after the potion
+# renumbering above no classic id is trusted untested. NOT yet verified live
+# — check against the first real gold drop (P5/P6 pickup drills).
+GOLD_KIND = 523
+
+# The Horadric Cube. Right-clicking it OPENS it, so the shift+right-click
+# that transfers every other item does something else entirely here — T13
+# shift-right-clicked the cube twice, nothing moved, and the full-stash
+# guardrail halted (user diagnosis, R67). Identified live: the single
+# kind-564 item in the character's inventory.
+#
+# Anything that cannot survive a shift+right-click belongs in the set
+# below, and the town layer skips those items rather than trusting a
+# caller's keep-predicate to remember. Quest items are the obvious future
+# members; add them as they are met, with the reason.
+CUBE_KIND = 564
+UNMOVABLE_KINDS = frozenset({CUBE_KIND})
+
+# --- Town NPCs and objects (Act 1, M5) --------------------------------------
+#
+# NPCs are type-1 units like monsters; kind (dwTxtFileNo) names them.
+# kolbot sdk/types/sdk.d.ts:1608-1634 (sdk.npcs).
+#
+# VERIFIED by the T17 proximity drill (R68, 2026-07-30): the user stood
+# beside each named NPC in turn and the nearest non-merc ally was read.
+# Akara answered at distance 1 — standing on top of her — and the rest at
+# 3-5 subtiles, with every rival candidate 14+ away. Unambiguous.
+#
+#     Akara 148   Kashya 150   Charsi 154   Gheed 147
+#
+# Worth keeping the history: R52 had recorded the same table as "verified"
+# on much weaker evidence (kind 148 merely entered perception range during
+# a walk toward Akara — anyone standing near her gives that signature), and
+# when T12 then walked to Kashya it looked like the table's fault. It was
+# not; see town.py's `_walk_guarded` for the real cause. The lesson is
+# about the evidence, not the ids: a coincidence and a measurement can
+# agree and still differ completely in what they license.
+#
+# Two facts from the same session that also hold:
+# Deckard Cain is kind 265, and generic townsfolk (e.g. the kind-149 rogue
+# guards) lack the friendly-alignment stat entirely, so they show up in the
+# *monster* list in town — one more reason combat logic never runs there.
+NPC_AKARA = 148
+NPC_KASHYA = 150
+NPC_CHARSI = 154  # the smith: repairs (T17-verified)
+NPC_KINDS = {
+    147: "gheed",
+    148: "akara",
+    150: "kashya",
+    154: "charsi",
+    155: "warriv",
+    265: "cain",
+}
+
+# Objects (dwType==2): kolbot sdk/types/sdk.d.ts:1724 (A1Waypoint: 119),
+# :1795 (Stash: 267). Verified live (R52, 2026-07-29): both named and
+# positioned correctly in the first town dump.
+OBJ_WAYPOINT_A1 = 119
+OBJ_STASH = 267
+OBJECT_KINDS = {
+    OBJ_WAYPOINT_A1: "waypoint",
+    OBJ_STASH: "stash",
+}
+
 # --- UI state (BH Constants.h:65-89) ---------------------------------------
 # P2 discovers the array these index into; the enum itself is stable.
 UI_GAME = 0x00
@@ -316,13 +598,17 @@ UI_CHAT_CONSOLE = 0x05
 UI_NPCMENU = 0x08
 UI_ESCMENU_MAIN = 0x09
 UI_AUTOMAP = 0x0A
-UI_NPCSHOP = 0x0C
+UI_NPCSHOP = 0x0C  # verified live (T18): the trade/repair screen raises it
 UI_QUEST = 0x0F
 UI_QUEST_LOG = 0x11
 UI_ESCMENU_EX = 0x13
 UI_WPMENU = 0x14
 UI_MINIPANEL = 0x15
 UI_PARTY = 0x16
+# kolbot sdk/types/sdk.d.ts:792 (sdk.uiflags.Stash: 0x19). Verified live
+# (M5 P2 drill, 2026-07-30): the slot toggled 0->1->0 exactly with the
+# stash screen — and raising ONLY itself (the inventory slot stayed 0).
+UI_STASH = 0x19
 
 UI_NAMES = {
     UI_GAME: "game",
@@ -340,6 +626,7 @@ UI_NAMES = {
     UI_WPMENU: "waypoint_menu",
     UI_MINIPANEL: "minipanel",
     UI_PARTY: "party",
+    UI_STASH: "stash",
 }
 
 # --- Player unit modes and towns (M4 safety monitor) -------------------------
@@ -350,6 +637,15 @@ UI_NAMES = {
 # false negatives not).
 PLAYER_MODE_DEATH = 0
 PLAYER_MODE_DEAD = 17
+
+# Monster UNIT_MODE values (kolbot sdk/types/sdk.d.ts:1590-1602, npcs.mode —
+# "same as monsters"): 0 = Death (dying animation), 12 = Dead. A dead
+# monster unit is a *corpse* — desecrate makes them, revive consumes them.
+# Mode 12 verified live (R52, 2026-07-29): Rogue Encampment's ambient
+# corpses all read mode 12. Mode 0 is a transient animation frame, kept on
+# the dual-source citation.
+MONSTER_MODE_DEATH = 0
+MONSTER_MODE_DEAD = 12
 
 # Town area ids (kolbot sdk/types/sdk.d.ts sdk.areas: RogueEncampment:1,
 # LutGholein:40, KurastDocktown:75, PandemoniumFortress:103, Harrogath:109).

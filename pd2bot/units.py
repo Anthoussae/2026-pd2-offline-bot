@@ -73,14 +73,22 @@ def read_stats(session: GameSession, unit: int) -> dict[int, int]:
 def unit_position(session: GameSession, unit: int, unit_type: int) -> tuple[int, int] | None:
     """World coordinates of a unit.
 
-    Units that move keep a `Path`; items on the ground keep an `ItemPath`, whose
-    coordinates sit at different offsets and are full DWORDs.
+    Units that move keep a `Path`; items keep an `ItemPath` and static objects
+    an `ObjectPath`, whose coordinates sit at different offsets and are full
+    DWORDs. (For carried items the same DWORDs hold container grid coords or
+    the belt slot instead of world subtiles — the caller knows which world it
+    is in from the unit's mode.)
     """
     path = session.ptr(unit + offsets.UNIT_PATH)
     if path is None:
         return None
     if unit_type == offsets.UNIT_TYPE_ITEM:
         return session.u32(path + offsets.ITEM_PATH_X), session.u32(path + offsets.ITEM_PATH_Y)
+    if unit_type == offsets.UNIT_TYPE_OBJECT:
+        return (
+            session.u32(path + offsets.OBJECT_PATH_X),
+            session.u32(path + offsets.OBJECT_PATH_Y),
+        )
     return session.u16(path + offsets.PATH_X), session.u16(path + offsets.PATH_Y)
 
 
@@ -166,10 +174,19 @@ class Monster:
     is_boss: bool
     is_minion: bool
     alignment: int = 0
+    # UNIT_MODE animation state; 0/12 mean dead (a corpse). Defaults to 1
+    # (Standing) because mode 0 is the Death animation — a hand-built value
+    # that omitted the field would otherwise silently classify as a corpse.
+    mode: int = 1
 
     @property
     def is_alive(self) -> bool:
-        return self.hp > 0
+        return self.hp > 0 and not self.is_corpse
+
+    @property
+    def is_corpse(self) -> bool:
+        """Dead on the ground — desecrate makes these, revive consumes them."""
+        return self.mode in (offsets.MONSTER_MODE_DEATH, offsets.MONSTER_MODE_DEAD)
 
     @property
     def is_ally(self) -> bool:
@@ -199,19 +216,41 @@ class GroundItem:
 
 
 @dataclass(frozen=True)
+class GameObject:
+    """A dwType==2 unit: waypoints, the stash chest, doors, shrines, portals.
+
+    Static scenery with a position — the things the bot walks to and clicks.
+    `kind` (dwTxtFileNo) says which object; only the kinds in
+    `offsets.OBJECT_KINDS` are named, everything else is scenery we ignore.
+    """
+
+    unit_id: int
+    kind: int  # dwTxtFileNo — which object type
+    position: tuple[int, int]
+    mode: int  # objects animate too (a waypoint glows, a door opens)
+
+    @property
+    def name(self) -> str | None:
+        return offsets.OBJECT_KINDS.get(self.kind)
+
+
+@dataclass(frozen=True)
 class UnitScan:
     """What one sweep of the nearby rooms found.
 
     `monsters` is hostiles only. Your mercenary and summons are in
     `allies` — counting them as monsters made the dump report a threat
     when the only thing nearby was the player's own Rogue (instruction
-    log R21).
+    log R21). Dead type-1 units go to `corpses` (M5: revive fuel), so
+    neither combat targeting nor the ally count ever sees a body.
     """
 
     monsters: list[Monster]
     ground_items: list[GroundItem]
     skipped: int  # units that could not be read; nonzero is worth noticing
     allies: list[Monster] = field(default_factory=list)
+    corpses: list[Monster] = field(default_factory=list)
+    objects: list[GameObject] = field(default_factory=list)
 
 
 def _read_monster(session: GameSession, unit: int) -> Monster | None:
@@ -228,9 +267,22 @@ def _read_monster(session: GameSession, unit: int) -> Monster | None:
         hp=stats.get(offsets.STAT_HP, 0),
         max_hp=stats.get(offsets.STAT_MAX_HP, 0),
         alignment=stats.get(offsets.STAT_ALIGNMENT, 0),
+        mode=session.u32(unit + offsets.UNIT_MODE),
         is_champion=bool(flags & offsets.MONSTER_FLAG_CHAMPION),
         is_boss=bool(flags & offsets.MONSTER_FLAG_BOSS),
         is_minion=bool(flags & offsets.MONSTER_FLAG_MINION),
+    )
+
+
+def _read_object(session: GameSession, unit: int) -> GameObject | None:
+    position = unit_position(session, unit, offsets.UNIT_TYPE_OBJECT)
+    if position is None:
+        return None
+    return GameObject(
+        unit_id=session.u32(unit + offsets.UNIT_ID),
+        kind=session.u32(unit + offsets.UNIT_TXT_FILE_NO),
+        position=position,
+        mode=session.u32(unit + offsets.UNIT_MODE),
     )
 
 
@@ -317,7 +369,9 @@ def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitSca
 
     monsters: list[Monster] = []
     allies: list[Monster] = []
+    corpses: list[Monster] = []
     items: list[GroundItem] = []
+    objects: list[GameObject] = []
     skipped = 0
     seen_ids: set[int] = set()
 
@@ -329,7 +383,10 @@ def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitSca
             monster = _read_monster(session, unit)
             if monster is not None and near(monster.position):
                 seen_ids.add(unit_id)
-                (allies if monster.is_ally else monsters).append(monster)
+                if monster.is_corpse:
+                    corpses.append(monster)
+                else:
+                    (allies if monster.is_ally else monsters).append(monster)
         except Exception:
             # The game mutates these structures as we read them; a malformed
             # unit is expected occasionally, not exceptional.
@@ -347,4 +404,23 @@ def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitSca
         except Exception:
             skipped += 1
 
-    return UnitScan(monsters=monsters, ground_items=items, skipped=skipped, allies=allies)
+    for unit in iter_units_of_type(session, offsets.UNIT_TYPE_OBJECT):
+        try:
+            unit_id = session.u32(unit + offsets.UNIT_ID)
+            if unit_id in seen_ids:
+                continue
+            obj = _read_object(session, unit)
+            if obj is not None and near(obj.position):
+                seen_ids.add(unit_id)
+                objects.append(obj)
+        except Exception:
+            skipped += 1
+
+    return UnitScan(
+        monsters=monsters,
+        ground_items=items,
+        skipped=skipped,
+        allies=allies,
+        corpses=corpses,
+        objects=objects,
+    )

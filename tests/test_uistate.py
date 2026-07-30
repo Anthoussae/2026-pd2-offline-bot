@@ -148,3 +148,22 @@ def test_can_act_requires_both_in_game_and_no_blocking_panel(session):
     session.regions[UI_ARRAY] = ui_array_bytes(set())
     session.regions[CLIENT_BASE + offsets.PLAYER_UNIT_PTR] = struct.pack("<I", 0)
     assert not can_act(session, UI_ARRAY)
+
+
+def test_stash_and_waypoint_panels_block_input():
+    """P2's live calibration: the stash raises ONLY its own slot (inventory
+    stays 0), and the waypoint slot is a real display flag after all — both
+    swallow clicks over most of the screen, so both must block. Without
+    this, can_act() said YES with the stash open (the M1 shape, one panel
+    over)."""
+    assert UIState(frozenset({offsets.UI_STASH})).blocks_input
+    assert UIState(frozenset({offsets.UI_WPMENU})).blocks_input
+
+
+def test_waypoint_slot_is_reported_again(session):
+    """0x14 left the always-on filter after the controlled toggle drill —
+    read_ui_state must report it like any other panel."""
+    session.regions[UI_ARRAY] = ui_array_bytes({offsets.UI_WPMENU})
+    state = read_ui_state(session, UI_ARRAY)
+    assert state.is_open(offsets.UI_WPMENU)
+    assert state.names == ["waypoint_menu"]

@@ -90,3 +90,48 @@ def test_fake_ui_array_encoding_matches_dword_entries():
     data = ui_array_bytes({offsets.UI_INVENTORY})
     assert len(data) == 0x26 * 4
     assert struct.unpack_from("<I", data, offsets.UI_INVENTORY * 4)[0] == 1
+
+
+def _ally(unit_id, kind, alignment=offsets.ALIGNMENT_FRIENDLY, hp=100):
+    from pd2bot.units import Monster
+
+    return Monster(unit_id, kind, (0, 0), hp=hp, max_hp=100, is_champion=False,
+                   is_boss=False, is_minion=False, alignment=alignment)
+
+
+def _area(level_no):
+    from pd2bot.world import Area
+
+    return Area(level_no=level_no, position=(0, 0), size=(100, 100))
+
+
+def test_merc_and_revives_out_of_town():
+    from pd2bot.snapshot import GameSnapshot
+
+    merc = _ally(1, 271)  # rogue hireling
+    revive = _ally(2, 411)  # some revived monster
+    snap = GameSnapshot(in_game=True, taken_at=0.0, area=_area(2),
+                        allies=(merc, revive))
+    assert not snap.in_town
+    assert snap.merc is merc
+    assert snap.revives == (revive,)
+
+
+def test_revives_report_empty_in_town_where_npcs_pollute_the_count():
+    """In town every friendly NPC is an ally; counting them as revives
+    would tell the upkeep rung it has tanks it does not have."""
+    from pd2bot.snapshot import GameSnapshot
+
+    akara = _ally(3, offsets.NPC_AKARA)
+    snap = GameSnapshot(in_game=True, taken_at=0.0, area=_area(1), allies=(akara,))
+    assert snap.in_town
+    assert snap.revives == ()
+    assert snap.merc is None
+
+
+def test_a_dead_merc_is_not_the_merc():
+    from pd2bot.snapshot import GameSnapshot
+
+    dying = _ally(1, 271, hp=0)
+    snap = GameSnapshot(in_game=True, taken_at=0.0, area=_area(2), allies=(dying,))
+    assert snap.merc is None

@@ -41,6 +41,14 @@ _MOUSE_LEFTDOWN, _MOUSE_LEFTUP = 0x0002, 0x0004
 _MOUSE_RIGHTDOWN, _MOUSE_RIGHTUP = 0x0008, 0x0010
 _KEY_UP = 0x0002
 
+# Virtual-key codes the bot uses (Win32 VK_*). Kept here because this module
+# owns the SendInput plumbing; the *meaning* of a key (which skill, which
+# belt column) lives with the caller's config, not here.
+VK_SHIFT = 0x10
+VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6 = 0x70, 0x71, 0x72, 0x73, 0x74, 0x75
+VK_1, VK_2, VK_3, VK_4 = 0x31, 0x32, 0x33, 0x34
+VK_I = 0x49  # the inventory toggle (default binding)
+
 # Down/up spacing: a real click is never instantaneous, and the game samples
 # input per frame (25 fps sim); 60 ms was proven against the live client in M1
 # (spike/probe_click.py). The pre-click pause lets the cursor-move register.
@@ -150,8 +158,16 @@ class GatedInput:
 
     # -- sends (all gated) -----------------------------------------------------
 
-    def click_screen(self, sx: int, sy: int, button: str = "left") -> None:
-        """Gated click at absolute screen coordinates inside the client area."""
+    def click_screen(
+        self, sx: int, sy: int, button: str = "left", *, stand_still: bool = False
+    ) -> None:
+        """Gated click at absolute screen coordinates inside the client area.
+
+        `stand_still` holds SHIFT across the click — the game's attack-in-
+        place modifier (M5 combat: strike a monster without walking into the
+        pack). The release is in a `finally` so no refusal or failure can
+        ever leave shift stuck down for input that comes later.
+        """
         self.check()
         rect = self.window.client_rect()
         if not clickable(rect, sx, sy):
@@ -167,11 +183,24 @@ class GatedInput:
         user32.SetCursorPos(sx, sy)
         time.sleep(_PRE_CLICK_PAUSE_S)
         self.check()  # re-check at the last moment; state may have moved
-        _send_mouse_flag(down)
-        time.sleep(_CLICK_HOLD_S)
-        _send_mouse_flag(up)
+        if stand_still:
+            _send_key(VK_SHIFT, 0)
+        try:
+            _send_mouse_flag(down)
+            time.sleep(_CLICK_HOLD_S)
+            _send_mouse_flag(up)
+        finally:
+            if stand_still:
+                _send_key(VK_SHIFT, _KEY_UP)
 
-    def click_world(self, wx: int, wy: int, button: str = "left") -> tuple[int, int]:
+    def click_world(
+        self,
+        wx: int,
+        wy: int,
+        button: str = "left",
+        *,
+        stand_still: bool = False,
+    ) -> tuple[int, int]:
         """Gated click on a world subtile. Returns the screen point used.
 
         Reads the player position fresh: the camera follows the player, so a
@@ -187,7 +216,7 @@ class GatedInput:
             raise InputRefused("player position unreadable — cannot project a world click")
         projection = projection_for(position, self.window.client_rect())
         sx, sy = projection.world_to_screen(wx, wy)
-        self.click_screen(sx, sy, button)
+        self.click_screen(sx, sy, button, stand_still=stand_still)
         return (sx, sy)
 
     def press_key(self, vk: int) -> None:
