@@ -13,13 +13,13 @@ M5 = the first end-to-end run (Cold Plains clearance, Hell). Phases:
 |---|---|
 | P1 perception extensions | **done**, live-verified |
 | P2 input extensions | **done**, live-verified |
-| P3 town layer + waypoint | **COMPLETE — awaiting the review gate** ← here |
-| P4 behaviour engine | not started (sim-only when it comes) |
+| P3 town layer + waypoint | **COMPLETE** (gate approved R114; commit cb63b67) |
+| P4 behaviour engine | **next** — sim-only | ← here
 | P5 combat + pickit | not started |
 | P6 staged live acceptance | not started |
 
-`346 tests, ruff clean.` Nothing is committed — the whole M5 working
-tree is uncommitted by design (no commit was requested).
+`346 tests, ruff clean.` P3 is committed and pushed: `cb63b67` on
+branch `m5-trial-run`.
 
 ## The immediate next actions
 
@@ -53,9 +53,12 @@ Late-session structural fixes worth knowing before P4:
   ungateable; verify by balance, and a stray Enter opens the chat
   console — deposit_gold clears it.
 
-Remaining: **the P3 review gate** — user reviews drill outcomes and
-approves P4 (behaviour engine, sim-only). The /teach step for this
-cycle has not been done yet either.
+The P3 gate is APPROVED (R114), the teach step done, and everything
+committed and pushed. Next is **P4: the behaviour engine** — read the
+phase file `04-behavior-engine.md` in this directory. Sim-only: the
+FSM, declarative runs, the survival reflex ladder, and the per-class
+combat interface, all buildable and testable without the game running.
+The bridge and a human are NOT needed until P5/P6.
 
 ## Live-test protocol (how anything gets verified)
 
@@ -150,9 +153,15 @@ even when it is all that remains.
 
 ## Suggested opening prompt for a fresh conversation
 
-> Continuing the PD2 bot, milestone M5. Read
-> `docs/plans/2026-07-29-m5-trial-run/RESUME.md` first, then `notes.md`
-> in the same directory (the calibration-crisis section especially).
-> P3 (town layer) is COMPLETE and live-proven end to end; we are at the
-> P3 review gate. Next: the gate decision, the /teach step for this
-> cycle, and then P4 — the behaviour engine, sim-only.
+> Continuing the PD2 bot, milestone M5, starting phase P4 (the
+> behaviour engine). Read `docs/plans/2026-07-29-m5-trial-run/RESUME.md`
+> first, then `notes.md` in the same directory (the calibration-crisis
+> and R75-loop sections especially), then the phase file
+> `04-behavior-engine.md`. P3 is complete, committed (cb63b67 on
+> m5-trial-run), and gate-approved (R114). P4 is SIM-ONLY: the FSM,
+> declarative runs, the survival reflex ladder (R49 defaults), and the
+> class-agnostic combat interface with the necro config (R47 kit). No
+> bridge or live game needed — build against fakes the way
+> tests/test_town.py does, and keep the sim honest rather than
+> convenient: nearly every P3 failure was an instrument lying, not the
+> game. Instruction-log IDs continue from R114.
