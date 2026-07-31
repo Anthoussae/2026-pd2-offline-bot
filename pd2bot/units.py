@@ -209,10 +209,11 @@ class GroundItem:
     kind: int  # dwTxtFileNo — which item type
     position: tuple[int, int]
     quality: int
-    # Socket count from the item's stat list, or None when the item has no
-    # such stat (most items) or the read failed. The stat id is UNVERIFIED
-    # until the T38 drill (offsets.STAT_NUM_SOCKETS) — consumers must treat
-    # None as "unknown", never as zero.
+    # Socket count from the item's stat list — 0 for an item with none, and
+    # None only when the stat list did not read at all (see
+    # `read_socket_count` for why that distinction is load-bearing).
+    # `offsets.STAT_NUM_SOCKETS` was live-verified by the T38 drill (R124).
+    # Consumers must still treat None as "unknown", never as zero.
     sockets: int | None = None
 
     @property
@@ -309,14 +310,38 @@ def _read_ground_item(session: GameSession, unit: int) -> GroundItem | None:
     # The socket count rides along from the item's stat list because the
     # pickit needs it (R117: "3-socket archon plate"). One extra stats read
     # per nearby ground item; items on screen number in the dozens at worst.
-    stats = read_stats(session, unit)
     return GroundItem(
         unit_id=session.u32(unit + offsets.UNIT_ID),
         kind=session.u32(unit + offsets.UNIT_TXT_FILE_NO),
         position=position,
         quality=session.u32(data + offsets.ITEM_QUALITY),
-        sockets=stats.get(offsets.STAT_NUM_SOCKETS),
+        sockets=read_socket_count(session, unit),
     )
+
+
+def read_socket_count(session: GameSession, unit: int) -> int | None:
+    """Sockets on one item: a real count, or None when nothing was read.
+
+    The distinction is the whole point, and it is why this is not just
+    `read_stats(...).get(STAT_NUM_SOCKETS)`. That expression collapses two
+    different facts into None — "this item has no socket stat, i.e. it has
+    ZERO sockets" and "the stat list did not read at all, i.e. we know
+    nothing". The pickup path could live with the conflation because it
+    fails closed either way (an unknown socket count never picks). The
+    inventory CLEANSE cannot: it runs the same rules permissively, where an
+    unevaluable condition counts as satisfied, so None means "keep" — and a
+    plain 0-socket necro head would be kept and stashed forever on the
+    strength of a rule that only ever wanted 3-socket ones (R132).
+
+    So: a non-empty stat list without `STAT_NUM_SOCKETS` means zero. Only an
+    empty read — a null stat list, a torn count — stays None. Armour and
+    weapons always carry stats (durability at minimum), so the items the
+    socket rules name reach the honest branch, not the fallback.
+    """
+    stats = read_stats(session, unit)
+    if not stats:
+        return None
+    return stats.get(offsets.STAT_NUM_SOCKETS, 0)
 
 
 def iter_units_of_type(session: GameSession, unit_type: int) -> Iterator[int]:

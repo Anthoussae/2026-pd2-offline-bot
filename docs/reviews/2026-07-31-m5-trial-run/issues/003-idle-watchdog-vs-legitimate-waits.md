@@ -1,6 +1,6 @@
 # 003 — The idle watchdog can fire during waits the design asks for
 
-Severity: **P2**
+Severity: **P2** — **FIXED** 2026-07-31
 
 `pd2bot/behavior/engine.py` (`_check_idle`, `idle_bail_s` default 10.0),
 `pd2bot/behavior/steps.py` (`clear_settle_s` default 5.0),
@@ -53,3 +53,26 @@ STUCK, not about it being still.
 
 The probe above, as a test: `clear_settle_s` above `idle_bail_s` should
 either be refused at construction or survive the settle.
+
+## Resolution
+
+Fixed 2026-07-31 with the second option — the honest model.
+
+`StepOutcome` gained `waiting: bool`, and `_check_idle` treats a declared
+wait as progress. `ClearRadiusStep` sets it in the two places the design
+asks the bot to stand still: the settle timer, and the tick where combat
+has nothing to send because everything is freshly poisoned or the revives
+have not taken the front (`restrike_s`, `wait_for_revives_s`). The
+watchdog now catches waits nobody asked for, which is what it is for.
+
+The first option — validating `idle_bail_s` against the declared waits at
+wiring time — was deliberately NOT also taken. With `waiting` in place it
+guards nothing the model does not already guard, and it has the same
+failure mode as the thing it would protect (a wait nobody remembered to
+declare is also a wait nobody remembered to pass to the validator). One
+mechanism that works beats two that each half-work.
+
+Tests: the review's probe as `test_a_declared_wait_is_not_idleness` (32 s
+of deliberate waiting against a 10 s limit), plus
+`test_an_undeclared_wait_still_bails` so the watchdog is provably not
+disarmed.

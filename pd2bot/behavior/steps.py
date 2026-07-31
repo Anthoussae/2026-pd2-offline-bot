@@ -321,7 +321,15 @@ class ClearRadiusStep(_PickupMixin):
                 return StepOutcome(done=False, acted=True)
             if self.maybe_cleanse(snap, ctx):
                 return StepOutcome(done=False, acted=True, note="inventory cleansed")
-            return StepOutcome(done=False)
+            # Nothing to send, nothing to pick up, hostiles still standing:
+            # this is the skirmish pattern deliberately holding off —
+            # `restrike_s` since the last dagger, or `wait_for_revives_s` for
+            # the revives to take the front. Poison is doing the killing and
+            # the ladder still gets its look every tick. Declared as a wait
+            # so the never-idle watchdog does not read patience as a hang
+            # (review 003); the worst realistic case is a 6 s restrike
+            # against a 10 s limit, which was margin nobody had declared.
+            return StepOutcome(done=False, waiting=True)
 
         if self._empty_since is None:
             self._empty_since = now
@@ -338,7 +346,11 @@ class ClearRadiusStep(_PickupMixin):
             return StepOutcome(done=False, acted=True)
         if self.maybe_cleanse(snap, ctx):
             return StepOutcome(done=False, acted=True, note="inventory cleansed")
-        return StepOutcome(done=False)
+        # The settle timer itself: the radius reads clear and the step is
+        # waiting to be sure. `clear_settle_s` is a knob that LOOKS
+        # independent of `idle_bail_s`, so raising it used to make the run
+        # abandon itself mid-settle (review 003).
+        return StepOutcome(done=False, waiting=True)
 
 
 @dataclass

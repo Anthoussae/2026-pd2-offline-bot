@@ -3,9 +3,10 @@
 import pytest
 
 from pd2bot.behavior.engine import IdleBail
-from pd2bot.behavior.runner import BehaviorRunner, IdleLoopHalt
+from pd2bot.behavior.runner import BehaviorRunner, IdleLoopHalt, StashFullHalt
 from pd2bot.cycle import CycleError
 from pd2bot.safety import ChickenExit
+from pd2bot.town import StashFull
 
 
 class ScriptedEngine:
@@ -80,3 +81,46 @@ def test_vitals_chicken_does_not_reset_the_idle_count():
         r(None)
     with pytest.raises(IdleLoopHalt):
         r(None)  # still the second idle bail without a completed run between
+
+
+# -- the full stash: a wall, not a bug --------------------------------------------
+
+
+def stash_runner(script, alerts):
+    outcomes = list(script)
+    return BehaviorRunner(
+        lambda session: ScriptedEngine(outcomes.pop(0)),
+        alert=lambda r: None,
+        stash_alert=alerts.append,
+    )
+
+
+def test_a_full_stash_halts_the_loop_loudly():
+    """`StashFull` used to escape as an unhandled TownError and end the
+    session with a traceback — the same escape shape as review 002's
+    InputRefused. It is a real stop, but it should look like one."""
+    alerts = []
+    r = stash_runner([StashFull("3 items left in the inventory")], alerts)
+    with pytest.raises(StashFullHalt, match="would not take the inventory"):
+        r(None)
+    assert len(alerts) == 1
+    # The alert names the cause AND carries the town layer's own detail, so
+    # the human reading it knows which stash and how many items.
+    assert "would not take the inventory" in alerts[0]
+    assert "3 items left in the inventory" in alerts[0]
+
+
+def test_stash_full_halt_is_loop_halting_not_a_chicken():
+    # Cycling into another game would hit the same wall one preamble later,
+    # with a fuller inventory each time. There is no version of this the bot
+    # can fix by itself, so the loop must stop rather than retry.
+    assert issubclass(StashFullHalt, CycleError)
+    assert not issubclass(StashFullHalt, ChickenExit)
+
+
+def test_a_full_stash_does_not_count_as_an_idle_bail():
+    alerts = []
+    r = stash_runner([StashFull("full")], alerts)
+    with pytest.raises(StashFullHalt):
+        r(None)
+    assert r.idle_bails == 0

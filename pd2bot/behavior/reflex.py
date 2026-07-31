@@ -39,7 +39,9 @@ carries R47.6's original key numbers; R53 superseded them, and the config
 here is the R53 mapping.)
 
 Cooldown and last-attempt bookkeeping is this module's job; P2's primitives
-are dumb on purpose. Blood warp's own cooldown is unknown-length, so it is
+are dumb on purpose. It is DECIDED here and COMMITTED by the engine, once
+the send has landed — see `ReflexDecision.commit`. Blood warp's own cooldown
+is unknown-length, so it is
 tracked by POSITION-VERIFY: an attempt is recorded with where the player
 stood, a later evaluation that finds the player far from that spot counts it
 as landed, and one that does not treats the warp as still on cooldown rather
@@ -116,11 +118,28 @@ class ReflexConfig:
 
 @dataclass(frozen=True)
 class ReflexDecision:
-    """One firing rung: which one, what to do, and why (for the log)."""
+    """One firing rung: which one, what to do, and why (for the log).
+
+    `commit` is the rung's bookkeeping — starting a cooldown, recording a
+    warp attempt — held back until the action has actually been SENT. The
+    engine calls it after a successful execute and never after a refused
+    one. Deciding is not acting: a heal whose click was refused (a panel
+    open, focus elsewhere) used to start its 10 s cooldown anyway, so the
+    ladder stopped offering the heal that the character still needed. The
+    ladder's promise is that it re-decides from fresh state every tick, and
+    committing at decision time broke that promise precisely when input was
+    being refused — which correlates with things going wrong (review 002).
+    """
 
     rung: str
     action: Action
     reason: str
+    commit: Callable[[], None] | None = None
+
+    def commit_sent(self) -> None:
+        """Called by the engine once the action left the building."""
+        if self.commit is not None:
+            self.commit()
 
 
 def _chebyshev(a: tuple[int, int], b: tuple[int, int]) -> int:
@@ -302,19 +321,29 @@ class ReflexLadder:
         )
         if target is None:
             return None
-        self._warp_attempt = (now, position)
-        # Forget the damage history. Blood warp COSTS 12% of max hp, and
-        # that self-inflicted drop otherwise reads as more incoming burst
-        # damage on the next tick — so the escape re-triggers its own
-        # trigger and the character pays twice (found in the P5 sim: two
-        # warps back to back, 240 hp for one escape). The burst rung is
-        # about damage being DONE to us, and after an escape the situation
-        # has changed anyway, so the window starts fresh here.
-        self._hp_samples.clear()
+
+        def commit() -> None:
+            self._warp_attempt = (now, position)
+            # Forget the damage history. Blood warp COSTS 12% of max hp, and
+            # that self-inflicted drop otherwise reads as more incoming burst
+            # damage on the next tick — so the escape re-triggers its own
+            # trigger and the character pays twice (found in the P5 sim: two
+            # warps back to back, 240 hp for one escape). The burst rung is
+            # about damage being DONE to us, and after an escape the situation
+            # has changed anyway, so the window starts fresh here.
+            #
+            # Both of these are deferred to the SEND for the same reason, and
+            # this rung is where it matters most: a warp that was never cast
+            # would otherwise block re-casts for `warp_retry_s` while the
+            # character stands in the pack it was trying to escape, and would
+            # throw away the burst history that justified the escape.
+            self._hp_samples.clear()
+
         return ReflexDecision(
             rung="blood_warp",
             action=CastAtPoint(cfg.warp_skill_id, target),
             reason=reason,
+            commit=commit,
         )
 
     def _armor_needs_recast(self, was_hit: bool) -> tuple[bool, str]:
@@ -418,11 +447,13 @@ class ReflexLadder:
                     if self._column_potion(
                         carried, column, lambda i: i.is_healing_potion
                     ):
-                        self._last_drink["healing"] = now
                         return ReflexDecision(
                             rung="heal",
                             action=DrinkPotion(column, "healing"),
                             reason=f"hp {hp_pct:.0f}% < {cfg.heal_below_pct:.0f}%",
+                            commit=lambda: self._last_drink.__setitem__(
+                                "healing", now
+                            ),
                         )
 
             # Rung 6 — mana potion, 15 s cooldown (the R49 amendment).
@@ -435,11 +466,11 @@ class ReflexLadder:
                     if self._column_potion(
                         carried, cfg.mana_column, lambda i: i.is_mana_potion
                     ):
-                        self._last_drink["mana"] = now
                         return ReflexDecision(
                             rung="mana",
                             action=DrinkPotion(cfg.mana_column, "mana"),
                             reason=f"mana {mana_pct:.0f}% < {cfg.mana_below_pct:.0f}%",
+                            commit=lambda: self._last_drink.__setitem__("mana", now),
                         )
 
             # Rung 7 — disengage: armor down, recast pending, hp sliding.
@@ -475,9 +506,11 @@ class ReflexLadder:
                 or now - self._armor_attempt >= cfg.armor_retry_s
             )
         ):
-            self._armor_attempt = now
             return ReflexDecision(
-                rung="upkeep", action=CastSelf(cfg.armor_skill_id), reason=why
+                rung="upkeep",
+                action=CastSelf(cfg.armor_skill_id),
+                reason=why,
+                commit=lambda: setattr(self, "_armor_attempt", now),
             )
         if not in_town and self._combat_upkeep is not None:
             action = self._combat_upkeep(snap)

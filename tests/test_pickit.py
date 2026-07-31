@@ -120,6 +120,28 @@ def test_shipped_cleanse_is_now_enabled_and_recognises_keepers():
     assert not keep(carried(4242))                          # unknown = junk
 
 
+def test_shipped_cleanse_drops_plain_socket_rule_bases():
+    """The R132 gap, against the file the bot actually runs.
+
+    `necro_heads` and `archon_plate` appear in the shipped pickit ONLY
+    under socket conditions (3, and 3-4). Every one of them used to be
+    kept and stashed regardless — the clutter this fix removes.
+    """
+    keep = cleanse_keep(load_pickit(SHIPPED))
+    table = load_item_table(SHIPPED_TABLE)
+
+    def carried(kind, sockets):
+        return CarriedItem(1, kind, NORMAL, offsets.ITEM_MODE_IN_STORAGE,
+                           offsets.STORAGE_INVENTORY, offsets.NODE_STORAGE,
+                           (0, 0), 1, sockets=sockets)
+
+    plate = table.ids["archon_plate"][0]
+    assert keep(carried(plate, 3))
+    assert keep(carried(plate, 4))
+    assert not keep(carried(plate, 0))
+    assert not keep(carried(plate, 2))
+
+
 def test_cleanse_disabled_while_names_are_pending(tmp_path):
     # The invariant that guarded the whole build-out: a whitelist which
     # cannot recognise a keeper must never be allowed to throw one away.
@@ -212,13 +234,42 @@ def test_socket_rule_matches_a_read_count(tmp_path):
 
 
 def test_unknown_sockets_strict_refuses_permissive_allows(tmp_path):
-    # Until T38 verifies the stat, every ground item reads sockets=None:
-    # strict (pickup) must not pick on a guess; permissive (cleanse) must
-    # not drop on one. Both mistakes point the same direction — keep.
+    # sockets=None now means only one thing — the stat list did not read —
+    # and it stays the conservative case: strict (pickup) must not pick on
+    # a guess; permissive (cleanse) must not drop on one. Both mistakes
+    # point the same direction, keep.
     pickit = load(tmp_path, SOCKET_RULE)
     unknowable = item(902, sockets=None)
     assert pickit.decide(unknowable)[0] == "skip"
     assert pickit.decide(unknowable, mode="permissive")[0] == "keep"
+
+
+def inv_item(uid, kind, cell=(0, 0), quality=NORMAL, sockets=None):
+    return CarriedItem(
+        uid, kind, quality, offsets.ITEM_MODE_IN_STORAGE,
+        offsets.STORAGE_INVENTORY, offsets.NODE_STORAGE, cell, 1,
+        sockets=sockets,
+    )
+
+
+def test_cleanse_drops_a_carried_item_whose_sockets_read_zero(tmp_path):
+    """R132: the one place the cleanse really was too conservative.
+
+    A socket condition cannot be evaluated against a carried item unless
+    the item carries its socket count, and permissive mode counts an
+    unevaluable condition as satisfied — so before `CarriedItem.sockets`
+    existed, EVERY plate matched the 3-4 socket rule and was kept and
+    stashed, however many sockets it actually had. Now a zero reads as a
+    zero and the rule says what it means.
+    """
+    keep = cleanse_keep(load(tmp_path, SOCKET_RULE))
+    assert keep is not None
+    assert keep(inv_item(1, 902, sockets=3))  # wanted: kept
+    assert keep(inv_item(2, 902, sockets=4))
+    assert not keep(inv_item(3, 902, sockets=0))  # plain: dropped
+    assert not keep(inv_item(4, 902, sockets=2))
+    # And the read that failed is still kept — unknown is not zero.
+    assert keep(inv_item(5, 902, sockets=None))
 
 
 # -- pending vocabulary --------------------------------------------------------

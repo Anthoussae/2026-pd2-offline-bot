@@ -178,6 +178,15 @@ class TownConfig:
     interact_retries: int = 2
     transfer_attempts: int = 2  # shift-clicks per item before StashFull
     verify_timeout_s: float = 3.0
+    # Warn when the regular stash tab is listing at least this many items
+    # after a deposit. A HEURISTIC, and the docstring on
+    # `warn_on_stash_pressure` says exactly how weak: item sizes are
+    # unreadable (P1), so a count is not an occupancy. Its whole job is to
+    # give the human a few runs of notice before a full stash halts the
+    # session, which is strictly better than the first warning being the
+    # halt itself. The regular tab is a 10x15 grid = 150 cells, so 120
+    # 1x1 items is 80% at best and rather worse in practice.
+    stash_pressure_at: int = 120
     # Between arrow presses when walking an NPC dialog by keyboard
     # (R104). The menu highlights per key, and D2 samples input per
     # frame at 25 fps, so this is comfortably more than one frame.
@@ -1624,6 +1633,34 @@ class TownLayer:
         report.log.append(f"cleanse: {dropped} junk item(s) dropped")
         return dropped
 
+    def warn_on_stash_pressure(self, report: PreambleReport) -> None:
+        """Say the stash is filling up, while there is still time to act.
+
+        Called with the REGULAR tab displayed, which is the only moment the
+        count means anything: the materials tab nulls the stash store's item
+        chain, so `_stash_visible` reads 0 there (T15/T36).
+
+        Deliberately a warning and never a halt. The count is a lower bound
+        on occupancy — a 2x4 armour and a rune both count as one item, and
+        the sizes that would turn this into real arithmetic are not readable
+        (P1) — so acting on it would mean stopping runs over a number that
+        can be wrong in the direction that matters. The alert is the whole
+        feature: `StashFull` is a hard stop with no workaround (the bot
+        cannot make room), and arriving at it with no notice is the part
+        worth fixing (R132).
+        """
+        listed = self._stash_visible()
+        if listed < self.config.stash_pressure_at:
+            return
+        message = (
+            f"stash pressure: the regular tab lists {listed} items "
+            f"(warning at {self.config.stash_pressure_at}). Item sizes are "
+            "unreadable, so this is a floor, not an occupancy — clear space "
+            "before a deposit refuses and halts the session."
+        )
+        report.log.append(f"stash: WARNING — {listed} items listed")
+        self._alert(message)
+
     def manage_inventory(self, report: PreambleReport) -> None:
         """The inventory loop: belt, drink, cleanse, materials, regular.
 
@@ -1689,6 +1726,8 @@ class TownLayer:
         moved_regular, refused = self._deposit_everything(strict=True)
         report.deposited = moved_materials + moved_regular
         report.log.append(f"stash: {moved_regular} into regular")
+
+        self.warn_on_stash_pressure(report)
 
         skipped = [
             i for i in self._carried(self.session).main_inventory if not i.is_movable

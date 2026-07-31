@@ -113,6 +113,21 @@ def make_ladder(config=None, *, carried=full_belt, armor=1.0,
     return ladder, clock
 
 
+def fire(ladder, snapshot):
+    """Evaluate AND commit — what the engine does when the send lands.
+
+    The ladder now decides and the engine commits (review 002), so a test
+    about a COOLDOWN has to say which of the two it means. Most do mean
+    "the rung fired and the action went out", and this is that; the tests
+    that care about a refused send call `evaluate` and skip the commit on
+    purpose.
+    """
+    decision = ladder.evaluate(snapshot)
+    if decision is not None:
+        decision.commit_sent()
+    return decision
+
+
 # -- quiet paths ---------------------------------------------------------------
 
 
@@ -218,23 +233,39 @@ def test_warp_hp_cost_guard():
 
 def test_warp_position_verify_blocks_recast_until_retry():
     ladder, clock = make_ladder(carried=no_rejuv_belt)
-    first = ladder.evaluate(snap(player(hp=550), monsters=pack(4)))
+    first = fire(ladder, snap(player(hp=550), monsters=pack(4)))
     assert first.rung == "blood_warp"
     # Same spot half a second later: the attempt is pending its verify —
     # no second cast, the ladder falls through.
     clock.advance(0.5)
-    again = ladder.evaluate(snap(player(hp=550), monsters=pack(4)))
+    again = fire(ladder, snap(player(hp=550), monsters=pack(4)))
     assert again.rung == "heal"
     # Past the retry window the attempt is written off and warp re-arms.
     clock.advance(2.0)
-    third = ladder.evaluate(snap(player(hp=550), monsters=pack(4)))
+    third = fire(ladder, snap(player(hp=550), monsters=pack(4)))
     assert third.rung == "blood_warp"
+
+
+def test_warp_refused_leaves_the_escape_armed():
+    """A warp that was never sent must not block the next one (review 002).
+
+    The worst case of the old commit-at-decision bug: the character is in
+    the pack that triggered the escape, and a refusal would have recorded
+    an attempt that never happened — blocking re-casts for `warp_retry_s`
+    while it stood there.
+    """
+    ladder, clock = make_ladder(carried=no_rejuv_belt)
+    first = ladder.evaluate(snap(player(hp=550), monsters=pack(4)))
+    assert first.rung == "blood_warp"  # decided, but NOT committed
+    clock.advance(0.5)
+    again = ladder.evaluate(snap(player(hp=550), monsters=pack(4)))
+    assert again.rung == "blood_warp"
 
 
 def test_warp_verified_by_movement_rearms_immediately():
     ladder, clock = make_ladder(carried=no_rejuv_belt)
-    assert ladder.evaluate(
-        snap(player(hp=550), monsters=pack(4))
+    assert fire(
+        ladder, snap(player(hp=550), monsters=pack(4))
     ).rung == "blood_warp"
     clock.advance(0.5)
     # The player materialized 20 subtiles away: the cast landed.
@@ -256,12 +287,25 @@ def test_warp_refuses_without_walkable_ground():
 
 def test_heal_fires_below_full_with_cooldown():
     ladder, clock = make_ladder()
-    first = ladder.evaluate(snap(player(hp=900)))
+    first = fire(ladder, snap(player(hp=900)))
     assert first.rung == "heal"
     assert first.action == DrinkPotion(2, "healing")  # R53: key 3 primary
     clock.advance(1.0)
-    assert ladder.evaluate(snap(player(hp=900))) is None  # cooling down
+    assert fire(ladder, snap(player(hp=900))) is None  # cooling down
     clock.advance(9.5)
+    assert fire(ladder, snap(player(hp=900))).rung == "heal"
+
+
+def test_refused_heal_does_not_start_its_cooldown():
+    """Review 002's probe, as a test: decide, do not send, decide again.
+
+    The character is below the threshold that asked for the heal, so the
+    ladder must offer it again on the very next tick rather than sit out a
+    10 s cooldown for a potion nobody drank.
+    """
+    ladder, clock = make_ladder()
+    assert ladder.evaluate(snap(player(hp=900))).rung == "heal"
+    clock.advance(1.0)
     assert ladder.evaluate(snap(player(hp=900))).rung == "heal"
 
 
@@ -284,13 +328,13 @@ def test_heal_checks_column_contents_not_layout():
 
 def test_mana_fires_below_quarter_with_long_cooldown():
     ladder, clock = make_ladder()
-    first = ladder.evaluate(snap(player(mana=90)))  # 22.5%
+    first = fire(ladder, snap(player(mana=90)))  # 22.5%
     assert first.rung == "mana"
     assert first.action == DrinkPotion(0, "mana")  # R53: key 1
     clock.advance(10.0)
-    assert ladder.evaluate(snap(player(mana=90))) is None  # 15 s, R49
+    assert fire(ladder, snap(player(mana=90))) is None  # 15 s, R49
     clock.advance(5.5)
-    assert ladder.evaluate(snap(player(mana=90))).rung == "mana"
+    assert fire(ladder, snap(player(mana=90))).rung == "mana"
 
 
 def test_mana_needs_a_potion_in_its_column():
@@ -309,11 +353,11 @@ def test_disengage_when_armor_down_and_cooling():
         carried=lambda: belt(belt_potion(2, REJUV, 1)), armor=lambda: armor[0]
     )
     # First: absorb below 75% -> the upkeep rung recasts (and records it).
-    assert ladder.evaluate(snap(player(hp=650))).rung == "upkeep"
+    assert fire(ladder, snap(player(hp=650))).rung == "upkeep"
     # The recast did not take: absorb reads zero, attempt still cooling.
     armor[0] = 0.0
     clock.advance(0.5)
-    decision = ladder.evaluate(snap(player(hp=650), monsters=pack(3)))
+    decision = fire(ladder, snap(player(hp=650), monsters=pack(3)))
     assert decision.rung == "disengage"
     assert isinstance(decision.action, MoveTo)
 
@@ -323,11 +367,11 @@ def test_no_disengage_without_hostiles():
     ladder, clock = make_ladder(
         carried=lambda: belt(belt_potion(2, REJUV, 1)), armor=lambda: armor[0]
     )
-    assert ladder.evaluate(snap(player(hp=650))).rung == "upkeep"
+    assert fire(ladder, snap(player(hp=650))).rung == "upkeep"
     armor[0] = 0.0
     clock.advance(0.5)
     # Nothing to run from, recast still cooling: this tick has nothing.
-    assert ladder.evaluate(snap(player(hp=650))) is None
+    assert fire(ladder, snap(player(hp=650))) is None
 
 
 # -- rung 8: upkeep ------------------------------------------------------------
@@ -342,11 +386,11 @@ def test_armor_recast_below_threshold():
 
 def test_armor_recast_attempts_are_paced():
     ladder, clock = make_ladder(armor=0.5)
-    assert ladder.evaluate(snap()).rung == "upkeep"
+    assert fire(ladder, snap()).rung == "upkeep"
     clock.advance(0.5)
-    assert ladder.evaluate(snap()) is None  # attempt pending; do not spam
+    assert fire(ladder, snap()) is None  # attempt pending; do not spam
     clock.advance(2.0)
-    assert ladder.evaluate(snap()).rung == "upkeep"
+    assert fire(ladder, snap()).rung == "upkeep"
 
 
 def test_armor_recast_allowed_in_town():

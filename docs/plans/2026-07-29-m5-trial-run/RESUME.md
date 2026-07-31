@@ -1,11 +1,11 @@
-# Resume point — M5, P6 stage A done; stage B next
+# Resume point — M5, review findings cleared; P6 wiring then stage B
 
-Written 2026-07-31. Read this plus [notes.md](notes.md) ("P4 build
-notes", "P5 build notes", "P5b — the R117 amendment") and you have the
-state; the gate artifact is [p5-sim-trace.md](p5-sim-trace.md), the
-architecture is in `docs/adr/2026-07-29-behavior-architecture.md`, and
-R115 is the only request still open in `docs/instruction-log.md`
-(R116/R119 resolved; the review's 002 and 003 are the live work).
+Written 2026-07-31, updated the same day after the R132 batch. Read this
+plus [notes.md](notes.md) ("P4 build notes", "P5 build notes", "P5b — the
+R117 amendment") and you have the state; the gate artifact is
+[p5-sim-trace.md](p5-sim-trace.md), the architecture is in
+`docs/adr/2026-07-29-behavior-architecture.md`, and **R115 is the only
+request still open** in `docs/instruction-log.md`.
 
 ## Where the milestone is
 
@@ -20,38 +20,72 @@ M5 = the first end-to-end run (Cold Plains clearance, Hell). Phases:
 | P5 combat + pickit | **done** (sim-only) |
 | P5b real pickit + hygiene (R117) | **done**; vocabulary closed (105 names, 0 pending) |
 | P6 stage A (town, drop gesture) | **PASSED** — T43 audit + T44 verification |
-| P6 stage B (supervised Cold Plains clear) | **next** | ← here
+| Review findings 002/003 + R132 batch | **done** (this session) |
+| P6 wiring checklist (review 005) | **next** | ← here
+| P6 stage B (supervised Cold Plains clear) | after the wiring |
 
-`586 tests, ruff clean.` All committed and pushed on `m5-trial-run`
-(`fe19d88`). The vocabulary is closed and the inventory cleanse is
-enabled; the only input path with no live evidence — ctrl+right-click —
-was verified in stage A.
+`609 tests, ruff clean.` All committed and pushed on `m5-trial-run`.
+**R130 is closed** — the commits were rewritten to the GitHub noreply
+address and pushed in the session that raised it; the log row saying
+otherwise was stale, and so was the claim here that four commits were
+waiting. The vocabulary is closed and the inventory cleanse is enabled;
+the only input path with no live evidence — ctrl+right-click — was
+verified in stage A.
 
-## START HERE TOMORROW
+## What the R132 batch changed (2026-07-31, all sim/unit-tested)
 
-**Stage B is a supervised Cold Plains clear** — the first time the bot
-fights anything. Everything in `necro.py`, ladder rungs 3-7 and the
+The user asked whether the cleanse was too conservative. It was, in
+exactly one place, and three neighbouring gaps got closed with it:
+
+1. **`CarriedItem.sockets`** (R132a). A socket condition could not be
+   evaluated against a carried item, and the cleanse evaluates
+   permissively — so every necro head and archon plate was kept and
+   stashed whatever its sockets. `units.read_socket_count` now separates
+   "zero sockets" from "nothing read"; only the latter is None. The user
+   chose this over a conservative/ruthless toggle: strict and permissive
+   agree on every other condition, so with the field in place a toggle
+   changes nothing, and WITHOUT it a ruthless-strict mode would have
+   dropped the socketed bases the pickit collected on purpose.
+2. **Review 002** — `InputRefused` is caught at both engine send sites,
+   with `refusal_limit` escalating an unbroken streak to
+   `InputRefusedHalt`; `ReflexDecision.commit` defers every rung's
+   bookkeeping until the send lands.
+3. **Review 003** — `StepOutcome.waiting` declares a deliberate wait and
+   the watchdog treats it as progress. The wiring-time validation option
+   was deliberately not also taken (see the issue's resolution).
+4. **Full stash** — `StashFull` converts to a loop-halting
+   `StashFullHalt` at the runner boundary instead of escaping as an
+   unhandled `TownError`, and `warn_on_stash_pressure` gives notice
+   before the wall. Halting leaves the character in town, where the human
+   needs to be anyway.
+
+Full inventory needed no new routine: suppress non-potion pickups,
+queue a field cleanse, empty the inventory next preamble. Ending a run
+early on a full inventory was considered and NOT done — it changes what
+the clearance step does, and stage B exists to validate that step as
+designed.
+
+## START HERE
+
+**The P6 wiring checklist** (review issue 005), which is now the only
+thing between here and stage B: `cleanse_keep(pickit)` ->
+`TownLayer.keep_item`; a SESSION-wide baseline -> `protected_ids` (the
+implicit one is a floor, not the goal); `RunServices.cleanse`; belt
+capacity -> `Pickit.belt_capacity`; `chicken_life_pct` -> `SafetyConfig`.
+One addition from R132: wire the reflex ladder's `carried` callable to
+`read_carried_items(with_sockets=False)` — it only reads the belt and
+runs every tick, so it should not pay for 40 stat reads; everything else
+takes the default.
+
+**Then stage B, a supervised Cold Plains clear** — the first time the
+bot fights anything. Everything in `necro.py`, ladder rungs 3-7 and the
 clearance step is sim-proven only, and the sim is a model of the game,
 not the game.
 
-Before stage B, fix the two review findings that bite an unattended run
-(`docs/reviews/2026-07-31-m5-trial-run/`):
-
-1. **002 (P2)** — `InputRefused` escapes the engine and ends the whole
-   loop; the ladder also commits cooldowns before the send lands, so a
-   refused heal blocks the next one for 10 s.
-2. **003 (P2)** — the idle watchdog can fire during waits the design
-   asks for (`clear_settle_s`, `restrike_s`). Defaults are safe by an
-   undeclared margin; raising any of them breaks runs.
-
-Then the P6 wiring checklist (review issue 005): `cleanse_keep(pickit)`
--> `TownLayer.keep_item`; a SESSION-wide baseline -> `protected_ids`
-(the implicit one is a floor, not the goal); `RunServices.cleanse`;
-belt capacity -> `Pickit.belt_capacity`; `chicken_life_pct` ->
-`SafetyConfig`.
-
 **R115** (IdleBail sharing the cycle's chicken counter) is still
-unanswered and is cheap to fold into the 002/003 work.
+unanswered. Note it is now the same shape as `StashFullHalt`, which took
+the "halt without leaving" route deliberately — worth deciding both
+together.
 
 P5b context: at the gate the user supplied the real pickup spec (R117)
 + five clarifications (R118, all answered). Potion protocol v2 (belt
@@ -133,14 +167,13 @@ Encampment 1, Cold Plains 3.
 
 ## Suggested opening prompt for a fresh conversation
 
-> Continuing the PD2 bot, milestone M5. P6 stage A is done — the
-> ctrl+right-click drop is live-verified and the item vocabulary is
-> closed. Next is stage B, the first supervised Cold Plains clear, but
-> fix review findings 002 and 003 first
-> (`docs/reviews/2026-07-31-m5-trial-run/`): a refused send currently
-> escapes the engine and ends the run loop, and the idle watchdog can
-> fire during waits the design asks for. Read
-> `docs/plans/2026-07-29-m5-trial-run/RESUME.md` first, then that
+> Continuing the PD2 bot, milestone M5. P6 stage A is done and the
+> review's P2 findings (002, 003) plus the R132 cleanse/fullness batch
+> are fixed — 609 tests, ruff clean, uncommitted. Next is the P6 wiring
+> checklist from `docs/reviews/2026-07-31-m5-trial-run/issues/005-minor-
+> cleanups.md`, then stage B, the first supervised Cold Plains clear.
+> Read `docs/plans/2026-07-29-m5-trial-run/RESUME.md` first, then that
 > review's `summary.md`, then the phase file
 > `06-staged-acceptance-closeout.md`. Stage B needs the bridge and a
-> human watching. Instruction-log IDs continue from R130.
+> human watching. Instruction-log IDs continue from R133; R115 is the
+> only open request.

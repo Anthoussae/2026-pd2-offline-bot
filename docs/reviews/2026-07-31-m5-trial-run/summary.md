@@ -28,17 +28,43 @@ reading, and the probes are reproducible from the issue files.
 
 ## Findings
 
-| # | Sev | Title | File |
-|---|---|---|---|
-| [001](issues/001-cleanse-unprotected-by-default.md) | **P1** | The cleanse drops everything by default; protection is opt-in | `town.py` |
-| [002](issues/002-refused-send-kills-the-loop.md) | **P2** | A refused send ends the run loop, and the ladder thinks it acted | `engine.py`, `reflex.py`, `cycle.py` |
-| [003](issues/003-idle-watchdog-vs-legitimate-waits.md) | **P2** | The idle watchdog can fire during waits the design asks for | `engine.py`, `steps.py`, `necro.py` |
-| [004](issues/004-potion-reserve-two-sources.md) | P3 | The potion reserve is configured twice, in two files | `town.py`, `config/pickit.toml` |
-| [005](issues/005-minor-cleanups.md) | P3 | Dead parameter, unbounded session state, P6 wiring checklist | several |
+| # | Sev | Title | File | State |
+|---|---|---|---|---|
+| [001](issues/001-cleanse-unprotected-by-default.md) | **P1** | The cleanse drops everything by default; protection is opt-in | `town.py` | **FIXED** |
+| [002](issues/002-refused-send-kills-the-loop.md) | **P2** | A refused send ends the run loop, and the ladder thinks it acted | `engine.py`, `reflex.py`, `cycle.py` | **FIXED** |
+| [003](issues/003-idle-watchdog-vs-legitimate-waits.md) | **P2** | The idle watchdog can fire during waits the design asks for | `engine.py`, `steps.py`, `necro.py` | **FIXED** |
+| [004](issues/004-potion-reserve-two-sources.md) | P3 | The potion reserve is configured twice, in two files | `town.py`, `config/pickit.toml` | open |
+| [005](issues/005-minor-cleanups.md) | P3 | Dead parameter, unbounded session state, P6 wiring checklist | several | open |
 
 None of these block P6 **stage A**, which is complete and passed. 001
 must be fixed before the cleanse is wired into a real run; 002 and 003
-should be fixed before any unattended session.
+should be fixed before any unattended session. All three are now fixed;
+004 and 005 remain, and 005's P6 wiring checklist is stage B's opening
+work.
+
+## Post-review addendum — R132 (2026-07-31)
+
+The user asked whether the cleanse is too CONSERVATIVE — the opposite
+question to 001's — and proposed a conservative/ruthless toggle. The
+audit found one real gap and it was not where a toggle would have helped:
+`CarriedItem` had no `sockets` field, so a socket condition could not be
+evaluated against a carried item, and permissive evaluation counts an
+unevaluable condition as satisfied. Every necro head and archon plate was
+therefore kept and stashed regardless of its sockets, on the strength of
+rules that only ever wanted 3- and 3/4-socket ones.
+
+Strict and permissive agreed on every other condition, so the fix was to
+close the perception gap rather than add a strictness axis: `R132(a)`,
+`CarriedItem.sockets` plus a `read_socket_count` that distinguishes "zero
+sockets" from "nothing read". A toggle would have been dormant config
+today and actively dangerous without the field — ruthless-strict would
+have dropped exactly the socketed bases the pickit went out to collect.
+
+Two fullness routines landed with it: `StashFull` now converts to a
+loop-halting `StashFullHalt` at the runner boundary (it was escaping as
+an unhandled `TownError`, the same shape as 002), and the deposit warns
+on stash pressure so the first notice of a filling stash is not the halt
+itself.
 
 ## What was checked and found sound
 
@@ -63,7 +89,8 @@ Coverage is genuinely good (584 tests) and the end-to-end sim is the
 strongest asset: it was built to be able to refuse, and it found two
 real bugs on its first run. Gaps worth naming:
 
-- No test exercises `InputRefused` through the engine (issue 002).
+- ~~No test exercises `InputRefused` through the engine (issue 002).~~
+  Five now do, including the review's own probes.
 - No test constructs the *production* wiring, which is why 001 and 004
   are invisible to the suite — every test passes the parameters that a
   real caller might omit.

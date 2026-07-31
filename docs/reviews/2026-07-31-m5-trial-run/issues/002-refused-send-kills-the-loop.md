@@ -1,6 +1,6 @@
 # 002 — A refused send ends the whole run loop, and the ladder thinks it acted
 
-Severity: **P2**
+Severity: **P2** — **FIXED** 2026-07-31
 
 `pd2bot/behavior/engine.py` (`tick`), `pd2bot/behavior/reflex.py`
 (bookkeeping committed before execution), `pd2bot/cycle.py` (`run_games`
@@ -58,3 +58,32 @@ refused — which correlates with things going wrong.
 A test where the executor raises `InputRefused` on the first heal: the
 engine survives the tick, and the ladder offers the heal again on the
 next one.
+
+## Resolution
+
+Fixed 2026-07-31, both halves.
+
+**The escape.** `BehaviorEngine.tick` now catches `InputRefused` at both
+send sites — the reflex execute and the step call — logs it, counts it in
+`EngineReport.refusals`, and lets the next tick re-decide. Swallowing it at
+the step site is safe because steps are written to be re-entered; a step
+that had done part of its work simply resumes.
+
+Absorbing forever would be its own bug, so `EngineConfig.refusal_limit`
+(50, ~10 s at the default tick rate) raises `InputRefusedHalt` on an
+unbroken streak. That case is the never-idle danger wearing a different
+hat: the bot is deciding, the character is standing in Hell, and nothing
+is reaching the game. A send that lands resets the streak.
+
+**The bookkeeping.** `ReflexDecision` gained a `commit` callable and the
+engine calls `commit_sent()` only after a successful execute. All four
+early-committing rungs moved their state into it: heal and mana cooldowns,
+the warp attempt (plus its `_hp_samples.clear()`), and the armor attempt.
+A refused send now marks no activity either, so the idle watchdog keeps
+watching through a refusal rather than being reset by a tick that did
+nothing.
+
+Tests: the review's own probe (`test_refused_heal_does_not_start_its_
+cooldown`), the warp version of it, refusal at the step site, streak
+escalation, and streak reset. The ladder's cooldown tests grew a `fire()`
+helper that evaluates AND commits — which is now the thing they meant.

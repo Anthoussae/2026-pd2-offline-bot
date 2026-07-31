@@ -1,4 +1,4 @@
-"""The run_games callback boundary: idle-bail counting and the loud halt.
+"""The run_games callback boundary: idle-bail counting and the loud halts.
 
 `cycle.run_games(callback)` is the M4 integration point and its internals
 are out of P4's scope, so everything idle-specific happens on THIS side of
@@ -18,6 +18,9 @@ can trip the cycle's vitals backstop instead, whose message then
 misattributes — the printed per-game "chicken:" line naming the idle bail
 is the disambiguator. Fixing that fully needs a one-line cycle.py change,
 which is a P5-gate decision, not a P4 liberty.
+
+The other loud halt here is `StashFull`, and it is the opposite kind of
+event: not a bug to find but a wall to stop at. See `StashFullHalt`.
 """
 
 from __future__ import annotations
@@ -27,16 +30,36 @@ from collections.abc import Callable
 from pd2bot.behavior.engine import BehaviorEngine, IdleBail
 from pd2bot.cycle import CycleError
 from pd2bot.memory import GameSession
+from pd2bot.town import StashFull
 
 
 class IdleLoopHalt(CycleError):
     """Idle-bailed too many times: an idle loop is a bug. Loop-halting."""
 
 
-def _default_alert(reason: str) -> None:  # pragma: no cover - exercised live
+class StashFullHalt(CycleError):
+    """The stash would not take the inventory. Loop-halting, on purpose.
+
+    This is the one failure the bot genuinely cannot work around. It can
+    drop junk (the cleanse) and it can stop picking more up, but it cannot
+    make room in a full stash — that needs a human deciding what to keep.
+    Cycling into another game would just hit the same wall one preamble
+    later, with a fuller inventory each time.
+
+    Halting rather than leaving the game is deliberate. `StashFull` is
+    raised from the town preamble, so the character is standing in town,
+    which is the safest place in the game and exactly where the human wants
+    to arrive: panels open, stash there, nothing hunting them. Same shape as
+    the death halt's "leave the game as it is for the human" (R27/Q6),
+    minus the permanence — there is nothing to latch, the next session
+    starts clean once the stash has room.
+    """
+
+
+def _shout(banner: str, reason: str, advice: str) -> None:  # pragma: no cover
     print("\n" + "!" * 66)
-    print(f"!!  IDLE LOOP: {reason}")
-    print("!!  This is a bug to find, not a threshold to tune.")
+    print(f"!!  {banner}: {reason}")
+    print(f"!!  {advice}")
     print("!" * 66 + "\n", flush=True)
     try:
         import winsound
@@ -46,6 +69,18 @@ def _default_alert(reason: str) -> None:  # pragma: no cover - exercised live
             winsound.Beep(392, 300)
     except Exception:
         pass
+
+
+def _default_alert(reason: str) -> None:  # pragma: no cover - exercised live
+    _shout("IDLE LOOP", reason, "This is a bug to find, not a threshold to tune.")
+
+
+def _default_stash_alert(reason: str) -> None:  # pragma: no cover - live only
+    _shout(
+        "STASH FULL",
+        reason,
+        "The bot cannot make room. Clear stash space, then start it again.",
+    )
 
 
 class BehaviorRunner:
@@ -63,10 +98,12 @@ class BehaviorRunner:
         *,
         idle_bail_max: int = 2,  # consecutive; an idle loop is a bug (R47.9)
         alert: Callable[[str], None] = _default_alert,
+        stash_alert: Callable[[str], None] = _default_stash_alert,
     ) -> None:
         self._engine_factory = engine_factory
         self._idle_bail_max = idle_bail_max
         self._alert = alert
+        self._stash_alert = stash_alert
         self.idle_bails = 0  # consecutive, not lifetime
 
     def __call__(self, session: GameSession) -> None:
@@ -74,6 +111,14 @@ class BehaviorRunner:
         engine = self._engine_factory(session)
         try:
             engine.run()
+        except StashFull as exc:
+            # Not a crash and not a cycle-and-retry: a wall. Convert the
+            # town layer's exception into the loop-halting kind BEFORE it
+            # reaches `run_games`, which would otherwise let a plain
+            # TownError propagate as an unhandled traceback.
+            reason = f"the regular stash would not take the inventory ({exc})"
+            self._stash_alert(reason)
+            raise StashFullHalt(reason) from exc
         except IdleBail as exc:
             self.idle_bails += 1
             if self.idle_bails >= self._idle_bail_max:

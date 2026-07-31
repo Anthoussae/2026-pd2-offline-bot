@@ -34,12 +34,25 @@ from typing import Protocol
 
 from pd2bot.behavior.actions import ActionExecutor
 from pd2bot.behavior.reflex import ReflexLadder
+from pd2bot.input import InputRefused
 from pd2bot.safety import ChickenExit
 from pd2bot.snapshot import GameSnapshot
 
 
 class BehaviorError(RuntimeError):
     """The engine cannot continue; the message says why."""
+
+
+class InputRefusedHalt(BehaviorError):
+    """Every send refused for `refusal_limit` ticks running.
+
+    A single refusal is routine — the guards raise it by design, and M4's
+    cycle already treats focus loss as recoverable — so the engine absorbs
+    it and re-decides next tick. A LONG run of them is different: the
+    character is standing in Hell while nothing the bot decides reaches the
+    game, which is the same danger the never-idle invariant exists for, and
+    it will not fix itself by ticking harder.
+    """
 
 
 class IdleBail(ChickenExit):
@@ -67,11 +80,22 @@ class StepOutcome:
     made verifiable progress) this tick says so, and a step that neither
     acts nor finishes for `idle_bail_s` outside town is exactly what the
     invariant exists to catch.
+
+    `waiting` is the step saying "I am standing still ON PURPOSE" — the
+    clearance settle timer, the restrike interval, the wait for revives to
+    tank. It counts as progress for the watchdog. The invariant is about the
+    bot being STUCK, not about it being still, and the two were previously
+    indistinguishable: several deliberate waits are configured in different
+    files by different owners (`clear_settle_s`, `restrike_s`,
+    `wait_for_revives_s`) and the watchdog knew about none of them, so
+    lengthening any one of them past `idle_bail_s` made runs abandon
+    themselves with a message blaming an idle loop (review 003).
     """
 
     done: bool
     acted: bool = False
     note: str = ""
+    waiting: bool = False
 
 
 class StepState(Protocol):
@@ -108,6 +132,11 @@ class EngineContext:
 class EngineConfig:
     tick_interval_s: float = 0.2  # ~5 decisions/s against a 25 fps sim
     idle_bail_s: float = 10.0  # R47.9 default
+    # Consecutive all-refused ticks before the engine gives up on the game.
+    # ~5 ticks/s, so 50 is about 10 s of the game refusing everything —
+    # deliberately the same order as `idle_bail_s`, because it is the same
+    # danger wearing a different hat.
+    refusal_limit: int = 50
 
 
 @dataclass
@@ -116,6 +145,7 @@ class EngineReport:
     reflex_fires: list[str] = field(default_factory=list)
     steps_completed: list[str] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
+    refusals: int = 0  # lifetime, for the post-run report
 
     def summary(self) -> str:
         return (
@@ -157,6 +187,7 @@ class BehaviorEngine:
         self._index = 0
         self._last_activity = self._clock()
         self._last_position: tuple[int, int] | None = None
+        self._refusal_streak = 0
 
     @property
     def complete(self) -> bool:
@@ -207,14 +238,37 @@ class BehaviorEngine:
             self.report.log.append(
                 f"reflex {decision.rung}: {decision.reason}"
             )
-            self._executor.execute(decision.action)
+            try:
+                self._executor.execute(decision.action)
+            except InputRefused as exc:
+                # Do NOT commit the rung's bookkeeping and do NOT mark
+                # activity: nothing happened, so the next tick must be free
+                # to decide the very same thing again.
+                self._note_refusal(f"reflex {decision.rung}", exc)
+                self._check_idle(snap, now)
+                return self.complete
+            decision.commit_sent()
+            self._refusal_streak = 0
             self._mark_activity(self._clock())
             return self.complete
 
         if not self.complete:
             state = self._states[self._index]
-            outcome = state.step(snap, self.ctx)
+            try:
+                outcome = state.step(snap, self.ctx)
+            except InputRefused as exc:
+                # Steps send through the same executor, so they refuse the
+                # same way. A step is free to have done part of its work
+                # before the refusal; it is written to be re-entered, which
+                # is what makes swallowing this safe.
+                self._note_refusal(f"step {state.name}", exc)
+                self._check_idle(snap, now)
+                return self.complete
             if outcome.acted:
+                self._refusal_streak = 0
+                self._mark_activity(self._clock())
+            if outcome.waiting:
+                # A declared wait is progress, not idleness (review 003).
                 self._mark_activity(self._clock())
             if outcome.done:
                 self._index += 1
@@ -227,6 +281,18 @@ class BehaviorEngine:
 
         self._check_idle(snap, now)
         return self.complete
+
+    def _note_refusal(self, where: str, exc: InputRefused) -> None:
+        """Absorb one refused send, and escalate only on a long streak."""
+        self.report.refusals += 1
+        self._refusal_streak += 1
+        self.report.log.append(f"{where}: send refused ({exc})")
+        if self._refusal_streak >= self.config.refusal_limit:
+            raise InputRefusedHalt(
+                f"{self._refusal_streak} sends refused in a row (last at "
+                f"{where}: {exc}) — the bot is deciding but nothing is "
+                "reaching the game"
+            ) from exc
 
     def run(self) -> EngineReport:
         """Tick until the run completes. Raises are the caller's to route:

@@ -1806,3 +1806,42 @@ def test_the_implicit_baseline_still_cleans_later_accidents(town):
     town.inventory.append(loot(99, (2, 0), kind=702))
     layer_under_test.cleanse_inventory(PreambleReport())
     assert [i.kind for i in town.dropped] == [702]
+
+
+# -- stash pressure (R132) --------------------------------------------------------
+
+
+def test_stash_pressure_warns_before_the_stash_is_actually_full(town):
+    """Give the human notice while there is still room to act.
+
+    `StashFull` is a hard stop the bot cannot work around, so the first
+    warning about a filling stash should not BE that stop.
+    """
+    town.stash = [stashed(9000 + i) for i in range(130)]
+    town.inventory = [loot(1, (0, 0))]
+    full_belt(town)
+    report = PreambleReport()
+    layer(town).manage_inventory(report)
+    assert any("stash: WARNING" in line for line in report.log)
+    assert any("stash pressure" in a for a in town.alerts)
+
+
+def test_no_stash_pressure_warning_with_room_to_spare(town):
+    town.stash = [stashed(9000 + i) for i in range(10)]
+    town.inventory = [loot(1, (0, 0))]
+    full_belt(town)
+    report = PreambleReport()
+    layer(town).manage_inventory(report)
+    assert not any("WARNING" in line for line in report.log)
+    assert town.alerts == []
+
+
+def test_stash_pressure_is_a_warning_and_never_a_halt(town):
+    """It is a count, not an occupancy — item sizes are unreadable (P1) —
+    so it must never be the thing that stops a run."""
+    town.stash = [stashed(9000 + i) for i in range(149)]
+    town.inventory = [loot(1, (0, 0))]
+    full_belt(town)
+    report = PreambleReport()
+    layer(town).manage_inventory(report)  # no raise
+    assert report.deposited == 1

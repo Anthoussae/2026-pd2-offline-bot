@@ -6,6 +6,7 @@ from pd2bot.units import (
     iter_units,
     iter_units_of_type,
     nearby_rooms,
+    read_socket_count,
     scan_units,
 )
 from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, stat_array, u32
@@ -415,3 +416,56 @@ def test_objects_are_scanned_with_dword_positions_and_names():
     assert by_id[701].position == (110, 205)
     assert by_id[702].name is None  # unnamed scenery is present but anonymous
     assert 703 not in by_id  # locality applies to objects too
+
+
+# -- socket counts (R132) ---------------------------------------------------------
+
+
+def _item_with_stats(mem, address, stats):
+    """One item unit whose stat list holds `stats`; None means no stat list."""
+    stat_list, stat_arr = address + 0x300, address + 0x400
+    mem.write_fields(
+        address,
+        {
+            offsets.UNIT_TYPE: u32(offsets.UNIT_TYPE_ITEM),
+            offsets.UNIT_STATS: u32(stat_list if stats is not None else 0),
+        },
+    )
+    if stats is not None:
+        mem.write_fields(
+            stat_list,
+            {
+                offsets.STATLIST_FULL_ARRAY: u32(stat_arr),
+                offsets.STATLIST_FULL_COUNT: u32(len(stats))[:2],
+            },
+        )
+        mem.write(stat_arr, stat_array(stats))
+    return address
+
+
+def test_socket_count_reads_zero_for_an_item_with_stats_but_no_sockets():
+    """The distinction the cleanse depends on (R132).
+
+    A stat list that read fine and has no socket entry means ZERO sockets —
+    not "unknown". Collapsing the two into None is what kept every plain
+    necro head and archon plate in the stash forever, because the cleanse
+    evaluates its rules permissively and unknown means keep.
+    """
+    mem = FakeMemory()
+    plain = _item_with_stats(mem, 0x0B090000, {offsets.STAT_MAX_DURABILITY: 60})
+    assert read_socket_count(FakeSession(mem), plain) == 0
+
+
+def test_socket_count_reads_the_real_count_when_present():
+    mem = FakeMemory()
+    socketed = _item_with_stats(
+        mem, 0x0B091000,
+        {offsets.STAT_MAX_DURABILITY: 60, offsets.STAT_NUM_SOCKETS: 3},
+    )
+    assert read_socket_count(FakeSession(mem), socketed) == 3
+
+
+def test_socket_count_is_unknown_when_no_stats_read_at_all():
+    mem = FakeMemory()
+    unreadable = _item_with_stats(mem, 0x0B092000, None)
+    assert read_socket_count(FakeSession(mem), unreadable) is None

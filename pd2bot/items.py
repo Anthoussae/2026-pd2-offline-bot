@@ -22,11 +22,11 @@ reports raw columns.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from pd2bot import offsets
 from pd2bot.memory import GameSession
-from pd2bot.units import player_unit
+from pd2bot.units import player_unit, read_socket_count
 
 # A character can own at most ~200 items (40 inventory + 16 belt + equips +
 # stash); the bound only exists so a torn chain cannot loop forever.
@@ -43,6 +43,13 @@ class CarriedItem:
     node_page: int  # NODE_*: the cross-check byte
     position: tuple[int, int]  # grid cell for stored items, (slot, 0) in belt
     item_level: int
+    # Sockets, for main-inventory items only and only when the caller asked
+    # (`read_carried_items(with_sockets=True)`); None everywhere else means
+    # "not read", never "none". The inventory cleanse needs it: without it a
+    # socket-conditioned keep rule cannot be evaluated against a CARRIED
+    # item, and the cleanse evaluates permissively — so every necro head and
+    # archon plate was kept and stashed regardless of its sockets (R132).
+    sockets: int | None = None
 
     @property
     def container(self) -> str:
@@ -280,8 +287,20 @@ def _cursor_unit(session: GameSession) -> int | None:
         return None
 
 
-def read_carried_items(session: GameSession) -> CarriedItems:
-    """Everything the character owns, or an empty read outside a game."""
+def read_carried_items(
+    session: GameSession, *, with_sockets: bool = True
+) -> CarriedItems:
+    """Everything the character owns, or an empty read outside a game.
+
+    `with_sockets` adds one stat read per MAIN-INVENTORY item (never the
+    stash, the belt or worn gear), which is what the cleanse needs to judge
+    a socket-conditioned rule. It defaults to True because the failure it
+    prevents is silent: a caller who forgets it gets items whose sockets
+    read None, and None is "keep" to the permissive whitelist. The bound is
+    the grid — 40 items — but that is still 40 reads, so a tick-rate caller
+    that only wants the belt (the reflex ladder) should pass False and say
+    why at the wiring site.
+    """
     items: list[CarriedItem] = []
     skipped = 0
     seen: set[int] = set()
@@ -290,6 +309,16 @@ def read_carried_items(session: GameSession) -> CarriedItems:
             item = _read_carried(session, unit)
         except Exception:
             item = None
+        if item is not None and with_sockets and item.in_main_inventory:
+            # Its OWN try: a socket read that fails means one unknown field,
+            # not a missing item. Folding it into the read above would let a
+            # torn stat list delete an item from the inventory entirely —
+            # and this list is what the deposit and the cleanse iterate, so
+            # an item that vanishes from it is an item nothing handles.
+            try:
+                item = replace(item, sockets=read_socket_count(session, unit))
+            except Exception:
+                pass
         if item is None:
             skipped += 1
             continue

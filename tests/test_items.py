@@ -9,7 +9,13 @@ the live client pairs them.
 
 from pd2bot import offsets
 from pd2bot.items import MAX_CARRIED_ITEMS, read_carried_items
-from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, u32
+from tests.conftest import (
+    CLIENT_BASE,
+    FakeMemory,
+    FakeSession,
+    stat_array,
+    u32,
+)
 
 PLAYER = 0x0C000000
 INVENTORY = 0x0C001000
@@ -46,6 +52,7 @@ def add_carried(
     node_page=0,
     pos=(0, 0),
     quality=2,
+    stats=0,
 ):
     path, data = address + 0x100, address + 0x200
     mem.write_fields(
@@ -57,6 +64,7 @@ def add_carried(
             offsets.UNIT_MODE: u32(mode),
             offsets.UNIT_DATA: u32(data),
             offsets.UNIT_PATH: u32(path),
+            offsets.UNIT_STATS: u32(stats),
         },
     )
     mem.write_fields(
@@ -244,3 +252,77 @@ def test_stash_items_are_in_neither_inventory_view():
     carried = read_carried_items(FakeSession(mem))
     assert carried.main_inventory == () and carried.charm_inventory == ()
     assert len(carried.stash) == 1
+
+
+# -- socket counts on carried items (R132) ---------------------------------------
+
+
+def _inventory_item(mem, address, unit_id, cell, sockets, stat_list=None):
+    """An inventory-grid item with a stat list holding `sockets`.
+
+    `add_carried` does not write UNIT_STATS and `write_fields` REPLACES a
+    region rather than merging into it, so the pointer has to go in with
+    the rest of the unit — patching it afterwards would blank the item.
+    """
+    add_carried(
+        mem, address, unit_id, 442,
+        mode=offsets.ITEM_MODE_IN_STORAGE,
+        game_location=offsets.STORAGE_INVENTORY,
+        node_page=offsets.NODE_STORAGE, pos=cell,
+        stats=address + 0x300 if stat_list is None else stat_list,
+    )
+    if stat_list is not None:
+        return address  # deliberately dangling: nothing is written there
+    values = {offsets.STAT_MAX_DURABILITY: 60}
+    if sockets is not None:
+        values[offsets.STAT_NUM_SOCKETS] = sockets
+    mem.write_fields(
+        address + 0x300,
+        {
+            offsets.STATLIST_FULL_ARRAY: u32(address + 0x400),
+            offsets.STATLIST_FULL_COUNT: u32(len(values))[:2],
+        },
+    )
+    mem.write(address + 0x400, stat_array(values))
+    return address
+
+
+def test_main_inventory_items_carry_their_socket_count():
+    """What the cleanse needs: a carried item that knows its own sockets.
+
+    Without this the whitelist cannot evaluate a socket-conditioned rule
+    against something already in the bag, and permissive evaluation keeps
+    what it cannot judge — so every plate was stashed regardless (R132).
+    """
+    mem = build_world()
+    three = _inventory_item(mem, 0x0C0A0000, 1, (0, 0), 3)
+    plain = _inventory_item(mem, 0x0C0B0000, 2, (1, 0), None)
+    chain(mem, three, plain)
+
+    by_id = {i.unit_id: i for i in read_carried_items(FakeSession(mem)).main_inventory}
+    assert by_id[1].sockets == 3
+    assert by_id[2].sockets == 0  # stats read, no socket entry: genuinely none
+
+
+def test_socket_reads_are_skipped_when_the_caller_opts_out():
+    """A tick-rate caller that only wants the belt should not pay for 40
+    stat reads — and must then treat the field as unread, not as zero."""
+    mem = build_world()
+    chain(mem, _inventory_item(mem, 0x0C0C0000, 1, (0, 0), 3))
+    carried = read_carried_items(FakeSession(mem), with_sockets=False)
+    assert carried.main_inventory[0].sockets is None
+
+
+def test_a_failed_socket_read_costs_the_field_not_the_item():
+    """The item must survive a torn stat list. This list is what the
+    deposit and the cleanse iterate, so an item that drops out of it is an
+    item nothing handles at all."""
+    mem = build_world()
+    # The stat pointer leads somewhere unmapped: the read raises.
+    address = _inventory_item(mem, 0x0C0D0000, 7, (0, 0), None,
+                              stat_list=0xDEAD0000)
+    chain(mem, address)
+
+    carried = read_carried_items(FakeSession(mem))
+    assert [i.unit_id for i in carried.main_inventory] == [7]
+    assert carried.main_inventory[0].sockets is None

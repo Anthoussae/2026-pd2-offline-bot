@@ -14,9 +14,11 @@ from pd2bot.behavior.engine import (
     BehaviorError,
     EngineConfig,
     IdleBail,
+    InputRefusedHalt,
     StepOutcome,
 )
 from pd2bot.behavior.reflex import ReflexDecision
+from pd2bot.input import InputRefused
 from pd2bot.player import Player
 from pd2bot.safety import ChickenExit, DeathHalt
 from pd2bot.snapshot import GameSnapshot
@@ -329,3 +331,170 @@ def test_upkeep_reflex_can_use_cast_self():
     )
     eng.tick()
     assert executor.executed == [CastSelf(68)]
+
+
+# -- review 002: a refused send must not end the run ------------------------------
+
+
+class RefusingExecutor:
+    """Raises InputRefused for the first `refusals` sends, then records."""
+
+    def __init__(self, refusals=1):
+        self.remaining = refusals
+        self.executed = []
+        self.attempts = 0
+
+    def execute(self, action):
+        self.attempts += 1
+        if self.remaining > 0:
+            self.remaining -= 1
+            raise InputRefused("the window is not in the foreground")
+        self.executed.append(action)
+
+
+class CommittingLadder:
+    """A ladder whose decisions record whether the engine committed them."""
+
+    def __init__(self, count):
+        self.committed = 0
+        self.count = count
+
+    def evaluate(self, snap):
+        if self.count <= 0:
+            return None
+        self.count -= 1
+        return ReflexDecision(
+            rung="heal", action=DrinkPotion(2, "healing"), reason="test",
+            commit=self._commit,
+        )
+
+    def _commit(self):
+        self.committed += 1
+
+
+def test_a_refused_reflex_send_does_not_escape_the_engine():
+    """The guards raise InputRefused by design and M4 treats focus loss as
+    routine; the behaviour layer used to have no equivalent, so an ordinary
+    refusal ended the whole session with a traceback."""
+    executor = RefusingExecutor(refusals=1)
+    eng, _ = engine(
+        states=[FakeStep("s", ticks_to_done=2)],
+        ladder=ScriptedLadder([DECISION, None, None]),
+        executor=executor,
+    )
+    eng.tick()  # refused — and survived
+    assert eng.report.refusals == 1
+    assert eng.run().steps_completed == ["s"]
+
+
+def test_a_refused_send_is_not_committed_and_not_activity():
+    ladder = CommittingLadder(count=2)
+    executor = RefusingExecutor(refusals=1)
+    eng, clock = engine(
+        states=[FakeStep("s", ticks_to_done=99)],
+        ladder=ladder, executor=executor,
+        config=EngineConfig(idle_bail_s=10.0),
+    )
+    eng.tick()
+    assert ladder.committed == 0  # decided, refused, NOT booked
+    eng.tick()
+    assert ladder.committed == 1  # the retry landed, and only then booked
+    # And the refused tick did not count as activity: the idle clock never
+    # restarted for it, so the watchdog is still watching.
+    clock.advance(11.0)
+    with pytest.raises(IdleBail):
+        eng.tick()
+
+
+def test_a_refused_step_send_does_not_escape_either():
+    """Steps send through the same executor, so they refuse the same way."""
+
+    class SendingStep:
+        name = "sends"
+
+        def __init__(self):
+            self.calls = 0
+
+        def step(self, snap, ctx):
+            self.calls += 1
+            ctx.executor.execute(CastSelf(68))
+            return StepOutcome(done=self.calls >= 2, acted=True)
+
+    step = SendingStep()
+    eng, _ = engine(states=[step], executor=RefusingExecutor(refusals=1))
+    eng.tick()  # refused inside the step
+    assert eng.report.refusals == 1
+    assert eng.run().steps_completed == ["sends"]
+
+
+def test_an_unbroken_refusal_streak_eventually_halts():
+    """One refusal is routine; a hundred means nothing is reaching the game
+    while the character stands in Hell — the never-idle danger in a hat."""
+    eng, _ = engine(
+        states=[FakeStep("s", ticks_to_done=999)],
+        ladder=ScriptedLadder([DECISION] * 10),
+        executor=RefusingExecutor(refusals=99),
+        config=EngineConfig(refusal_limit=5, idle_bail_s=1000.0),
+    )
+    with pytest.raises(InputRefusedHalt):
+        for _ in range(6):
+            eng.tick()
+
+
+def test_the_refusal_streak_resets_on_a_send_that_lands():
+    executor = RefusingExecutor(refusals=1)
+    eng, _ = engine(
+        states=[FakeStep("s", ticks_to_done=999)],
+        ladder=ScriptedLadder([DECISION] * 6),
+        executor=executor,
+        config=EngineConfig(refusal_limit=2, idle_bail_s=1000.0),
+    )
+    for _ in range(4):
+        eng.tick()  # refuse, land, land, land — never two in a row
+    assert eng.report.refusals == 1
+
+
+# -- review 003: a declared wait is not idleness ----------------------------------
+
+
+class WaitingStep:
+    """Stands still on purpose, and says so."""
+
+    name = "settling"
+
+    def __init__(self, waiting=True):
+        self.waiting = waiting
+        self.calls = 0
+
+    def step(self, snap, ctx):
+        self.calls += 1
+        return StepOutcome(done=False, acted=False, waiting=self.waiting)
+
+
+def test_a_declared_wait_is_not_idleness():
+    """Review 003's probe: a settle longer than `idle_bail_s` must survive.
+
+    `clear_settle_s`, `restrike_s` and `wait_for_revives_s` live in
+    different files under different configs, and the watchdog knew about
+    none of them — so raising any one past the limit made runs abandon
+    themselves and blame an idle loop.
+    """
+    eng, clock = engine(
+        states=[WaitingStep()], config=EngineConfig(idle_bail_s=10.0)
+    )
+    for _ in range(4):
+        eng.tick()
+        clock.advance(8.0)  # 32 s of deliberate waiting, no bail
+
+
+def test_an_undeclared_wait_still_bails():
+    # The watchdog is not disarmed — it now catches waits nobody asked for,
+    # which is what it was always for.
+    eng, clock = engine(
+        states=[WaitingStep(waiting=False)],
+        config=EngineConfig(idle_bail_s=10.0),
+    )
+    eng.tick()
+    clock.advance(11.0)
+    with pytest.raises(IdleBail):
+        eng.tick()

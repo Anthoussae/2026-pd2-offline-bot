@@ -365,6 +365,16 @@ def cleanse_keep(pickit: Pickit) -> Callable[[CarriedItem], bool] | None:
 
     Potions always survive a cleanse regardless of rules: their surplus is
     the town loop's business (drink it), never the ground's.
+
+    Permissive is broader than strict by exactly one thing now: an item
+    whose sockets did not read. Every other condition — kind, quality,
+    potion reserve — evaluates identically on a carried item, and sockets
+    joined them once `CarriedItem.sockets` existed (R132). Before that the
+    gap was the whole difference between the two modes and it ran one way:
+    a plain necro head or archon plate could not be judged, so it was kept
+    and stashed, which is the clutter the cleanse exists to prevent. Feed
+    this whitelist items read WITH sockets (`read_carried_items` does by
+    default) or the gap reopens silently.
     """
     if pickit.pending_names:
         return None
