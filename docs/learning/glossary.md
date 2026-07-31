@@ -21,6 +21,13 @@ the repetitive boilerplate generated automatically. Used here as the state
 model: readable, cheap, and immutable by default. First seen in
 [from script to package](2026-07-28-from-script-to-package.md).
 
+**declarative (configuration)** — expressing *what* should happen as data
+(a list of steps, a table of thresholds) while the code owns *how*.
+The Cold Plains run and the necro's tuning are TOML text files, not
+Python; a new run is a new file. The trade-off is that files can hold
+typos, which is why the loaders validate strictly at startup. First
+seen in [the behavior engine](2026-07-31-the-behavior-engine.md).
+
 **DLL (dynamic-link library)** — a file of compiled code that is not a
 program by itself but is loaded *into* a running program to provide
 functions. Windows programs are commonly split this way: Diablo II's
@@ -63,6 +70,13 @@ Pathfinding algorithms like A* operate on this grid. Our bot reads them
 from the live game's memory and remembers them in a per-seed atlas
 (single-player maps never change).
 
+**blocking (call)** — a function that does not return until its work is
+finished, so nothing else in that thread runs meanwhile. Harmless where
+nothing else needs to happen, dangerous where something does: the bot
+approaches monsters in short hops rather than one blocking walk, so the
+survival checks keep running between them. First seen in
+[simulating the game](2026-07-31-simulating-the-game.md).
+
 **flaky test** — a test that sometimes passes and sometimes fails with no code change in between. Usually a symptom of a race condition, a timing assumption, or a fragile selector in the test itself; professionals treat flakiness as a bug in the test harness to be fixed, not ignored. *(First seen: 2026-07-31, when the tools lie.)*
 
 **fragile selector** — locating something by where it happens to be (a pixel position, "the third element on the page") rather than by a stable identity. Breaks silently the moment the layout shifts. The cure is addressing by identity: an ID, a label, or an ordinal in a structure that cannot move. *(First seen: 2026-07-31, when the tools lie.)*
@@ -91,6 +105,13 @@ reading across the process boundary. In-process is more powerful and more
 fragile; out-of-process is more limited and more robust. This project is
 out-of-process; kolbot is in-process, which is why a version mismatch
 stopped it dead.
+
+**interface / protocol** — a named shape of methods ("anything with
+`engage()` and `upkeep()`") that code can depend on without knowing the
+concrete thing behind it. Python's version is the `Protocol` class. The
+standard testing move follows directly: hand the code a *fake* that has
+the right shape and scripted answers, and it cannot tell the difference.
+First seen in [the behavior engine](2026-07-31-the-behavior-engine.md).
 
 **linter / formatter** — a linter reads source code and flags likely mistakes and
 style violations; a formatter rewrites layout into one consistent shape so the
@@ -129,6 +150,13 @@ input gate re-verifies "safe to click?" at the moment of clicking; there
 is deliberately no way around it. First seen in
 [when reality corrects the docs](2026-07-28-when-reality-corrects-the-docs.md).
 
+**integration test** — a test that runs several components together and
+checks the result, as opposed to a unit test that checks one in
+isolation. Slower and vaguer about what broke, but it is the only kind
+that catches bugs living in the *interaction* between pieces that are
+each individually correct — which is most of the expensive ones. First
+seen in [simulating the game](2026-07-31-simulating-the-game.md).
+
 **latch** — a state flag that, once set, stays set regardless of later
 observations — reset only by a human restart. Used where "things look
 fine again" is not evidence of safety: our death halt is a latch, so a
@@ -158,6 +186,13 @@ skills under `~/.claude/skills/` are copies made by the installer, never
 edited directly. Most sync bugs in any system are two "sources of truth"
 disagreeing.
 
+**short-circuit** — evaluating an ordered list of options and stopping at
+the first that applies, so nothing below it runs at all. The survival
+ladder works this way each tick: the most urgent firing rule consumes
+the whole tick, and attacking literally cannot happen while a survival
+rule fired — safety by structure instead of by remembering to check.
+First seen in [the behavior engine](2026-07-31-the-behavior-engine.md).
+
 **polling** — repeatedly checking a condition ("has the screen changed
 yet?") at an interval, instead of being notified. Almost always paired
 with a timeout (give up after N seconds) and often with bounded retries
@@ -176,7 +211,24 @@ named state and moves only along defined transitions; crucially, an
 input that fits no known state is an error, not a guess. Our game cycle
 is one: main menu, char select, difficulty popup, loading, in game —
 and `UNKNOWN` stops everything with a description. First seen in
-[the game cycle](2026-07-29-the-game-cycle.md).
+[the game cycle](2026-07-29-the-game-cycle.md); the behavior engine's
+run steps are a second one
+([the behavior engine](2026-07-31-the-behavior-engine.md)).
+
+**tick / game loop** — the shape almost every game and bot runs on: a
+loop that observes the world, makes one small decision, acts, and
+repeats several times a second. One pass is a tick. Its virtue is that
+no decision is ever stale — plans that stopped making sense are
+abandoned within a tick. First seen in
+[the behavior engine](2026-07-31-the-behavior-engine.md).
+
+**test double (fake, stub, mock)** — a stand-in for a real dependency,
+used so code can be tested without it. The quality bar is whether it can
+say NO: a double that grants every request proves only that your code
+can ask. Ours kills monsters slowly, refuses one pickup outright, and
+treats a keypress as a request whose effect must be read back — and it
+found two real bugs on its first run. First seen in
+[simulating the game](2026-07-31-simulating-the-game.md).
 
 **transient vs persistent state** — data with a short lifetime (a
 monster's position this instant) versus data that stays true (a wall).
@@ -196,3 +248,9 @@ installed libraries, so different projects can use different versions of the
 same library without conflict. It is derived data: never commit it to git or
 put it in cloud-synced storage. First seen in
 [from script to package](2026-07-28-from-script-to-package.md).
+
+**watchdog** — a timer that fires when a system stops *making progress*,
+as opposed to visibly failing. It catches the unforeseen bug whose only
+symptom is standing still. Our never-idle rule is one: outside town,
+nothing sent and no progress for ten seconds means leave the game.
+First seen in [the behavior engine](2026-07-31-the-behavior-engine.md).

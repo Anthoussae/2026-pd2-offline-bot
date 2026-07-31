@@ -1,0 +1,29 @@
+# The M5 trial run: clear around the Cold Plains waypoint, Hell.
+#
+# A run is an ordered list of steps; the step vocabulary and each step's
+# parameters live in pd2bot/behavior/run.py (default_registry). This file
+# says WHAT happens — no class names, no pixel coordinates, no game
+# structures — and a new run should be a new file like this one, not code.
+#
+# The cycle owns everything outside these steps: game creation, the Hell
+# guard, and leaving when the run completes (or chickens out).
+
+name = "cold-plains"
+
+[[step]] # heal -> repair -> R75 inventory loop -> merc; town layer, P3
+name = "town_preamble"
+
+[[step]] # town waypoint -> Cold Plains (area 3), arrival verified by area id
+name = "waypoint"
+dest = 3
+
+[[step]] # kill everything within `radius` subtiles of the arrival point
+name = "clear_radius"
+center = "arrival" # recorded by the waypoint step on the shared blackboard
+radius = 150       # R46 Q2
+
+[[step]] # collect what the pickit rules want from the cleared ground
+name = "pickup"
+
+[[step]] # run complete; the cycle takes it from here (leave, next game)
+name = "done"

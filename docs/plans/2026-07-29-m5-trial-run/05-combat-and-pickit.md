@@ -172,3 +172,46 @@ Necro module, pickit, run steps and the Cold Plains run definition
 complete and sim-proven end-to-end; decision trace produced; gate
 question asked and answered; tests/lint green; zero live input sent.
 ADR expectation: none new (P4's draft stands until P6).
+
+## Implementation Result
+
+Status: done (sim-only, as scoped; gate question pending)
+Completed: 2026-07-31
+Commit: pending
+
+- Changed: `pd2bot/behavior/necro.py` (skirmish FSM + desecrate/revive
+  maintenance), `pd2bot/behavior/execute.py` (the ActionExecutor seam P4
+  left), `pd2bot/behavior/steps.py` (the five step handlers + wired
+  registry), `pd2bot/pickit.py`, `config/pickit.toml`, `[combat]` section
+  of `config/necro.toml`, `PickUpItem` action, `EngineContext.snapshot`.
+  Tests: `tests/simworld.py` (the scripted world) plus
+  `test_behavior_necro/execute/steps/sim` and `test_pickit` — 90 new.
+- Validated: `pytest -q` 524 passed; `ruff check .` clean. Zero live
+  input; the game was never running.
+- Gate artifact: `p5-sim-trace.md` (regenerate with
+  `python -m tests.simworld`).
+
+**Two real defects the sim found**, both fixed:
+
+1. **Blood warp fired twice for one escape.** The warp costs 12% of max
+   hp, and that self-inflicted drop read as fresh incoming burst damage
+   on the next tick, re-triggering its own rung — 240 hp and two casts
+   for one escape. The ladder now clears its damage window when it
+   issues a warp (the burst rung is about damage done TO us).
+2. **The stuck item was attempted six times, not three.** Clearance and
+   the sweep each kept their own pickup memory, so the sweep re-tried an
+   item clearance had already given up on. Pickup bookkeeping moved to
+   the shared `RunServices` — the same asymmetry shape that cost three
+   live runs in P3.
+
+- Deviations, reported:
+  1. Added `execute.py` (executor) and `steps.py` beyond the phase's
+     file list — both are seams the phase implies rather than new scope.
+  2. The dash is taken in `dash_step` (8) hops rather than one `walk_to`
+     to melee range. `walk_to` blocks, and a long blocking walk into a
+     pack is time the ladder is not consulted; the phase's "short leash"
+     is implemented as short hops.
+  3. `config/necro.toml` `[combat]` grew from one key to fourteen, as
+     the phase anticipated ("P5 extends this schema").
+  4. Gold's kind (523) remains unverified live; the pickit ships a gold
+     rule that may simply never fire, flagged in the file itself.

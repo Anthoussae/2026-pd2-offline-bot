@@ -167,6 +167,20 @@ STAT_GOLD_BANK = 15
 # combat stage (P6); the <75% upkeep rule is a ratio, unaffected either way.
 STAT_BONE_ARMOR = 132
 STAT_BONE_ARMOR_MAX = 133
+# Socket count on an ITEM unit (kolbot sdk: sdk.stats.NumSockets = 194).
+#
+# VERIFIED LIVE (T38, 2026-07-31). The user was the oracle and the answer
+# arrived as an action, because a plausible number is exactly what cannot
+# be trusted here — T18 produced a confident, precise, WRONG calibration
+# and nothing downstream could tell (R86). So the drill stated every
+# socket count it read (five equipped items: 1/1/5/1/3, plus one
+# inventory item) and asked the user to DROP the socketed inventory item
+# only if all of them were right. They dropped it.
+#
+# Both halves of the read are covered: kind 441 read 3 sockets CARRIED and
+# 3 again ON THE GROUND — the ground path being the one the pickit
+# actually uses, and a different code path from the carried read.
+STAT_NUM_SOCKETS = 194
 # Item durability (kolbot sdk/types/sdk.d.ts, sdk.stats Durability/MaxDurability).
 # Read off ITEM units, not the player. Items with no maximum (rings, charms,
 # amulets) simply lack these — absence means "indestructible or not
@@ -640,6 +654,50 @@ UI_NAMES = {
     UI_PARTY: "party",
     UI_STASH: "stash",
 }
+
+# --- The chat line the client last displayed (M5P3 follow-up) ---------------
+#
+# NOT from BH, and not derivable from code: BH runs in-process and never
+# needed to find the chat buffer, so there is no macro to cite and no
+# function whose machine code points at it. This address was derived the
+# remaining way — a content scan (T40, 2026-07-31, R120): the user typed a
+# rare marker, the client's committed memory was searched for it, and the
+# round was repeated with a SECOND marker. One module-relative address
+# carried both, which is what separates a buffer from a coincidence.
+#
+# What it holds: the most recent chat line, NUL-terminated. "Most recent" is
+# literal — the BOT's own messages land here too, so any listener must ignore
+# its own. The bytes after the terminator are stale tail from a longer
+# previous line; read to the NUL.
+#
+# THE ADDRESS IS NOT THE START OF THE LINE. It is a fixed address that
+# usually coincides with it, and S1 (2026-07-31, R122) caught it not doing
+# so: the bot read its own question back as "laude] or (C) leave it..." —
+# the same text, two bytes to the left — and answered itself. D2 writes a
+# colour escape (0xFF, then a code) in front of chat strings, and when that
+# prefix's length differs, everything read from here shifts with it. The
+# same drift explains T41's first run dying on a 0xFF byte at this address.
+#
+# Consequences for any consumer, all of them live in chatread.py:
+#   * a read can be short at the FRONT, so a user's "red" could arrive "ed";
+#   * identifying the bot's own voice cannot depend on the prefix sitting at
+#     position 0 (chatread matches against what was recently said instead);
+#   * this is a WINDOW onto the last line, not a string pointer, and it will
+#     stay that way until the real message list is found (T42).
+#
+# Verified: both markers, same address, one live client. NOT yet verified
+# across a client restart — module-relative offsets should survive one, but
+# "should" is what this project measures instead of assuming. T41 re-derives
+# the address by scan before using it, so a moved buffer fails loudly.
+#
+# Two siblings found by the same scan, kept for the record and unused:
+#   D2Client.dll+0x11EC80  the same text as wchar_t
+#   heap 0x19CFA2          the RENDERED line — colour codes and the sender
+#                          name included, so it distinguishes speakers — but
+#                          a heap address, so not durable without a chain
+CHAT_LAST_LINE = 0x1234D3
+CHAT_LAST_LINE_WIDE = 0x11EC80
+CHAT_LAST_LINE_MAX = 160  # chat.py splits at 100 chars; this is slack, not a limit
 
 # --- Player unit modes and towns (M4 safety monitor) -------------------------
 

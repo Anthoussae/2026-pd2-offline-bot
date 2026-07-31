@@ -45,6 +45,7 @@ _KEY_UP = 0x0002
 # owns the SendInput plumbing; the *meaning* of a key (which skill, which
 # belt column) lives with the caller's config, not here.
 VK_SHIFT = 0x10
+VK_CONTROL = 0x11  # ctrl+right-click drops an inventory item (R117)
 VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6 = 0x70, 0x71, 0x72, 0x73, 0x74, 0x75
 VK_1, VK_2, VK_3, VK_4 = 0x31, 0x32, 0x33, 0x34
 # NPC dialogs are keyboard-navigable: arrows move the highlight, Enter

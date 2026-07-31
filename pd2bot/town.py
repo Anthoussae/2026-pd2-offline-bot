@@ -199,6 +199,11 @@ class TownConfig:
     # phase — where a refusal really is a problem — pays full price.
     materials_attempts: int = 1
     materials_verify_s: float = 0.6
+    # How many potions of EACH type stay in the inventory as reserve after
+    # the belt is filled (R118 Q1: belt first, then up to this many). The
+    # rest are drunk — all types, rejuvs included (R118 Q2, superseding
+    # R75's rejuvs-to-materials) — and no potion is ever stashed.
+    potion_reserve: int = 2
     # Calibrated client-rect fractions. None = refuse rather than guess.
     #
     # The inventory pair is T11's snake-sweep fit (R61, 1536x864 window):
@@ -295,6 +300,8 @@ class TownLayer:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         should_stop: Callable[[], bool] | None = None,
+        keep_item: Callable[[CarriedItem], bool] | None = None,
+        protected_ids: Callable[[], set[int]] | None = None,
     ) -> None:
         self.session = session
         self.gated = gated
@@ -308,6 +315,22 @@ class TownLayer:
         self._alert = alert
         self._clock = clock
         self._sleep = sleep
+        # The cleanse whitelist (R117): an item this returns False for is
+        # accidental-pickup junk, dropped on the ground rather than stashed.
+        # None means cleansing is DISABLED — the safe default, and what the
+        # wiring passes while the pickit's vocabulary still has unverified
+        # ids (pickit.cleanse_keep) — in which case everything is stashed
+        # exactly as before.
+        self._keep_item = keep_item
+        # Unit ids the cleanse must NEVER drop, whatever the whitelist
+        # thinks (R128). The bot is cleaning up its own accidents, so
+        # anything already carried when the bot started is off limits: the
+        # user pointed out that several keep-list items can only be
+        # CRAFTED, never dropped, which means the whitelist can never learn
+        # their ids from a live pickup — and one sitting in the inventory
+        # would look exactly like junk. Protecting the startup baseline
+        # closes that hole without needing those ids at all.
+        self._protected_ids = protected_ids
         # An outside veto, checked in every wait. A bot stuck in a retry
         # ladder was previously unstoppable: the drill harness could only
         # cancel its OWN waits, and a loop inside this layer ran to
@@ -1233,6 +1256,12 @@ class TownLayer:
         for item in self._carried(self.session).main_inventory:
             if not item.is_movable:
                 continue  # the Cube opens on right-click instead of moving
+            if _potion_type(item) is not None:
+                # No potion is ever stashed (R118 Q2). The exclusion must be
+                # explicit here because the materials tab would happily
+                # ACCEPT a rejuv — it is a material to the game, just not to
+                # us any more.
+                continue
             if self._attempt_deposit(item, attempts=attempts, verify_s=verify_s):
                 moved += 1
             else:
@@ -1364,12 +1393,31 @@ class TownLayer:
                 what="closing a chat console left by a stray Enter",
             )
 
+    def _excess_potions(self) -> list[CarriedItem]:
+        """Inventory potions beyond the per-type reserve (R118 Q1).
+
+        The first `potion_reserve` of each type are the keepers; everything
+        past them is excess. Which particular bottles stay is deliberately
+        not interesting — they are interchangeable within a type.
+        """
+        seen: dict[str, int] = {}
+        excess = []
+        for item in self._carried(self.session).main_inventory:
+            potion_type = _potion_type(item)
+            if potion_type is None:
+                continue
+            seen[potion_type] = seen.get(potion_type, 0) + 1
+            if seen[potion_type] > self.config.potion_reserve:
+                excess.append(item)
+        return excess
+
     def drink_excess_potions(self, report: PreambleReport) -> int:
-        """Drink leftover healing and mana potions out of the inventory.
+        """Drink inventory potions down to the per-type reserve.
 
         Runs after the belt is filled, so what is left is genuinely excess.
-        Rejuvenations are deliberately NOT drunk: they are materials (R75)
-        and cannot be bought, so they fall through to the stash instead.
+        ALL types are drunk, rejuvenations included — the R118 Q2 decision
+        ("easy and clean"), superseding R75's rejuvs-to-materials — and no
+        potion is ever stashed, so drinking is the only outlet.
 
         Drinking always works, even at full health (R75), so a potion that
         does not disappear was not clicked — worth reporting, not worth a
@@ -1378,11 +1426,7 @@ class TownLayer:
         drunk = 0
         while True:
             self._check_stop()
-            excess = [
-                i
-                for i in self._carried(self.session).main_inventory
-                if i.is_healing_potion or i.is_mana_potion
-            ]
+            excess = self._excess_potions()
             if not excess:
                 break
             potion = excess[0]
@@ -1473,14 +1517,99 @@ class TownLayer:
             raise BeltBelowMinimum(missing)
         report.log.append(f"belt: {report.refilled} moved, minimums hold")
 
-    def manage_inventory(self, report: PreambleReport) -> None:
-        """The R75 loop: belt, drink, materials, regular — halt on leftovers.
+    def drop_item(self, item: CarriedItem) -> bool:
+        """Ctrl+right-click one inventory item onto the ground. Did it leave?
 
-        The user's design, and the good idea in it is that **the game does
-        the classification**. Attempting every item into the materials tab
-        and keeping whatever it accepts means the bot needs no item taxonomy
-        — precisely the kind of knowledge that goes stale every patch.
-        Potions are the one category it must recognise, and it already does.
+        MUST run with the stash CLOSED: gesture meaning depends on what is
+        open (the R64 lesson — the same shift-click stashes or belts an item
+        depending on the stash), and ctrl-clicks are quick-move gestures in
+        several mods when a container is up. With only the inventory open
+        there is nowhere for the item to go but the floor, so "gone from the
+        inventory" is proof of the drop.
+
+        The ctrl is settled on both sides of the click by PanelInput (the
+        R113 modifier race): an UNMODIFIED right-click here would drink a
+        potion or use a tome — the exact incident that bought the settle.
+        """
+        if self._panel_open(offsets.UI_STASH):
+            raise TownError(
+                "refusing to drop an item with the stash open — gesture "
+                "meaning depends on open panels (R64), and this one must "
+                "mean 'to the floor'"
+            )
+        for _ in range(self.config.transfer_attempts):
+            self._check_stop()
+            self.panel.click(
+                offsets.UI_INVENTORY, *self._grid_pixel(item.position),
+                button="right", ctrl=True,
+            )
+
+            def _gone(uid: int = item.unit_id) -> bool:
+                return all(
+                    i.unit_id != uid
+                    for i in self._carried(self.session).main_inventory
+                )
+
+            if self._await(_gone, self.config.verify_timeout_s):
+                return True
+        return False
+
+    def cleanse_inventory(self, report: PreambleReport) -> int:
+        """Drop accidental-pickup junk on the ground (R117).
+
+        Junk = movable, not a potion, and not recognised by the whitelist.
+        With no whitelist wired (None), this does nothing at all — the
+        fail-safe default, active while the pickit vocabulary still has
+        unverified ids, because a whitelist that cannot recognise a quest
+        item must never be allowed to throw one away (pickit.cleanse_keep).
+
+        A stuck item is alerted and LEFT (it falls through to the stash
+        phases): failing to drop junk costs stash space, not correctness,
+        and halting the whole preamble over garbage would invert the
+        priorities.
+        """
+        if self._keep_item is None:
+            return 0
+        protected = self._protected_ids() if self._protected_ids else set()
+        junk = [
+            i
+            for i in self._carried(self.session).main_inventory
+            if i.is_movable
+            and _potion_type(i) is None
+            and i.unit_id not in protected
+            and not self._keep_item(i)
+        ]
+        if not junk:
+            return 0
+        self._begin_step()
+        self.press_inventory_open()
+        dropped = 0
+        for item in junk:
+            if self.drop_item(item):
+                dropped += 1
+            else:
+                self._alert(
+                    f"junk item kind {item.kind} at {item.position} would "
+                    "not drop — leaving it to the stash phases"
+                )
+        self.close_panels()
+        report.log.append(f"cleanse: {dropped} junk item(s) dropped")
+        return dropped
+
+    def manage_inventory(self, report: PreambleReport) -> None:
+        """The inventory loop: belt, drink, cleanse, materials, regular.
+
+        The R75 design amended by R117/R118: belt filled first, the
+        inventory keeps a reserve of `potion_reserve` per potion type, ALL
+        excess is drunk (rejuvs included), **no potion is ever stashed**,
+        and accidental-pickup junk is dropped before the stash phases.
+
+        The good idea underneath is still the user's: **the game does the
+        classification**. Attempting every non-potion into the materials
+        tab and keeping whatever it accepts means the bot needs no item
+        taxonomy — precisely the kind of knowledge that goes stale every
+        patch. Potions are the one category it must recognise, and it
+        already does.
 
         Panel state is part of the instruction, not ambient context (R64):
         shift-click means inventory->belt with the stash CLOSED and
@@ -1492,14 +1621,18 @@ class TownLayer:
         """
         self._begin_step()
         if self._carried(self.session).main_inventory:
-            # Stash CLOSED for both of these: shift-click means "to the belt"
-            # only while it is shut, and would stash the potion otherwise
-            # (R64). Fill the belt BEFORE drinking, so that what gets drunk
-            # is genuinely surplus rather than potions the belt had room for.
+            # Stash CLOSED for all of these: gesture meaning depends on what
+            # is open (R64) — shift-click belts a potion only while it is
+            # shut, and the drop gesture must have nowhere to send an item
+            # but the floor. Fill the belt BEFORE drinking, so that what
+            # gets drunk is genuinely surplus rather than potions the belt
+            # had room for; drink down to the reserve (R118: 2 per type
+            # stay); then drop whatever the whitelist disowns (R117).
             self.press_inventory_open()
             self.fill_belt(report)
             self.drink_excess_potions(report)
             self.close_panels()
+            self.cleanse_inventory(report)
         self.assert_belt_minimums(report)
 
         carried = self._carried(self.session).main_inventory

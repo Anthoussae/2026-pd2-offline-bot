@@ -150,6 +150,11 @@ class Town:
         self.stash_tab = "regular"
         self.material_kinds: set[int] = set()
         self.tab_toggle_works = True
+        # The drop gesture (R117): ctrl+right-click sends an item to the
+        # floor. The fake keeps what fell there, so tests can tell dropped
+        # from vanished.
+        self.dropped: list[CarriedItem] = []
+        self.drop_works = True
         # The gold amount dialog raises NO panel flag (T37), so the fake
         # keeps it as hidden state — which is exactly the bot's problem: it
         # cannot see whether this is true before pressing Enter.
@@ -237,8 +242,17 @@ class Town:
                 return index, item
         return None, None
 
-    def panel_click(self, panel_id, sx, sy, button="left", shift=False):
-        self.panel_clicks.append((panel_id, sx, sy, button, shift))
+    def panel_click(self, panel_id, sx, sy, button="left", shift=False, ctrl=False):
+        self.panel_clicks.append((panel_id, sx, sy, button, shift, ctrl))
+        if ctrl and panel_id == offsets.UI_INVENTORY and button == "right":
+            # Ctrl+right-click drops the item to the ground (R117). Routed
+            # BEFORE the plain right-click branch: an unmodified reading of
+            # this click would DRINK a potion — the R113 race's exact
+            # hazard — so the fake must never fall through to it.
+            index, item = self._item_at_pixel(sx, sy)
+            if item is not None and self.drop_works:
+                self.dropped.append(self.inventory.pop(index))
+            return
         if panel_id == offsets.UI_STASH and not shift and button == "left":
             # Two different left-click targets live in this panel, so the
             # fake routes by POSITION as the game does — otherwise a gold
@@ -374,7 +388,7 @@ def town(monkeypatch):
     return state
 
 
-def layer(town_state, config=CALIBRATED):
+def layer(town_state, config=CALIBRATED, keep_item=None, protected_ids=None):
     clock = FakeClock()
     gated = SimpleNamespace(
         click_world=town_state.click_world, press_key=town_state.press_key
@@ -399,6 +413,8 @@ def layer(town_state, config=CALIBRATED):
         alert=town_state.alerts.append,
         clock=clock,
         sleep=clock.sleep,
+        keep_item=keep_item,
+        protected_ids=protected_ids,
     )
 
 
@@ -482,7 +498,7 @@ def test_deposit_needs_grid_calibration(town):
 def test_deposit_grid_pixel_math(town):
     town.inventory = [loot(1, (2, 1))]
     layer(town).deposit_to_stash(lambda i: True, PreambleReport())
-    _, sx, sy, _, _ = town.panel_clicks[0]
+    _, sx, sy, *_ = town.panel_clicks[0]
     assert (sx, sy) == cell_pixel((2, 1))
 
 
@@ -626,9 +642,11 @@ def full_belt(town_state):
 def test_the_loop_deposits_materials_first_then_the_rest(town):
     """R75's core: attempt everything into MATERIALS, keep what it takes,
     then switch and deposit the rest. The bot never classifies an item —
-    the game does, which is why it needs no item taxonomy to go stale."""
-    town.inventory = [loot(1, (0, 0), kind=530), loot(2, (1, 0), kind=522)]
-    town.material_kinds = {530}  # rejuvs are materials (R75); the sword is not
+    the game does, which is why it needs no item taxonomy to go stale.
+    (The material here is a rune-shaped thing, not a rejuv: since R118 no
+    potion is ever offered to the stash at all.)"""
+    town.inventory = [loot(1, (0, 0), kind=800), loot(2, (1, 0), kind=522)]
+    town.material_kinds = {800}  # the game accepts the rune, not the sword
     full_belt(town)
 
     report = PreambleReport()
@@ -661,23 +679,39 @@ def test_a_refusal_is_normal_in_materials_and_fatal_in_regular(town):
     assert town.alerts  # and it is loud
 
 
-def test_excess_potions_are_drunk_but_rejuvs_are_not(town):
-    """Rejuvenations cannot be bought (R47.6) and are materials (R75), so
-    they go to the stash rather than down the hatch. Healing and mana left
-    over after the belt is full are genuinely excess."""
+def test_potion_reserve_kept_and_excess_drunk_including_rejuvs(town):
+    """R118 Q1/Q2: after the belt fills, up to `potion_reserve` (2) of each
+    type stay in the inventory; EVERYTHING beyond that is drunk — rejuvs
+    included, superseding R75's rejuvs-to-materials — and no potion is ever
+    offered to the stash."""
     full_belt(town)
-    town.inventory = [
-        potion(1, 606, cell=(0, 0)),  # healing: drink
-        potion(2, 611, cell=(1, 0)),  # mana: drink
-        potion(3, 530, cell=(2, 0)),  # rejuv: keep, it is a material
-    ]
-    town.material_kinds = {530}
+    town.inventory = (
+        [potion(10 + i, 606, cell=(i, 0)) for i in range(3)]  # 3 healing
+        + [potion(20 + i, 611, cell=(i, 1)) for i in range(3)]  # 3 mana
+        + [potion(30 + i, 530, cell=(i, 2)) for i in range(3)]  # 3 rejuv
+    )
+    town.material_kinds = {530}  # the game WOULD take rejuvs; we never offer
 
     report = PreambleReport()
     layer(town).manage_inventory(report)
-    assert any("drink: 2 excess" in line for line in report.log)
-    assert town.inventory == []  # the rejuv went to the stash, not the belt
-    assert report.deposited == 1
+    assert any("drink: 3 excess" in line for line in report.log)
+    kinds_left = sorted(i.kind for i in town.inventory)
+    assert kinds_left == [530, 530, 606, 606, 611, 611]  # the reserve, intact
+    assert report.deposited == 0  # not one potion was stashed
+    assert town.stash == [stashed(9001), stashed(9002)]  # untouched
+
+
+def test_reserve_within_cap_is_left_alone(town):
+    """A reserve at or under the cap drinks nothing at all."""
+    full_belt(town)
+    town.inventory = [
+        potion(1, 606, cell=(0, 0)), potion(2, 606, cell=(1, 0)),
+        potion(3, 530, cell=(2, 0)),
+    ]
+    report = PreambleReport()
+    layer(town).manage_inventory(report)
+    assert not any("drink" in line for line in report.log)
+    assert len(town.inventory) == 3
 
 
 def test_the_cube_is_never_deposited_in_either_phase(town):
@@ -717,11 +751,11 @@ def test_a_missed_gold_click_leaves_no_chat_console_behind(town):
     town.inventory = [loot(1, (0, 0))]
     original = town.panel_click
 
-    def gold_button_misses(panel_id, sx, sy, button="left", shift=False):
+    def gold_button_misses(panel_id, sx, sy, button="left", shift=False, ctrl=False):
         if (panel_id, sx, sy) == (offsets.UI_STASH, *_point_pixel("stash.gold_button")):
-            town.panel_clicks.append((panel_id, sx, sy, button, shift))
+            town.panel_clicks.append((panel_id, sx, sy, button, shift, ctrl))
             return  # the click lands on nothing; no dialog opens
-        original(panel_id, sx, sy, button, shift)
+        original(panel_id, sx, sy, button, shift, ctrl)
 
     town.panel_click = gold_button_misses
     with pytest.raises(TownError, match="gold deposit had no effect"):
@@ -1631,3 +1665,104 @@ def test_deposit_closes_a_stale_stash_then_opens_it_itself(town):
     layer(town).deposit_to_stash(lambda i: True, report)
     assert STASH_POS in town.world_clicks  # opened by us, not inherited
     assert report.deposited == 1
+
+
+# -- the inventory cleanse (R117) -------------------------------------------------
+
+
+def junk_only(item):
+    """A whitelist that recognises nothing: everything non-potion is junk."""
+    return False
+
+
+def test_cleanse_drops_junk_and_stashes_the_rest(town):
+    """Junk goes to the FLOOR, keepers go to the stash — and the whitelist
+    is what tells them apart."""
+    town.inventory = [
+        loot(1, (0, 0), kind=999),  # a keeper (the whitelist says so)
+        loot(2, (1, 0), kind=700),  # junk
+    ]
+    full_belt(town)
+    report = PreambleReport()
+    layer(town, keep_item=lambda item: item.kind == 999).manage_inventory(report)
+    assert [i.kind for i in town.dropped] == [700]
+    assert town.inventory == []
+    assert report.deposited == 1  # the keeper, stashed as usual
+    assert any("cleanse: 1 junk" in line for line in report.log)
+
+
+def test_cleanse_disabled_without_a_whitelist(town):
+    """No whitelist wired (pickit vocabulary still has pending ids): nothing
+    is EVER dropped — everything falls through to the stash as before."""
+    town.inventory = [loot(1, (0, 0), kind=700)]
+    full_belt(town)
+    report = PreambleReport()
+    layer(town).manage_inventory(report)
+    assert town.dropped == []
+    assert report.deposited == 1
+
+
+def test_cleanse_never_drops_potions_or_unmovables(town):
+    """The reserve potions and the Cube survive even a whitelist that
+    recognises nothing: potions are the town loop's business, and the Cube
+    cannot survive the gesture (R67)."""
+    from pd2bot.offsets import UNMOVABLE_KINDS
+
+    cube = sorted(UNMOVABLE_KINDS)[0]
+    town.inventory = [
+        potion(1, 606, cell=(0, 0)),
+        loot(2, (1, 0), kind=cube),
+    ]
+    full_belt(town)
+    report = PreambleReport()
+    layer(town, keep_item=junk_only).manage_inventory(report)
+    assert town.dropped == []
+    kinds_left = sorted(i.kind for i in town.inventory)
+    assert kinds_left == sorted([606, cube])
+
+
+def test_drop_refuses_with_the_stash_open(town):
+    """Gesture meaning depends on open panels (R64): a drop sent with the
+    stash up could quick-move instead. The layer refuses outright."""
+    town.panels.add(offsets.UI_STASH)
+    item = loot(1, (0, 0), kind=700)
+    town.inventory = [item]
+    with pytest.raises(TownError, match="stash open"):
+        layer(town).drop_item(item)
+    assert town.dropped == []
+
+
+def test_a_stuck_drop_alerts_and_leaves_the_item_to_the_stash(town):
+    """Failing to drop junk costs stash space, not correctness: alert,
+    leave it, let the stash phases take it — never halt the preamble over
+    garbage."""
+    town.inventory = [loot(1, (0, 0), kind=700)]
+    town.drop_works = False
+    full_belt(town)
+    report = PreambleReport()
+    layer(town, keep_item=junk_only).manage_inventory(report)
+    assert town.dropped == []
+    assert any("would not drop" in alert for alert in town.alerts)
+    assert town.inventory == []  # the stash phases still took it
+    assert report.deposited == 1
+
+
+def test_cleanse_never_drops_protected_items(town):
+    """The startup baseline is untouchable (R128).
+
+    Several keep-list items can only be CRAFTED, so the whitelist can
+    never learn their ids from a live pickup — and one sitting in the
+    inventory would look exactly like junk. The bot is only ever cleaning
+    up its own accidents, so anything it did not pick up this session is
+    off limits regardless of what the whitelist says.
+    """
+    heirloom = loot(1, (0, 0), kind=9999)  # unrecognised AND irreplaceable
+    accident = loot(2, (1, 0), kind=700)
+    town.inventory = [heirloom, accident]
+    full_belt(town)
+
+    report = PreambleReport()
+    layer(
+        town, keep_item=junk_only, protected_ids=lambda: {1}
+    ).manage_inventory(report)
+    assert [i.kind for i in town.dropped] == [700]  # only the accident fell

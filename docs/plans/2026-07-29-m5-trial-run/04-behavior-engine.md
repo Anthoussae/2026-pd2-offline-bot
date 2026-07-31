@@ -138,3 +138,34 @@ Engine, run loader, ladder, combat protocol, necro config and
 `IdleBail` exist and are thoroughly sim-tested; ADR drafted; nothing
 live was run; tests/lint green. Review gate: none (P5 ends with the
 go/no-go). ADR expectation: **drafted here**, finalized P6.
+
+## Implementation Result
+
+Status: done (sim-only, as scoped)
+Completed: 2026-07-31
+Commit: pending
+
+- Changed: new package `pd2bot/behavior/` (engine, run, reflex, combat,
+  actions, runner), `config/necro.toml`, `runs/cold-plains.toml`, 88 new
+  tests across five `tests/test_behavior_*.py` files, ADR draft
+  `docs/adr/2026-07-29-behavior-architecture.md` (status: proposed).
+- Validated: `pytest -q` 434 passed; `ruff check .` clean. No live run,
+  no input sent — everything against fakes.
+- Deviations, reported:
+  1. **Belt keys follow R53, not this file's rung table.** The table
+     above says heal = key 1 / mana = key 3 (R47.6's original layout);
+     R53 declared the permanent layout mana/rejuv/heal/heal, so the
+     shipped defaults are heal keys 3+4, mana key 1, rejuv key 2 —
+     derived in the loader from `[belt] columns`.
+  2. **IdleBail is a `ChickenExit` subclass** so the untouched cycle
+     leaves the game; runner counts idles separately and halts loudly
+     at 2 consecutive. Wrinkle: the cycle's chicken counter also sees
+     idle bails (mixed sequences can halt with the vitals message).
+     Clean fix needs one line in cycle.py — deferred to the P5 gate
+     (R115).
+  3. Added `actions.py` (action vocabulary + executor protocol) and
+     `runner.py` (callback boundary) beyond the four planned modules —
+     structural seams, no scope added.
+  4. Rung 8's armor recast is allowed in town (`armor_in_town = true`):
+     castable there (P2 live), and arriving armored is strictly better.
+     Desecrate/revive delegation stays out-of-town only per R47.4.

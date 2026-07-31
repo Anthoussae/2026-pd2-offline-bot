@@ -1,0 +1,157 @@
+# The poison dagger necromancer — everything class-specific in one file.
+#
+# This file is meant to be READ AND TUNED BY A HUMAN (R46 Q3). Every number
+# here was user-approved at R49 (with the R53 belt layout and the 15 s mana
+# cooldown amendment); change them here, never in code. The loader refuses
+# unknown keys loudly, so a typo fails at startup instead of silently
+# defaulting mid-run.
+
+name = "necromancer"
+
+# Skill ids as captured LIVE from this character (P1 drill A, R52). These
+# are PD2's ids, which differ from classic D2 in places (blood warp 367,
+# desecrate 83 in a classic slot).
+[skills]
+poison_strike = 73 # the permanent left skill; offense never switches (R47)
+bone_armor = 68
+blood_warp = 367
+tp_tome = 220      # bound but unused in M5
+bone_wall = 78     # bound but unused in M5
+desecrate = 83
+revive = 95
+
+# Right-skill hotkeys as bound in the client (R47.1). If the in-game
+# bindings change, change these to match — the bot presses these keys and
+# then VERIFIES the switch from memory before any cast (skills.py).
+[hotkeys]
+bone_armor = "F1"
+blood_warp = "F2"
+tp_tome = "F3"
+bone_wall = "F4"
+desecrate = "F5"
+revive = "F6"
+
+# The PERMANENT belt layout (user declaration, R53 — supersedes R47.6):
+# key 1 mana, key 2 rejuv, keys 3+4 healing. Columns are listed left to
+# right; the drink keys are the column number plus one. The minimums are
+# the town layer's loud-halt floor after a refill (R48: no vendor UI —
+# below minimum means halt for a manual restock).
+[belt]
+columns = ["mana", "rejuv", "healing", "healing"]
+min_healing = 4
+min_mana = 2
+min_rejuv = 0 # rejuvs cannot be bought; advisory only (R47.6)
+
+# The survival reflex ladder (R49). Rungs, top priority first:
+#   1 death latch, 2 chicken     -> SafetyMonitor's, not the ladder's
+#   3 rejuv, 4 blood warp, 5 heal potion, 6 mana potion,
+#   7 disengage, 8 upkeep        -> the ladder's, numbers below
+# The ladder only runs OUT of town (town guards read as monsters to
+# perception, and drink rules are out-of-town only) — except the armor
+# recast, see armor_in_town.
+[reflex]
+# Rung 2 — the chicken threshold. Listed here because the user tunes it
+# with the rest, but it is enforced by SafetyMonitor, not the ladder.
+chicken_life_pct = 35.0
+
+# Rung 3 — rejuv: below this hp%, drink the rejuv column (no cooldown).
+# With the column EMPTY and this many hostiles this close, escalate
+# straight to blood warp.
+rejuv_below_pct = 50.0
+escalate_hostiles = 2
+escalate_radius = 10
+
+# Rung 4 — blood warp, escape only, never traversal (R47.3). Trigger:
+# packed in (warp_hostiles within warp_radius AND hp below warp_hp_pct),
+# or burst down (more than warp_loss_pct of max hp lost within
+# warp_loss_window_s). Guards: the cast costs 10 mana and
+# max(warp_cost_pct of max hp, warp_cost_floor) hp — never cast without
+# warp_min_mana mana or with hp at or below twice the hp cost.
+warp_hostiles = 4
+warp_radius = 8
+warp_hp_pct = 60.0
+warp_loss_pct = 25.0
+warp_loss_window_s = 2.0
+warp_min_mana = 10
+warp_cost_pct = 12.0
+warp_cost_floor = 12
+# The warp's own cooldown is unknown-length, so it is verified by effect:
+# an attempt that moved the player warp_verify_move subtiles landed; until
+# then, re-casts are blocked for warp_retry_s.
+warp_verify_move = 10
+warp_retry_s = 2.0
+# Where to flee: a walkable spot this far from the hostile centroid.
+retreat_distance = 20
+# Which skills the two casting rungs use (names from [skills] above).
+escape_skill = "blood_warp"
+armor_skill = "bone_armor"
+
+# Rung 5 — healing potion: below this hp%, drink a healing column, at
+# most once per heal_cooldown_s. The second healing column is the backup.
+heal_below_pct = 100.0
+heal_cooldown_s = 10.0
+
+# Rung 6 — mana potion: below this mana%, at most once per
+# mana_cooldown_s (15 s — the R49 amendment; was proposed at 5).
+mana_below_pct = 25.0
+mana_cooldown_s = 15.0
+
+# Rung 7 — disengage: bone armor down AND still on recast cooldown AND hp
+# below this: retreat from the pack instead of trading hits unarmored.
+disengage_hp_pct = 70.0
+
+# Rung 8 — upkeep: recast bone armor when its remaining absorb falls
+# below armor_recast_below_pct (fallback when the stat is unreadable:
+# recast after being hit, R47.2). armor_retry_s paces attempts, since the
+# real cooldown cannot be read. armor_in_town lets the recast happen in
+# town too (castable there, proven live in P2; arriving armored is
+# strictly better). Desecrate/revive upkeep is the combat module's and
+# never runs in town (R47.4).
+armor_recast_below_pct = 75.0
+armor_retry_s = 2.0
+armor_in_town = true
+
+# The skirmish pattern, in the user's own words (R47.2): "on contact, wait
+# briefly for revives to engage -> dash in -> left-click the monster ->
+# run back out of danger -> recast bone armor if low -> repeat until the
+# pack is dead." The numbers below are the parts that description leaves
+# open; they are judgment calls, tune them freely.
+#
+# Offense itself has no knobs: the left skill is permanently Poison
+# Strike, so an attack is a left-click on the monster (R47.1).
+[combat]
+# Hostiles within engage_radius mean "we are in a fight". melee_range is
+# close enough to strike. The dash happens in hops of at most dash_step
+# subtiles rather than one long walk — a blocking walk into a pack is
+# time the survival ladder is NOT being consulted, and the ladder is what
+# keeps this character alive.
+engage_radius = 40
+melee_range = 3
+dash_step = 8
+# How far back out of the pack after each strike.
+retreat_subtiles = 12
+# Poison does the killing, so a struck monster is already dying: prefer
+# fresh targets and only re-hit a survivor after this long.
+restrike_s = 6.0
+
+# Revives as aggro tanks. On contact, hold up to wait_for_revives_s for
+# them to get in front — the wait ends early once one of them is within
+# revive_engaged_range of a hostile, since it is waiting for them to
+# TANK, not waiting out a timer.
+wait_for_revives_s = 1.5
+revive_engaged_range = 8
+# Keep this many revives up (R47.4). They last ~300 s; the count is
+# re-checked every tick, so expiry heals itself.
+revive_target = 3
+# Corpses this close count as revive fuel.
+revive_search_radius = 15
+# Desecrate makes corpses. Bounded: if it produces none (nothing died
+# nearby, skill on cooldown), stop after this many rounds rather than
+# recasting forever — every one of those ticks is a tick not fighting.
+# The settle delays stop the bot re-casting before the last cast resolved.
+desecrate_rounds = 2
+desecrate_settle_s = 1.0
+revive_settle_s = 0.6
+# Which skills the maintenance uses (names from [skills] above).
+desecrate_skill = "desecrate"
+revive_skill = "revive"

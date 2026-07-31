@@ -1,0 +1,115 @@
+# Item ids learned after item_ids.toml was written; merged over its
+# [pending] list at load time. Machine-generated - do not hand-edit.
+#
+# Codes read live from the game's item table (T42). Each name binds to
+# BOTH the classic record and PD2's `s`-suffixed one, because PD2
+# carries both and it is the `s` family that drops - established when
+# T39's first two items came back as r15s (Hel rune, kind 713) and
+# gpbs (Perfect Sapphire, kind 690) against a first pass that had
+# bound those names to the classic 639 and 586 (R126). Binding both is
+# safe: an item is one record or the other, never both.
+
+[verified]
+amulet = 535 # amu
+ring = 537 # rin
+flawless_amethyst = [575, 685] # gzv + gzvs
+perfect_amethyst = [576, 686] # gpv + gpvs
+flawless_topaz = [580, 687] # gly + glys
+perfect_topaz = [581, 688] # gpy + gpys
+flawless_sapphire = [585, 689] # glb + glbs
+perfect_sapphire = [586, 690] # gpb + gpbs
+flawless_emerald = [590, 691] # glg + glgs
+perfect_emerald = [591, 692] # gpg + gpgs
+flawless_ruby = [595, 693] # glr + glrs
+perfect_ruby = [596, 694] # gpr + gprs
+flawless_diamond = [600, 695] # glw + glws
+perfect_diamond = [601, 696] # gpw + gpws
+flawless_skull = [615, 697] # skl + skls
+perfect_skull = [616, 698] # skz + skzs
+small_charm = 618 # cm1
+large_charm = 619 # cm2
+grand_charm = 620 # cm3
+el_rune = [625, 699] # r01 + r01s
+eld_rune = [626, 700] # r02 + r02s
+tir_rune = [627, 701] # r03 + r03s
+nef_rune = [628, 702] # r04 + r04s
+eth_rune = [629, 703] # r05 + r05s
+ith_rune = [630, 704] # r06 + r06s
+tal_rune = [631, 705] # r07 + r07s
+ral_rune = [632, 706] # r08 + r08s
+ort_rune = [633, 707] # r09 + r09s
+thul_rune = [634, 708] # r10 + r10s
+amn_rune = [635, 709] # r11 + r11s
+sol_rune = [636, 710] # r12 + r12s
+shael_rune = [637, 711] # r13 + r13s
+dol_rune = [638, 712] # r14 + r14s
+hel_rune = [639, 713] # r15 + r15s
+io_rune = [640, 714] # r16 + r16s
+lum_rune = [641, 715] # r17 + r17s
+ko_rune = [642, 716] # r18 + r18s
+fal_rune = [643, 717] # r19 + r19s
+lem_rune = [644, 718] # r20 + r20s
+pul_rune = [645, 719] # r21 + r21s
+um_rune = [646, 720] # r22 + r22s
+mal_rune = [647, 721] # r23 + r23s
+ist_rune = [648, 722] # r24 + r24s
+gul_rune = [649, 723] # r25 + r25s
+vex_rune = [650, 724] # r26 + r26s
+ohm_rune = [651, 725] # r27 + r27s
+lo_rune = [652, 726] # r28 + r28s
+sur_rune = [653, 727] # r29 + r29s
+ber_rune = [654, 728] # r30 + r30s
+jah_rune = [655, 729] # r31 + r31s
+cham_rune = [656, 730] # r32 + r32s
+zod_rune = [657, 731] # r33 + r33s
+jewel = 658 # jew
+
+# -- approved by the user at R128 (option A review table) ----------
+# Codes read live from the game's table; names paired from the
+# filter's own cube-recipe text and from block position, then
+# reviewed row by row.
+
+archon_plate = 456 # utp, R128 approved
+balrog_skin = 455 # uar, R128 approved
+black_soulstone = 735 # dcho, R128 approved
+bloodlord_skull = 520 # nef, R128 approved
+bone_knife = 235 # 7dg, R128 approved
+bone_visage = 478 # uh9, R128 approved
+cantor_trophy = 499 # ne9, R128 approved
+chaos_armor = 444 # ula, R128 approved
+cinquedeas = 134 # 9kr, R128 approved
+dusk_shroud = 443 # uea, R128 approved
+flesh_of_malic = 782 # lmal, R128 approved
+gold = 538 # gld, R128 approved
+heavy_bracers = 464 # uvg, R128 approved
+hellfire_ashes = 787 # cm2f, R128 approved
+hellspawn_skull = 517 # neg, R128 approved
+key_of_destruction = 664 # pk3, R128 approved
+key_of_hate = 663 # pk2, R128 approved
+key_of_terror = 662 # pk1, R128 approved
+kraken_shell = 445 # utu, R128 approved
+larzuks_puzzlebox = 684 # lbox, R128 approved
+larzuks_puzzlepiece = 778 # lpp, R128 approved
+liliths_mirror = 770 # llmr, R128 approved
+minion_skull = 516 # neb, R128 approved
+mithril_coil = 475 # umc, R128 approved
+overseer_skull = 518 # ned, R128 approved
+prime_evil_soul = 736 # dcso, R128 approved
+pure_demonic_essence = 734 # dcbl, R128 approved
+relic_of_the_ancients = 769 # uba, R128 approved
+sacred_armor = 454 # uul, R128 approved
+shadow_plate = 462 # uts, R128 approved
+shako = 435 # uap, R128 approved
+sigil_of_korlic = 774 # ubac, R128 approved
+sigil_of_madawc = 772 # ubaa, R128 approved
+sigil_of_talic = 773 # ubab, R128 approved
+skeleton_key = 779 # rkey, R128 approved
+spiderweb_sash = 473 # ulc, R128 approved
+splinter_of_the_void = 766 # rtmv, R128 approved
+succubus_skull = 519 # nee, R128 approved
+tainted_worldstone_shard = 758 # cwss, R128 approved
+trang_ouls_jawbone = 761 # rtmo, R128 approved
+troll_belt = 476 # utc, R128 approved
+vial_of_lightsong = 771 # lsvl, R128 approved
+wire_fleece = 447 # ucl, R128 approved
+worldstone_shard = 674 # wss, R128 approved

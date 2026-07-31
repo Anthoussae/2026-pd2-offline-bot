@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ctypes
 import struct
+from dataclasses import dataclass
 
 import pymem
 import pymem.exception
@@ -19,6 +20,75 @@ import pymem.process
 PROCESS_NAME = "Game.exe"
 CLIENT_MODULE = "d2client.dll"
 WIN_MODULE = "d2win.dll"  # owns the out-of-game menu controls (M4)
+
+# --- content scanning (the differential-scan instrument) --------------------
+#
+# Every address this bot reads was derived from a *citation* — a BH offset, or
+# a function's own machine code (uistate.find_ui_array). That works while BH
+# knows about the thing. It does not work for state BH never needed to export,
+# and the in-game chat line is the first such case (M5P3 follow-up): BH runs
+# in-process and simply never had to find the buffer, so there is no offset to
+# cite and nothing to parse.
+#
+# The remaining move is the one uistate's docstring already names as the
+# fallback — a differential scan — but by CONTENT rather than by code: put a
+# known rare string into the game, find where it landed, then prove the
+# address by watching a second string appear at the same place. That is a
+# calibration instrument, not a runtime path: nothing in the bot may scan
+# memory in a loop. It produces an address, which then gets a citation of its
+# own (the drill that found it) and lives in offsets.py like everything else.
+
+MEM_COMMIT = 0x1000
+PAGE_GUARD = 0x100
+PAGE_NOACCESS = 0x01
+# Protections that permit a read. Anything else (NOACCESS, execute-only) is
+# skipped rather than attempted: a failed ReadProcessMemory costs a syscall
+# per region and tells us nothing.
+_READABLE = frozenset({0x02, 0x04, 0x20, 0x40, 0x80})  # R, RW, XR, XRW, XWC
+
+_CHUNK = 4 * 1024 * 1024
+
+
+class _MEMORY_BASIC_INFORMATION(ctypes.Structure):
+    """Laid out for OUR bitness, not the target's.
+
+    Python here is 64-bit and the D2 client is 32-bit, which is fine —
+    VirtualQueryEx fills in the caller's struct — but it means the pointer
+    fields must be `c_void_p`/`c_size_t` so ctypes inserts the 64-bit
+    padding. Hardcoding DWORDs would silently misparse every region.
+    """
+
+    _fields_ = [
+        ("BaseAddress", ctypes.c_void_p),
+        ("AllocationBase", ctypes.c_void_p),
+        ("AllocationProtect", ctypes.c_ulong),
+        ("RegionSize", ctypes.c_size_t),
+        ("State", ctypes.c_ulong),
+        ("Protect", ctypes.c_ulong),
+        ("Type", ctypes.c_ulong),
+    ]
+
+
+@dataclass(frozen=True)
+class Region:
+    """One committed, readable span of the target's address space."""
+
+    base: int
+    size: int
+    protect: int
+
+    @property
+    def end(self) -> int:
+        return self.base + self.size
+
+
+@dataclass(frozen=True)
+class Module:
+    """A loaded module's runtime span, for naming a raw address."""
+
+    name: str
+    base: int
+    size: int
 
 
 class GameNotRunning(RuntimeError):
@@ -140,3 +210,90 @@ class GameSession:
         """Unpack a little-endian struct in one read (cheaper than field-by-field)."""
         fmt = fmt if fmt.startswith("<") else "<" + fmt
         return struct.unpack(fmt, self._pm.read_bytes(address, struct.calcsize(fmt)))
+
+    # -- scanning (calibration only — never in a runtime loop) --------------
+
+    def modules(self) -> list[Module]:
+        """Every loaded module with its runtime span."""
+        found = []
+        for module in pymem.process.enum_process_module(self._pm.process_handle):
+            name = module.name
+            if isinstance(name, bytes):
+                name = name.decode(errors="replace")
+            found.append(Module(name, module.lpBaseOfDll, module.SizeOfImage))
+        return found
+
+    def describe(self, address: int, modules: list[Module] | None = None) -> str:
+        """Name an address: 'D2Client.dll+0x11BBFC' when it sits in a module.
+
+        An address inside a module is a candidate for a durable offset — it
+        is the same distance from the base on every launch. A heap address
+        is not, and saying so plainly is the difference between a finding
+        and a coincidence.
+        """
+        for module in modules if modules is not None else self.modules():
+            if module.base <= address < module.base + module.size:
+                return f"{module.name}+{address - module.base:#x}"
+        return f"heap:{address:#x}"
+
+    def regions(self) -> list[Region]:
+        """Walk the target's committed, readable address space."""
+        info = _MEMORY_BASIC_INFORMATION()
+        size = ctypes.sizeof(info)
+        found: list[Region] = []
+        address = 0
+        # A 32-bit target's user space stops at 4GB even when we are 64-bit.
+        limit = 0x1_0000_0000
+        while address < limit:
+            if not ctypes.windll.kernel32.VirtualQueryEx(
+                self._pm.process_handle,
+                ctypes.c_void_p(address),
+                ctypes.byref(info),
+                size,
+            ):
+                break
+            base, length = info.BaseAddress or 0, info.RegionSize
+            if length == 0:
+                break
+            if (
+                info.State == MEM_COMMIT
+                and not info.Protect & PAGE_GUARD
+                and info.Protect & 0xFF in _READABLE
+            ):
+                found.append(Region(base, length, info.Protect))
+            address = base + length
+        return found
+
+    def search(self, needle: bytes, *, limit: int = 500) -> list[int]:
+        """Every address holding `needle`, oldest region first.
+
+        Read in overlapping chunks so a match straddling a chunk boundary is
+        still found — the one bug that would make this instrument lie by
+        omission, and the failure it would produce ("the text is not in
+        memory") is exactly the conclusion we must not reach wrongly.
+        """
+        if not needle:
+            raise ValueError("refusing to scan for an empty needle")
+        overlap = len(needle) - 1
+        hits: list[int] = []
+        for region in self.regions():
+            offset = 0
+            while offset < region.size:
+                span = min(_CHUNK, region.size - offset)
+                try:
+                    data = self._pm.read_bytes(region.base + offset, span)
+                except Exception:
+                    break  # region changed under us; the next one is fine
+                start = 0
+                while True:
+                    index = data.find(needle, start)
+                    if index == -1:
+                        break
+                    hits.append(region.base + offset + index)
+                    if len(hits) >= limit:
+                        return hits
+                    start = index + 1
+                if span < _CHUNK:
+                    break
+                offset += _CHUNK - overlap
+        return hits

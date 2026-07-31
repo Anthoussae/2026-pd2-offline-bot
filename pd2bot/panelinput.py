@@ -47,6 +47,7 @@ from pd2bot.input import (
     _MOUSE_RIGHTDOWN,
     _MOUSE_RIGHTUP,
     _PRE_CLICK_PAUSE_S,
+    VK_CONTROL,
     VK_SHIFT,
     InputRefused,
     _send_key,
@@ -132,6 +133,7 @@ class PanelInput:
         button: str = "left",
         *,
         shift: bool = False,
+        ctrl: bool = False,
         move_settle_s: float | None = None,
     ) -> None:
         """Guarded click at absolute screen coordinates inside a named panel.
@@ -143,6 +145,15 @@ class PanelInput:
         a normal click may take a slower one. Exposed rather than raised
         blindly because a longer pause costs real time on every click; the
         T24 battery measures which controls actually need it.
+
+        Modifiers (`shift` moves items, `ctrl`+right DROPS them — R117) are
+        settled a frame on each side of the click: a modifier sent in the
+        SAME frame as its click is a race the game can resolve as an
+        unmodified click, which is how a Tome of Identify got USED instead
+        of stashed (R113). For ctrl the unmodified reading is worse — a
+        plain right-click on a potion drinks it — so the discipline is not
+        optional. Releases are in a `finally`, so no failure can leave a
+        modifier stuck down for input that comes later.
         """
         self.check(expected_panel, sx, sy)
         down, up = (
@@ -153,19 +164,17 @@ class PanelInput:
         user32.SetCursorPos(sx, sy)
         time.sleep(_PRE_CLICK_PAUSE_S if move_settle_s is None else move_settle_s)
         self.check(expected_panel, sx, sy)  # the panel may have closed under us
-        if shift:
-            # Settle a frame on each side of the click: shift and click in
-            # the SAME frame is a race the game can resolve as an unmodified
-            # click — which USED a Tome of Identify instead of stashing it
-            # (R113). See _MODIFIER_SETTLE_S in input.py.
-            _send_key(VK_SHIFT, 0)
+        modifiers = [vk for vk, held in ((VK_SHIFT, shift), (VK_CONTROL, ctrl)) if held]
+        for vk in modifiers:
+            _send_key(vk, 0)
+        if modifiers:
             time.sleep(_MODIFIER_SETTLE_S)
         try:
             _send_mouse_flag(down)
             time.sleep(_CLICK_HOLD_S)
             _send_mouse_flag(up)
-            if shift:
+            if modifiers:
                 time.sleep(_MODIFIER_SETTLE_S)
         finally:
-            if shift:
-                _send_key(VK_SHIFT, _KEY_UP)
+            for vk in reversed(modifiers):
+                _send_key(vk, _KEY_UP)

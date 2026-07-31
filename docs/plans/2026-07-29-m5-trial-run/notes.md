@@ -575,3 +575,216 @@ as healing would make the heal rung a no-op).
   (user decision, M4).
 - Stat-based `.nip`-style pickit language — M6, with item stat
   perception to match.
+
+## P4 build notes (2026-07-31, sim-only)
+
+Built as planned: `pd2bot/behavior/` (ticked engine, TOML runs over a
+step registry, the R49 ladder, the class-agnostic combat protocol,
+declarative actions + executor seam, the runner at the callback
+boundary), `config/necro.toml`, `runs/cold-plains.toml`, 88 tests
+(434 total, ruff clean). ADR drafted (proposed):
+`docs/adr/2026-07-29-behavior-architecture.md`. Nothing live was run.
+
+Decisions worth carrying to P5:
+
+- **The phase file's rung table carried stale belt keys.** It kept
+  R47.6's heal-on-key-1 layout; R53's permanent declaration (mana 1,
+  rejuv 2, heal 3+4) governs, and the loader *derives* the ladder's
+  columns from `[belt] columns` so the layout has one source of truth.
+- **IdleBail rides the ChickenExit path** (subclass) because cycle.py
+  is frozen in P4: the unmodified cycle leaves the game, the runner
+  counts idles separately (2 consecutive -> loud `IdleLoopHalt`).
+  Wrinkle: the cycle's own chicken counter also counts an idle bail, so
+  a mixed chicken-then-idle pair can halt with the vitals message (the
+  per-game `chicken:` line still names the idle bail). One-line
+  cycle.py fix possible; decision deferred to the P5 gate (R115).
+- **Town suppression is load-bearing, not cosmetic**: town guards
+  without an alignment stat read as monsters (P1 drill D), so any
+  hostile-count trigger evaluated in town counts bystanders. Rungs 3-7
+  are hard-suppressed in town; the armor recast is the one
+  town-permitted rung (`armor_in_town`); desecrate/revive delegation is
+  out-of-town only (R47.4).
+- **Blood warp is position-verified** (trust-nothing applied to an
+  unreadable cooldown): an attempt records where the player stood; a
+  later evaluation that finds them >= `warp_verify_move` away counts it
+  landed, otherwise re-casts are blocked for `warp_retry_s`.
+- **P5 seams**: `ActionExecutor` (actions -> gated input, verified
+  switches), the five step factories (`build_states` refuses to build
+  over a declared-but-unimplemented step), the necro `CombatModule`
+  (`[combat]` in necro.toml grows with it), and wiring
+  `chicken_life_pct` = 35 into `SafetyConfig` at cycle assembly.
+- The bone-armor stat read has a real helper (`reflex.read_armor_ratio`,
+  stats 132/133) plus the R47-approved fallback (recast after being
+  hit) when it reads None — P6 stage B still owes the falls-when-hit
+  live check.
+
+## P5 build notes (2026-07-31, sim-only)
+
+Combat, pickit and the run steps built; 90 new tests (524 total, ruff
+clean); gate artifact `p5-sim-trace.md`. Nothing live was run.
+
+**The sim earned its keep on day one.** It was built to be able to say
+no — poison kills over time rather than on the strike, corpses appear
+only where something died, one item can never be picked up, and a
+hotkey press is a request the fake grants rather than an effect — and
+it immediately found two defects that unit tests had all passed over:
+
+- **Blood warp re-triggered itself.** The warp costs 12% of max hp; on
+  the next tick that self-inflicted loss read as more incoming burst
+  damage, so the escape rung fired again. One escape, two casts, 240 hp.
+  The ladder now clears its hp-sample window when it issues a warp. The
+  general shape is worth remembering: *a reflex whose action changes the
+  same signal it triggers on will oscillate unless it forgets.*
+- **Two steps, two memories, double the wasted clicks.** Clearance and
+  the sweep both pick loot up, and each kept its own attempt counter, so
+  the sweep re-attempted an item clearance had already written off. This
+  is exactly P3's asymmetry lesson (heal retried a missed click, repair
+  did not) reappearing in new code. Fixed by moving the bookkeeping to
+  the shared `RunServices`.
+
+Design decisions worth carrying to P6:
+
+- **The dash is short hops, not one walk.** `walk_to` blocks, so a
+  single walk into a pack is a stretch with no ladder evaluation. Each
+  approach moves at most `dash_step` (8) subtiles, so the engine ticks
+  and the ladder looks between them. This is the one place where the
+  ticked design visibly beats a procedural one.
+- **Two blocking steps remain** (`town_preamble`, `waypoint`) and that
+  is deliberate: the layers beneath them are already written blocking
+  and live-proven, and both run where the ladder has nothing to say
+  (town; a loading screen). Everything that happens in Hell is ticked.
+- **The pickit cannot lie about what it can see.** Rules speak of item
+  kind and quality only, because that is all `GroundItem` carries.
+  Stat-based rules need M6's item-stat perception.
+- **Gold's kind is still unverified** (523, inherited from kolbot). The
+  shipped rule may never fire; the file says so. First live pickup
+  drill settles it — worth an explicit check in P6 stage C.
+- The `[combat]` config numbers are all judgment calls where R47 left a
+  word rather than a number ("briefly", "dash in", "run back out"); the
+  user should skim them at the gate.
+
+## P5b — the R117 amendment (2026-07-31, sim-side complete)
+
+At the P5 gate the user answered with the REAL pickup spec rather than a
+go/no-go (R117; clarifications R118, all five answered same-day). Built
+and tested (546 tests, ruff clean); two read-only drills remain (R119).
+The phase file is `05b-real-pickit-and-hygiene.md`; key decisions:
+
+- **The vocabulary is data with provenance.** ~100 item names in
+  `config/item_ids.toml`, most PENDING until the T39 placement drill
+  reads each id from the live game. PD2's kind renumbering (R54) is why
+  nothing inherited is trusted: classic rune ids (El = 610) literally
+  collide with PD2's observed mana potions (610/611), so kolbot tables
+  are provably wrong here. T39 appends to `item_ids.learned.toml`;
+  the loader merges, and contradictions are loud.
+- **Unresolved names fail SAFE in both directions.** Pickup (strict
+  mode): a rule naming a pending id matches nothing — an unpicked item
+  costs nothing. Cleanse (permissive mode + `cleanse_keep`): dropping
+  is disabled OUTRIGHT while any keep-rule has pending names — a
+  whitelist that cannot recognise a Worldstone Shard must never throw
+  one away.
+- **Potion protocol v2**: belt first, inventory reserve of 2 per type,
+  ALL excess drunk (rejuvs included — R118 Q2 retires R75's
+  rejuvs-are-materials), and potions never offered to the stash (the
+  materials tab would ACCEPT a rejuv, so the exclusion is explicit).
+- **The drop gesture inherits every input lesson at once**: ctrl
+  settled both sides of the click (R113 — an unmodified right-click
+  DRINKS a potion), refused while the stash is open (R64 — gesture
+  meaning depends on panels), verified by the item leaving the
+  inventory, alert-and-continue when stuck (junk is not worth halting
+  over).
+- **The field cleanse runs only in dead air**: queued by a failed
+  pickup, executed when no live hostile is within 40 subtiles, never
+  in town (the preamble has its own pass). A cleanse that freed space
+  gives written-off pickups one more bounded round — the sim's trace
+  shows exactly this sequence (junk at t10, cleansed after the last
+  death, the stuck unique retried and re-written-off).
+- **No gold rule**: the R117 list omits gold (PD2 may auto-pick it);
+  noted in the pickit file with a one-line recipe to re-add.
+
+Follow-ups riding to P6: verify gold's kind on a live drop; verify the
+drop gesture by effect in town (stage A); wire `cleanse_keep` and
+`belt_capacity` at assembly. The teach step for this stretch lands with
+the P5b close-out (after the drills), not before.
+
+## The item-code table (T42, 2026-07-31) — the Rosetta stone
+
+The user pointed at their loot filter as a naming source (R125). It is
+not one, quite — the filter speaks D2 *codes* (`9kr`, `uap`) while
+perception reads numeric kinds — but chasing that gap found something
+better, and it retires most of T39.
+
+**`dwTxtFileNo` is an index into the game's own item-record array.**
+Each record carries the item's code, so that array converts everything
+we can read into something a human (or a filter) can name.
+
+Located WITHOUT an offset, which matters because the array is on the
+heap and moves every launch:
+
+- 533 (`tbk`) and 534 (`ibk`) are ADJACENT indices, so the distance
+  between those two strings in memory *is* the record stride. Derived,
+  not guessed — the first attempt guessed 29 plausible strides and
+  matched none of them.
+- 564 (`box`) must then also land correctly at that stride. Three
+  simultaneous anchors is not something coincidence supplies.
+- Four bases fit, because each record repeats the code four times over
+  (code / normcode / ubercode / ultracode). They are separated
+  **structurally**: only the true code column contains ELITE codes
+  (`uap` Shako, `utp` Archon Plate) — a normcode column holds base-item
+  codes exclusively, because that is what a normcode is. Index 93 shows
+  it plainly: code `9ha` (exceptional Hand Axe) against normcode `hax`.
+
+The fit was then scored against six ids verified by earlier, unrelated
+work: index 0 = `hax` (the first record in the game's own ordering),
+530/531 = `rvs`/`rvl`, 606 = `hp5`, 610/611 = `mp4`/`mp5`. All six agree.
+T42 re-runs the whole derivation and re-checks those six, so a season
+patch that moves item numbering fails loudly instead of silently.
+
+**What it bought.** 53 of T39's ~100 names resolved mechanically: all 33
+runes (`r01`-`r33`, one contiguous block at 625-657), the gem blocks
+(five grades per type, five consecutive records each — note only
+amethyst uses `gz` for flawless, the rest use `gl`, a real D2 quirk),
+skulls, charms, jewellery. Written to `config/item_ids.learned.toml`
+with provenance; the remaining 53 (named elite bases, PD2's custom
+quest/map items, gold) stay pending for T39.
+
+**The honest limit.** Codes are read live; the *name*↔*code* pairing for
+those 53 is reference knowledge, corroborated three ways (block
+contiguity, the verified potions sitting inside the same blocks, the
+rune block being exactly 33 records). The one error it could plausibly
+make is systematic — a whole block off by one, or a family mislabelled —
+so T39 spot-checks a sample. A single rune and a single gem confirmed
+live rules that out; that is precisely the "spot-verify a sample" the
+user approved at R118 Q4.
+
+## The vocabulary is closed (R127/R128, 2026-07-31)
+
+105 names, zero pending, and the inventory cleanse gate opened by
+itself. Three things are worth carrying forward.
+
+**The filter names items through their cube recipes.** Not through
+comments (those proved noisy — a "Troll Belt" comment matched code
+`rbe` off an unrelated token) but through the crafting text the user
+sees on the ground: every rune reads "3x Hel + Key = Io", so `r15s` is
+Hel; every quest item lists the OTHER TWO ingredients of its recipe, so
+it is the one missing from its own tooltip. `pk1` says it needs "Key of
+Hatred & Key of Destruction" and is therefore the Key of Terror. That
+turned an unanswerable naming problem into an almost mechanical one,
+and it is a source worth re-reading whenever PD2 adds items.
+
+**Craft-only items are not "unresolved", they are out of scope.** The
+user pointed out the nine names nothing could find can only be cubed,
+never dropped. A pickup rule for them could never fire, and leaving
+them pending would have held the cleanse disabled forever over items
+that cannot appear on the ground. They are retired to a documented
+block in `item_ids.toml` rather than deleted.
+
+**That same remark exposed a hole worth more than the nine names.** An
+item that can only be crafted can never teach the whitelist its id from
+a live pickup — so one sitting in the inventory looks exactly like junk,
+and the cleanse would drop it. The fix is not more ids: the cleanse
+exists to clean up the bot's OWN accidents, so it now refuses to drop
+anything the bot was already carrying at startup
+(`TownLayer(protected_ids=...)`). The baseline needs no vocabulary at
+all, which is why it closes the hole completely rather than narrowing
+it. P6 wires it from the first snapshot of the session.

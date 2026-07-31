@@ -209,6 +209,11 @@ class GroundItem:
     kind: int  # dwTxtFileNo — which item type
     position: tuple[int, int]
     quality: int
+    # Socket count from the item's stat list, or None when the item has no
+    # such stat (most items) or the read failed. The stat id is UNVERIFIED
+    # until the T38 drill (offsets.STAT_NUM_SOCKETS) — consumers must treat
+    # None as "unknown", never as zero.
+    sockets: int | None = None
 
     @property
     def quality_name(self) -> str:
@@ -301,11 +306,16 @@ def _read_ground_item(session: GameSession, unit: int) -> GroundItem | None:
     position = unit_position(session, unit, offsets.UNIT_TYPE_ITEM)
     if position is None:
         return None
+    # The socket count rides along from the item's stat list because the
+    # pickit needs it (R117: "3-socket archon plate"). One extra stats read
+    # per nearby ground item; items on screen number in the dozens at worst.
+    stats = read_stats(session, unit)
     return GroundItem(
         unit_id=session.u32(unit + offsets.UNIT_ID),
         kind=session.u32(unit + offsets.UNIT_TXT_FILE_NO),
         position=position,
         quality=session.u32(data + offsets.ITEM_QUALITY),
+        sockets=stats.get(offsets.STAT_NUM_SOCKETS),
     )
 
 

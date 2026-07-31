@@ -1,9 +1,10 @@
-# Resume point — M5 P3, mid live-verification
+# Resume point — M5, P4/P5/P5b built; drills + gate before P6
 
-Written 2026-07-30 at a conversation handoff. Read this plus
-[notes.md](notes.md) (the "Town-layer live campaign" section especially)
-and you have the state; `docs/instruction-log.md` R63–R82 and
-`docs/drill-log.md` carry the detail.
+Written 2026-07-31. Read this plus [notes.md](notes.md) ("P4 build
+notes", "P5 build notes", "P5b — the R117 amendment") and you have the
+state; the gate artifact is [p5-sim-trace.md](p5-sim-trace.md), the
+architecture is in `docs/adr/2026-07-29-behavior-architecture.md`, and
+R115/R116/R119 are open in `docs/instruction-log.md`.
 
 ## Where the milestone is
 
@@ -13,54 +14,80 @@ M5 = the first end-to-end run (Cold Plains clearance, Hell). Phases:
 |---|---|
 | P1 perception extensions | **done**, live-verified |
 | P2 input extensions | **done**, live-verified |
-| P3 town layer + waypoint | **COMPLETE** (gate approved R114; commit cb63b67) |
-| P4 behaviour engine | **next** — sim-only | ← here
-| P5 combat + pickit | not started |
-| P6 staged live acceptance | not started |
+| P3 town layer + waypoint | **done** (gate R114; commit cb63b67) |
+| P4 behaviour engine | **done** (sim-only) |
+| P5 combat + pickit | **done** (sim-only) |
+| P5b real pickit + hygiene (R117) | **sim-side done** — drills R119 pending | ← here
+| P6 staged live acceptance | blocked on the R116 gate re-ask |
 
-`346 tests, ruff clean.` P3 is committed and pushed: `cb63b67` on
-branch `m5-trial-run`.
+`546 tests, ruff clean.` Nothing since cb63b67 is committed (no commit
+was requested).
 
-## The immediate next actions
+## THE BLOCKERS, in order
 
-**P3 is functionally complete.** Every town step, the waypoint round
-trip, and the full R75 inventory loop (belt-fill, drink, materials,
-regular, gold — all live-proven, T35/T37) run through the production
-`run_preamble`, which is now heal -> repair -> manage_inventory -> merc
-and takes no keep-predicate: the game classifies the items. Full
-coverage was demonstrated across a halted run and its resume (T27 runs
-136+137, one staged world): heal, repair, belt, drink, deposits, the
-Tome of Identify, gold, merc — and the halt/resume pair incidentally
-proved the preamble is resumable, since every step is conditional on
-the world rather than on a checklist.
+1. **R119 (execute)**: the two read-only discovery drills over the
+   bridge — T38 (socket stat) and T39 (item ids by placement;
+   `config/item_ids.toml` [pending] is the worklist, results append to
+   `item_ids.learned.toml`, partial coverage fine).
+2. **R116 (decision)**: the go/no-go for P6's staged live acceptance,
+   re-asked once the drills land. R115 (IdleBail wiring) rides along.
 
-Late-session structural fixes worth knowing before P4:
+P5b context: at the gate the user supplied the real pickup spec (R117)
++ five clarifications (R118, all answered). Potion protocol v2 (belt
+first, reserve 2/type in inventory, drink ALL excess incl. rejuvs,
+never stash potions), the real pickit over a provenance-tracked
+vocabulary (most ids pending T39; unresolved names fail SAFE — no
+pickup, and the cleanse is disabled entirely), and the inventory
+cleanse (ctrl+right-click drop; town preamble pass + field pass in
+dead air only). See the phase file `05b-real-pickit-and-hygiene.md`.
 
-- **Navigator-level click avoidance** (R111): travel clicks aimed
-  within 4 subtiles of any interactive unit (objects AND NPCs, read
-  fresh per click) are nudged 6 clear. This ended the waypoint-misclick
-  loop after two positional recoveries failed. Monsters deliberately
-  not avoided.
-- **The modifier race** (R113): shift and click sent in the same frame
-  can resolve as an UNMODIFIED click — invisible on potions (a naked
-  right-click just drinks), discovered when it CAST a Tome of Identify.
-  `_MODIFIER_SETTLE_S` now flanks every modified click in PanelInput
-  and GatedInput's stand-still path (M5 combat would have hit it).
-- **NPC dialog rows are ordinals, not positions** (R104): arrows +
-  Enter, highlight opens on row 1 and wraps. Kashya's resurrect is row
-  2 of 4 IN THE DEAD-MERC MENU ONLY (alive, row 2 is HIRE — R56).
-- **Gold's amount dialog raises no panel flag** (T37): undetectable,
-  ungateable; verify by balance, and a stray Enter opens the chat
-  console — deposit_gold clears it.
+## What P4 and P5 built
 
-The P3 gate is APPROVED (R114), the teach step done, and everything
-committed and pushed. Next is **P4: the behaviour engine** — read the
-phase file `04-behavior-engine.md` in this directory. Sim-only: the
-FSM, declarative runs, the survival reflex ladder, and the per-class
-combat interface, all buildable and testable without the game running.
-The bridge and a human are NOT needed until P5/P6.
+`pd2bot/behavior/` — the whole decision layer, ADR drafted (proposed,
+finalize in P6):
 
-## Live-test protocol (how anything gets verified)
+- **engine.py** — ticked loop: snapshot -> `SafetyMonitor.tick()`
+  (raises pass through) -> reflex ladder -> current run step. A firing
+  rung consumes the tick, so offense is skipped by construction.
+  `IdleBail` watchdog after 10 s of no sends and no progress out of town.
+- **reflex.py** — the R49 ladder, rungs 3-8. Cooldowns, blood-warp
+  position-verify, town suppression of rungs 3-7. Belt keys follow R53
+  (mana 1, rejuv 2, heal 3+4), derived from `[belt] columns`.
+- **necro.py** — R47.2's skirmish pattern: contact, wait for revives to
+  tank, dash in SHORT HOPS (so the ladder gets a look between them),
+  strike, retreat, repeat. Poison does the killing, so targets are
+  chosen fresh-first with a 6 s restrike. Desecrate -> revive to 3,
+  bounded, never in town.
+- **execute.py** — the only module that sends: every cast goes through
+  `ensure_right_skill` (no cast on an unverified skill), attacks hold
+  SHIFT, pickups must not. Records the decision trace.
+- **steps.py** — the five step handlers + the wired registry.
+  `clear_radius` needs the radius empty for 5 s before finishing;
+  `pickup` sweeps with a shared, bounded inventory-full guard.
+- **run.py / combat.py** — runs and class configs as strict TOML.
+- **runner.py** — the `run_games` callback boundary, idle-bail counting.
+- `pd2bot/pickit.py` + `config/pickit.toml` — top-down, first-match-wins
+  loot rules over kind and quality (all perception can see).
+
+## What P6 does (read `06-staged-acceptance-closeout.md`)
+
+The staged live ladder (R46 Q8), the bridge, and a human. Everything
+below is sim-proven but has never met the game:
+
+1. Wire the real `GameActionExecutor` to a live `GatedInput`/`Navigator`
+   and the real `TownLayer`/`WaypointTravel` behind the two blocking
+   steps. Feed `chicken_life_pct` (35) into `SafetyConfig`.
+2. **Verify gold's kind (523)** on the first real drop — inherited from
+   kolbot, never confirmed on this client, and the pickit's gold rule
+   may simply never fire until it is.
+3. The bone-armor stat's falls-when-hit half still owes a live check
+   (deferred from P1 drill B); the R47 fallback covers an unreadable
+   stat.
+4. Finalize the ADR, write `docs/architecture/behavior.md`, README
+   section on the drill harness + drill log + bridge-run, and the date
+   normalization sweep (both noted in the P3 notes).
+
+## Live-test protocol (needed again from P6 on)
 
 The user starts the elevated bridge once per session:
 
@@ -68,100 +95,29 @@ The user starts the elevated bridge once per session:
 powershell -ExecutionPolicy Bypass -File "C:\dev\2026-pd2-bot\2026-pd2-offline-bot\tools\elevated-bridge.ps1"
 ```
 
-The `-ExecutionPolicy Bypass` child-process form is REQUIRED; running
-the script directly fails on this machine's policy.
-
-The agent then drives everything through `tools/bridge-run.ps1`. Drills
-live in `drills/`, are built on the `pd2bot/drill.py` harness, and each
-announces itself in-game (`TEST T<n> — title [kind]`, instructions, an
-input warning, `TEST LIVE`, `TEST CONCLUDED — status`) and appends a row
-to `docs/drill-log.md`. A running drill — including a bot looping inside
-the town layer — is stoppable with:
+The `-ExecutionPolicy Bypass` child-process form is REQUIRED. Drills
+live in `drills/` on the `pd2bot/drill.py` harness; cancel with:
 
 ```
 powershell -File tools\drill-cancel.ps1
 ```
 
-## Calibrations already measured (all baked into config)
-
-1536x864 window. **Re-run the source drill after any window or
-resolution change.**
-
-Panel click targets live in `pd2bot/uipoints.py` as named `UIPoint`s, each
-carrying the provenance of its measurement; grid geometry stays in
-`TownConfig`. **Every point below was proved by its effect, not by the
-click landing.**
-
-| What | Value | From |
-|---|---|---|
-| inventory origin / cell | (0.5301, 0.4385) / (0.0268, 0.0461) | T11 |
-| usable inventory grid | 10x4, cells (0,0)-(9,3) | T10 |
-| charsi.trade_repair | **keyboard row 2 of 3** | T34/T19 — no position at all |
-| charsi.repair_all | (0.4648, 0.7650) | T25 — durability to 0 |
-| waypoint.cold_plains | (0.3249, 0.2928) | T25 — arrived area 3 |
-| waypoint.rogue_encampment | (0.3197, 0.2384) | T25 — arrived area 1 |
-| stash.materials_tab | (0.2188, 0.8426) | T15/T16 |
-| kashya.resurrect | **keyboard row 2 of 4** (dead-merc menu) | R105/T21 |
-
-Area ids confirmed live: **Rogue Encampment 1, Cold Plains 3**.
-
-**NPC dialog rows carry no position at all.** They are drawn relative
-to the NPC and NPCs wander, so no fraction and no anchored offset can
-locate one — four separate attempts each verified by effect when taken
-and each stale by the next opening. They are chosen by ORDINAL instead:
-arrows move the highlight, Enter selects, the highlight opens on row 1
-and wraps (T34). Kashya's index differs by merc state, since the
-resurrect row only exists while the merc is dead (R56) — alive, row 2
-is HIRE.
-
-**Do not trust a calibration whose drill is not in the current tree.**
-T18's and T20's numbers were discarded wholesale (R86): they were taken
-with a capture that armed immediately and recorded the cursor resting on
-the NPC the user had just clicked.
-
-## Live facts that are easy to lose
-
-- **Charm inventory shares the inventory container**; only the cell
-  coordinate (y >= 4) separates it, and this character keeps 24 items
-  there. Everything filters through `main_inventory`.
-- **The Horadric Cube (kind 564) cannot be shift-clicked** — right-click
-  opens it. In `UNMOVABLE_KINDS`; the deposit filters it itself.
-- **PD2 renumbered potions**: 610/611 mana, 606 healing, 530/531 rejuv,
-  proven by effect (T6). Belt columns are permanent: key 1 mana, 2
-  rejuv, 3+4 healing.
-- **Rejuvs are materials** and are never drunk or put in the regular
-  stash.
-- **The materials tab makes the ordinary stash read EMPTY**, and stash
-  contents populate progressively — never infer fullness from a count.
-  Tab state IS readable: the stash store's item-chain head goes null
-  while materials is displayed (T22).
-- **Services are paid from the shared stash**, not carried gold; gold is
-  a non-topic by user decision.
-- NPC ids (T17-verified by proximity): Akara 148, Kashya 150, Charsi
-  154, Gheed 147.
-
-## The R75 inventory loop (user-designed, BUILT and live-proven)
-
-`TownLayer.manage_inventory`: potions to belt (FILL, not top-up — R107)
--> drink excess healing/mana -> deposit ALL into MATERIALS (fast-fail;
-"didn't move" is the expected answer there) -> switch tab -> deposit ALL
-into REGULAR (a leftover halts loudly) -> deposit gold -> close. The
-game does the classification, so the bot has no item taxonomy to go
-stale. Rejuvs are never drunk; they fall through to materials once the
-belt's rejuv column is full. The Cube is exempt and named in the log
-even when it is all that remains.
+Everything from P3 still holds: calibrations in `pd2bot/uipoints.py`
+(re-run after any window/resolution change), NPC dialog rows are
+keyboard ordinals, the charm inventory shares the container (y >= 4),
+the Cube is unmovable, PD2 potion kinds 610/611 mana / 606 healing /
+530/531 rejuv, rejuvs are materials, the materials tab makes the stash
+read empty, services are paid from the shared stash. Area ids: Rogue
+Encampment 1, Cold Plains 3.
 
 ## Suggested opening prompt for a fresh conversation
 
-> Continuing the PD2 bot, milestone M5, starting phase P4 (the
-> behaviour engine). Read `docs/plans/2026-07-29-m5-trial-run/RESUME.md`
-> first, then `notes.md` in the same directory (the calibration-crisis
-> and R75-loop sections especially), then the phase file
-> `04-behavior-engine.md`. P3 is complete, committed (cb63b67 on
-> m5-trial-run), and gate-approved (R114). P4 is SIM-ONLY: the FSM,
-> declarative runs, the survival reflex ladder (R49 defaults), and the
-> class-agnostic combat interface with the necro config (R47 kit). No
-> bridge or live game needed — build against fakes the way
-> tests/test_town.py does, and keep the sim honest rather than
-> convenient: nearly every P3 failure was an instrument lying, not the
-> game. Instruction-log IDs continue from R114.
+> Continuing the PD2 bot, milestone M5. P4 and P5 are both complete and
+> sim-proven (524 tests, ruff clean) but uncommitted, and the P5 gate
+> (R116, go/no-go for live) is unanswered — check with me on that
+> before starting P6. Read
+> `docs/plans/2026-07-29-m5-trial-run/RESUME.md` first, then
+> `notes.md` ("P4 build notes" and "P5 build notes"), then
+> `p5-sim-trace.md` and the phase file
+> `06-staged-acceptance-closeout.md`. Instruction-log IDs continue
+> from R116.
