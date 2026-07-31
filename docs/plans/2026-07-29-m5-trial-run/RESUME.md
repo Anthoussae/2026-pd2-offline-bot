@@ -1,4 +1,4 @@
-# Resume point — M5, P4/P5/P5b built; drills + gate before P6
+# Resume point — M5, P6 stage A done; stage B next
 
 Written 2026-07-31. Read this plus [notes.md](notes.md) ("P4 build
 notes", "P5 build notes", "P5b — the R117 amendment") and you have the
@@ -17,20 +17,38 @@ M5 = the first end-to-end run (Cold Plains clearance, Hell). Phases:
 | P3 town layer + waypoint | **done** (gate R114; commit cb63b67) |
 | P4 behaviour engine | **done** (sim-only) |
 | P5 combat + pickit | **done** (sim-only) |
-| P5b real pickit + hygiene (R117) | **sim-side done** — drills R119 pending | ← here
-| P6 staged live acceptance | blocked on the R116 gate re-ask |
+| P5b real pickit + hygiene (R117) | **done**; vocabulary closed (105 names, 0 pending) |
+| P6 stage A (town, drop gesture) | **PASSED** — T43 audit + T44 verification |
+| P6 stage B (supervised Cold Plains clear) | **next** | ← here
 
 `546 tests, ruff clean.` Nothing since cb63b67 is committed (no commit
 was requested).
 
-## THE BLOCKERS, in order
+## START HERE TOMORROW
 
-1. **R119 (execute)**: the two read-only discovery drills over the
-   bridge — T38 (socket stat) and T39 (item ids by placement;
-   `config/item_ids.toml` [pending] is the worklist, results append to
-   `item_ids.learned.toml`, partial coverage fine).
-2. **R116 (decision)**: the go/no-go for P6's staged live acceptance,
-   re-asked once the drills land. R115 (IdleBail wiring) rides along.
+**Stage B is a supervised Cold Plains clear** — the first time the bot
+fights anything. Everything in `necro.py`, ladder rungs 3-7 and the
+clearance step is sim-proven only, and the sim is a model of the game,
+not the game.
+
+Before stage B, fix the two review findings that bite an unattended run
+(`docs/reviews/2026-07-31-m5-trial-run/`):
+
+1. **002 (P2)** — `InputRefused` escapes the engine and ends the whole
+   loop; the ladder also commits cooldowns before the send lands, so a
+   refused heal blocks the next one for 10 s.
+2. **003 (P2)** — the idle watchdog can fire during waits the design
+   asks for (`clear_settle_s`, `restrike_s`). Defaults are safe by an
+   undeclared margin; raising any of them breaks runs.
+
+Then the P6 wiring checklist (review issue 005): `cleanse_keep(pickit)`
+-> `TownLayer.keep_item`; a SESSION-wide baseline -> `protected_ids`
+(the implicit one is a floor, not the goal); `RunServices.cleanse`;
+belt capacity -> `Pickit.belt_capacity`; `chicken_life_pct` ->
+`SafetyConfig`.
+
+**R115** (IdleBail sharing the cycle's chicken counter) is still
+unanswered and is cheap to fold into the 002/003 work.
 
 P5b context: at the gate the user supplied the real pickup spec (R117)
 + five clarifications (R118, all answered). Potion protocol v2 (belt
