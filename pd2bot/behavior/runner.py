@@ -30,11 +30,26 @@ from collections.abc import Callable
 from pd2bot.behavior.engine import BehaviorEngine, IdleBail
 from pd2bot.cycle import CycleError
 from pd2bot.memory import GameSession
-from pd2bot.town import StashFull
+from pd2bot.safety import ChickenExit
+from pd2bot.town import StashFull, TownError
 
 
 class IdleLoopHalt(CycleError):
     """Idle-bailed too many times: an idle loop is a bug. Loop-halting."""
+
+
+class PreambleFailed(ChickenExit):
+    """The town preamble failed; leave and try a fresh game.
+
+    A `ChickenExit` subclass for the same reason `IdleBail` is one: the
+    cycle's existing handler already does the right immediate thing (leave
+    the game, keep cycling) and this module owns the counting. It is not a
+    vitals problem, so the runner books it separately.
+    """
+
+
+class PreambleHalt(CycleError):
+    """The preamble failed twice running. Structural, not luck. Halting."""
 
 
 class StashFullHalt(CycleError):
@@ -97,14 +112,17 @@ class BehaviorRunner:
         engine_factory: Callable[[GameSession], BehaviorEngine],
         *,
         idle_bail_max: int = 2,  # consecutive; an idle loop is a bug (R47.9)
+        preamble_fail_max: int = 2,  # consecutive; twice is not bad luck
         alert: Callable[[str], None] = _default_alert,
         stash_alert: Callable[[str], None] = _default_stash_alert,
     ) -> None:
         self._engine_factory = engine_factory
         self._idle_bail_max = idle_bail_max
+        self._preamble_fail_max = preamble_fail_max
         self._alert = alert
         self._stash_alert = stash_alert
         self.idle_bails = 0  # consecutive, not lifetime
+        self.preamble_failures = 0  # consecutive, not lifetime
 
     def __call__(self, session: GameSession) -> None:
         """The callback `cycle.run_games` invokes once per created game."""
@@ -119,6 +137,29 @@ class BehaviorRunner:
             reason = f"the regular stash would not take the inventory ({exc})"
             self._stash_alert(reason)
             raise StashFullHalt(reason) from exc
+        except TownError as exc:
+            # Everything else the town layer raises. Found the hard way on
+            # the first stage-B attempt: an `ensure_materials_tab` refusal
+            # propagated out of `run_games` and killed the process with a
+            # traceback, leaving the character in a Hell game with the
+            # stash panel open. That is the same escape shape as review
+            # 002's InputRefused and StashFull — fixing the two named cases
+            # and leaving the parent class to escape was half a fix.
+            #
+            # Counted rather than halted-on-sight because the two kinds
+            # look identical from here: P3 saw plenty of transient preamble
+            # failures (a mis-click, an NPC dialog that opened late) which a
+            # fresh game fixes by itself, and a structural one repeats. So
+            # leave, retry once, and halt loudly when it happens again.
+            self.preamble_failures += 1
+            if self.preamble_failures >= self._preamble_fail_max:
+                reason = (
+                    f"the town preamble failed {self.preamble_failures} "
+                    f"games in a row — this is not bad luck (last: {exc})"
+                )
+                self._alert(reason)
+                raise PreambleHalt(reason) from exc
+            raise PreambleFailed(str(exc)) from exc
         except IdleBail as exc:
             self.idle_bails += 1
             if self.idle_bails >= self._idle_bail_max:
@@ -131,3 +172,4 @@ class BehaviorRunner:
             raise  # the cycle's ChickenExit path leaves the game, routinely
         else:
             self.idle_bails = 0
+            self.preamble_failures = 0

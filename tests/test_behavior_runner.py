@@ -3,10 +3,16 @@
 import pytest
 
 from pd2bot.behavior.engine import IdleBail
-from pd2bot.behavior.runner import BehaviorRunner, IdleLoopHalt, StashFullHalt
+from pd2bot.behavior.runner import (
+    BehaviorRunner,
+    IdleLoopHalt,
+    PreambleFailed,
+    PreambleHalt,
+    StashFullHalt,
+)
 from pd2bot.cycle import CycleError
 from pd2bot.safety import ChickenExit
-from pd2bot.town import StashFull
+from pd2bot.town import StashFull, TownError
 
 
 class ScriptedEngine:
@@ -124,3 +130,55 @@ def test_a_full_stash_does_not_count_as_an_idle_bail():
     with pytest.raises(StashFullHalt):
         r(None)
     assert r.idle_bails == 0
+
+
+# -- the town preamble: found by the first stage-B attempt ------------------------
+
+
+def test_a_town_error_no_longer_escapes_as_a_traceback():
+    """Stage B attempt 1 died exactly here: an `ensure_materials_tab`
+    refusal propagated out of run_games and killed the process, leaving the
+    character in a Hell game with the stash panel open. Fixing StashFull and
+    InputRefused while leaving the parent TownError to escape was half a
+    fix."""
+    r = runner([TownError("cannot identify the stash tab")])
+    with pytest.raises(PreambleFailed):
+        r(None)
+    assert r.preamble_failures == 1
+
+
+def test_preamble_failed_leaves_the_game_rather_than_halting():
+    # A ChickenExit rides the cycle's existing leave-and-continue path; a
+    # transient mis-click should cost one game, not the session.
+    assert issubclass(PreambleFailed, ChickenExit)
+
+
+def test_a_second_consecutive_preamble_failure_halts_loudly():
+    alerts = []
+    r = runner([TownError("one"), TownError("two")], alerts)
+    with pytest.raises(PreambleFailed):
+        r(None)
+    with pytest.raises(PreambleHalt, match="2 games in a row"):
+        r(None)
+    assert len(alerts) == 1
+    assert "not bad luck" in alerts[0]
+
+
+def test_a_completed_run_resets_the_preamble_count():
+    r = runner([TownError("one"), None, TownError("two")])
+    with pytest.raises(PreambleFailed):
+        r(None)
+    r(None)  # a game that worked: the failure was transient after all
+    assert r.preamble_failures == 0
+    with pytest.raises(PreambleFailed):
+        r(None)  # counted from scratch, not halted
+
+
+def test_stash_full_is_still_its_own_case_not_a_preamble_failure():
+    # StashFull IS a TownError, so order matters in the handler: a full
+    # stash is a wall to stop at, not something a fresh game retries.
+    alerts = []
+    r = stash_runner([StashFull("full")], alerts)
+    with pytest.raises(StashFullHalt):
+        r(None)
+    assert r.preamble_failures == 0
