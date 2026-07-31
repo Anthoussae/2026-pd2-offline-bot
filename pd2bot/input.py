@@ -47,6 +47,11 @@ _KEY_UP = 0x0002
 VK_SHIFT = 0x10
 VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6 = 0x70, 0x71, 0x72, 0x73, 0x74, 0x75
 VK_1, VK_2, VK_3, VK_4 = 0x31, 0x32, 0x33, 0x34
+# NPC dialogs are keyboard-navigable: arrows move the highlight, Enter
+# selects (user discovery, R104). Sent through PanelInput, never here — a
+# world-gated Enter is meaningless, and an ungated one chooses dialog
+# options by accident, which is the R89 defect.
+VK_UP, VK_DOWN, VK_RETURN = 0x26, 0x28, 0x0D
 VK_I = 0x49  # the inventory toggle (default binding)
 
 # Down/up spacing: a real click is never instantaneous, and the game samples
@@ -54,6 +59,14 @@ VK_I = 0x49  # the inventory toggle (default binding)
 # (spike/probe_click.py). The pre-click pause lets the cursor-move register.
 _PRE_CLICK_PAUSE_S = 0.05
 _CLICK_HOLD_S = 0.06
+# A modifier pressed in the SAME frame as its click is a race: the game can
+# process the click first and see it unmodified. Harmless on most items — an
+# unshifted right-click on a potion just drinks it — which is exactly why it
+# survived every deposit until T27 met a Tome of Identify, where the naked
+# right-click CAST it and the identify cursor then ate the retry too (R113,
+# user-observed). One frame of settle on each side removes the race: shift
+# provably down before the click, provably still down when it resolves.
+_MODIFIER_SETTLE_S = 0.06
 
 
 class InputRefused(RuntimeError):
@@ -185,10 +198,13 @@ class GatedInput:
         self.check()  # re-check at the last moment; state may have moved
         if stand_still:
             _send_key(VK_SHIFT, 0)
+            time.sleep(_MODIFIER_SETTLE_S)  # same-frame race, see the constant
         try:
             _send_mouse_flag(down)
             time.sleep(_CLICK_HOLD_S)
             _send_mouse_flag(up)
+            if stand_still:
+                time.sleep(_MODIFIER_SETTLE_S)
         finally:
             if stand_still:
                 _send_key(VK_SHIFT, _KEY_UP)

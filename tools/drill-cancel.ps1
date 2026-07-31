@@ -29,4 +29,4 @@ if ($Clear) {
 
 New-Item -ItemType Directory -Force -Path (Split-Path $file) | Out-Null
 Set-Content -Encoding utf8 $file 'cancel'
-Write-Output "cancel requested — the running drill will abort at its next wait"
+Write-Output "cancel requested - the running drill will abort at its next wait"

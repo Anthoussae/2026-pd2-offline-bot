@@ -72,7 +72,9 @@ def test_protocol_messages_in_order(tmp_path):
     assert texts[2] == "[claude] Then the other thing."
     assert "Read-only" in texts[3]  # sends_input is False
     assert texts[4] == "[claude] TEST LIVE"
-    assert texts[5] == "[claude] TEST CONCLUDED — PASS"
+    # The id is in the conclusion too (R85): several tests report into the
+    # same chat window, so a bare status does not say which one concluded.
+    assert texts[5] == "[claude] TEST T99 CONCLUDED — PASS"
 
 
 def test_bot_control_drills_warn_hands_off(tmp_path):
@@ -167,6 +169,48 @@ def test_capture_hover_fires_after_move_and_stillness():
     assert (x, y) == (400, 300)
     assert fx == pytest.approx(400 / 1536)
     assert fy == pytest.approx(300 / 864)
+
+
+def test_a_failed_drill_announces_its_reason_in_game(tmp_path):
+    """R95: the user watches the game, not the console. A drill that ends
+    without saying so in chat leaves them waiting on a bot that stopped
+    minutes ago — and the failure reason belongs there too, so they can
+    decide what to do next without alt-tabbing."""
+    chat = FakeChat()
+    run = make_run(chat)
+
+    def explode(_run):
+        raise RuntimeError("the thing went wrong")
+
+    run_drill(DRILL, explode, run=run, log_path=tmp_path / "log.md")
+    assert "[claude] TEST T99 CONCLUDED — FAILED" in chat.delivered
+    assert any("the thing went wrong" in text for text in chat.delivered)
+
+
+def test_a_passing_drill_does_not_announce_a_reason(tmp_path):
+    chat = FakeChat()
+    run = make_run(chat)
+    run_drill(DRILL, lambda r: "all good", run=run, log_path=tmp_path / "log.md")
+    assert chat.delivered[-1] == "[claude] TEST T99 CONCLUDED — PASS"
+
+
+def test_capture_hover_arms_against_the_live_cursor_when_given_no_last_point():
+    """R86, the defect that poisoned two calibrations: `last_point=None`
+    meant 'armed immediately', so the first capture of a drill fired on the
+    hand still resting where the user had just clicked the NPC. T18's
+    'trade/repair row' was Charsi's portrait, 488 px out, and it looked
+    entirely plausible. None must mean 'arm against where the cursor is'."""
+    positions = iter([(100, 100)] * 50)  # never moves off the click point
+    run = make_run(cursor=lambda: next(positions, (100, 100)))
+    assert run.capture_hover(required_panel=None, last_point=None, timeout_s=5.0) is None
+
+
+def test_capture_hover_still_fires_when_the_user_moves_onto_the_target():
+    moves = [(100, 100)] * 3 + [(400, 300)] * 60
+    positions = iter(moves)
+    run = make_run(cursor=lambda: next(positions, (400, 300)))
+    got = run.capture_hover(required_panel=None, last_point=None, timeout_s=30.0)
+    assert got is not None and got[:2] == (400, 300)
 
 
 def test_cancel_stops_a_waiting_drill(tmp_path):

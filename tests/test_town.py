@@ -6,11 +6,12 @@ for the failure cases. What is under test is the verify-everything logic:
 no step may report success on a click alone.
 """
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
-from pd2bot import offsets
+from pd2bot import offsets, uistate
 from pd2bot.items import CarriedItem, CarriedItems
 from pd2bot.player import Player
 from pd2bot.snapshot import GameSnapshot
@@ -23,6 +24,7 @@ from pd2bot.town import (
     TownLayer,
     Uncalibrated,
 )
+from pd2bot.uipoints import default_points
 from pd2bot.uistate import UIState
 from pd2bot.units import GameObject, Monster
 from pd2bot.window import ClientRect
@@ -30,10 +32,34 @@ from pd2bot.world import Area
 
 RECT = ClientRect(left=0, top=0, width=1536, height=864)
 
+def points(overrides):
+    """The point registry with test values filled in (R87).
+
+    Sets whichever field actually calibrates that point: a screen-anchored
+    one takes a client-rect fraction, an NPC-anchored one takes a pixel
+    offset from the NPC (R97). Call sites do not have to care which is
+    which — that is the registry's business, not the test's.
+
+    Tests that exercise a click must say what they are aiming at, which is
+    the honest reading of them anyway: they check the mechanism, never the
+    measurement.
+    """
+    base = default_points()
+    for name, value in overrides.items():
+        point = base[name]
+        if point.by_keyboard:
+            base[name] = replace(point, keyboard_row=value)
+        elif point.npc_anchored:
+            base[name] = replace(point, npc_offset=value)
+        else:
+            base[name] = replace(point, fraction=value)
+    return base
+
+
 CALIBRATED = TownConfig(
     inventory_origin=(0.60, 0.40),
     inventory_cell=(0.02, 0.03),
-    resurrect_row=(0.30, 0.35),
+    ui_points=points({"kashya.resurrect": 2}),  # row 2 of 4, dead-merc menu
 )
 UNCALIBRATED = TownConfig(inventory_origin=None, inventory_cell=None)
 
@@ -67,9 +93,20 @@ def potion(uid, kind, *, belt_slot=None, cell=(0, 0)):
                        offsets.STORAGE_INVENTORY, offsets.NODE_STORAGE, cell, 1)
 
 
-def loot(uid, cell):
-    return CarriedItem(uid, 522, 6, offsets.ITEM_MODE_IN_STORAGE,
+def loot(uid, cell, kind=522):
+    return CarriedItem(uid, kind, 6, offsets.ITEM_MODE_IN_STORAGE,
                        offsets.STORAGE_INVENTORY, offsets.NODE_STORAGE, cell, 33)
+
+
+def _point_pixel(name):
+    """Where a shipped screen-anchored point lands in the test rect."""
+    return default_points()[name].pixel(RECT)
+
+
+def stashed(uid, cell=(0, 0)):
+    """An item sitting in the REGULAR stash — what the tab signal reads."""
+    return CarriedItem(uid, 522, 6, offsets.ITEM_MODE_IN_STORAGE,
+                       offsets.STORAGE_STASH, offsets.NODE_STORAGE, cell, 33)
 
 
 class Town:
@@ -97,6 +134,26 @@ class Town:
         self.walked = []
         self.alerts = []
         self._uid = 0
+        # Whose dialog is open, and where the highlight sits in it. The
+        # menus genuinely differ, so the fake must too (R104/R105):
+        #   Charsi          TALK / TRADE-REPAIR / CANCEL
+        #   Kashya, dead    TALK / RESURRECT / HIRE / CANCEL
+        #   Kashya, alive   TALK / HIRE / CANCEL   <- row 2 is HIRE, not
+        #                                             resurrect: same index,
+        #                                             different action (R56)
+        self.dialog_npc = None
+        self.dialog_row = 1  # the highlight opens here and wraps at the end
+        # The stash and its two tabs (R75). `material_kinds` is what the
+        # MATERIALS tab will accept — the game does this classification, so
+        # the fake owns it and the bot must never assume it.
+        self.stash: list[CarriedItem] = [stashed(9001), stashed(9002)]
+        self.stash_tab = "regular"
+        self.material_kinds: set[int] = set()
+        self.tab_toggle_works = True
+        # The gold amount dialog raises NO panel flag (T37), so the fake
+        # keeps it as hidden state — which is exactly the bot's problem: it
+        # cannot see whether this is true before pressing Enter.
+        self.gold_dialog = False
 
     # -- readers ---------------------------------------------------------------
 
@@ -110,7 +167,14 @@ class Town:
         )
 
     def carried(self, session=None):
-        return CarriedItems(items=tuple(self.belt + self.inventory), skipped=0)
+        # The materials tab makes the ordinary stash read EMPTY (T15) — the
+        # fake reproduces that, because it is the tab signal the loop relies
+        # on and a fake that always listed the stash would hide every bug in
+        # the tab logic.
+        visible = self.stash if self.stash_tab == "regular" else []
+        return CarriedItems(
+            items=tuple(self.belt + self.inventory + visible), skipped=0
+        )
 
     def snapshot(self):
         allies = []
@@ -134,14 +198,32 @@ class Town:
 
     # -- fake input paths --------------------------------------------------------
 
+    def _open_dialog(self, npc):
+        self.panels.add(offsets.UI_NPCMENU)
+        self.dialog_npc = npc
+        self.dialog_row = 1  # a freshly opened menu always starts here
+
+    @staticmethod
+    def belt_capacity(item) -> int:
+        """4 rows per column; healing owns two columns (R53)."""
+        return 8 if item.is_healing_potion else 4
+
+    @property
+    def dialog_rows(self) -> int:
+        if self.dialog_npc == offsets.NPC_KASHYA:
+            return 3 if self.merc_alive else 4  # resurrect only when dead
+        return 3
+
     def click_world(self, x, y, **kwargs):
         self.world_clicks.append((x, y))
         if (x, y) == AKARA_POS:
-            self.panels.add(offsets.UI_NPCMENU)
+            self._open_dialog(offsets.NPC_AKARA)
             if self.heal_on_interact:
                 self.hp, self.mana = self.max_hp, self.max_mana
         elif (x, y) == KASHYA_POS:
-            self.panels.add(offsets.UI_NPCMENU)
+            self._open_dialog(offsets.NPC_KASHYA)
+        elif (x, y) == CHARSI_POS:
+            self._open_dialog(offsets.NPC_CHARSI)
         elif (x, y) == STASH_POS:
             self.panels.add(offsets.UI_STASH)
         return (0, 0)
@@ -157,33 +239,115 @@ class Town:
 
     def panel_click(self, panel_id, sx, sy, button="left", shift=False):
         self.panel_clicks.append((panel_id, sx, sy, button, shift))
-        if panel_id == offsets.UI_STASH and shift and button == "right":
+        if panel_id == offsets.UI_STASH and not shift and button == "left":
+            # Two different left-click targets live in this panel, so the
+            # fake routes by POSITION as the game does — otherwise a gold
+            # click would toggle the tab and every test would agree with a
+            # bot that aimed anywhere at all.
+            if (sx, sy) == _point_pixel("stash.gold_button"):
+                self.gold_dialog = True  # invisible to perception (T37)
+            elif (sx, sy) == _point_pixel("stash.materials_tab"):
+                if self.tab_toggle_works:
+                    self.stash_tab = (
+                        "materials" if self.stash_tab == "regular" else "regular"
+                    )
+        elif panel_id == offsets.UI_STASH and shift and button == "right":
             index, item = self._item_at_pixel(sx, sy)
-            if self.deposit_works and item is not None:
-                self.inventory.pop(index)
+            if item is None or not self.deposit_works:
+                return
+            # The GAME decides what the materials tab accepts — that is the
+            # whole point of R75's design, so the fake refuses the rest
+            # rather than quietly taking everything.
+            if self.stash_tab == "materials" and item.kind not in self.material_kinds:
+                return
+            self.inventory.pop(index)
+            if self.stash_tab == "regular":
+                self.stash.append(stashed(item.unit_id))
+        elif panel_id == offsets.UI_INVENTORY and not shift and button == "right":
+            index, item = self._item_at_pixel(sx, sy)
+            if item is not None and item.potion_name is not None:
+                self.inventory.pop(index)  # drunk
         elif panel_id == offsets.UI_INVENTORY and shift:
             if self.refill_works:
                 index, item = self._item_at_pixel(sx, sy)
-                if item is not None and item.potion_name is not None:
-                    moved = self.inventory.pop(index)
-                    self._uid += 1
-                    self.belt.append(
-                        potion(900 + self._uid, moved.kind, belt_slot=len(self.belt))
+                if item is None or item.potion_name is None:
+                    return
+                # The belt has CAPACITY, and shift-click routes by type into
+                # its column (R53: 1 mana, 2 rejuv, 3+4 healing). Without
+                # that, the fake would swallow every potion ever offered and
+                # `fill_belt` would never learn the belt was full — which is
+                # exactly how it decides what counts as excess (R107).
+                def same_type(b, target=item):
+                    return (
+                        b.is_healing_potion == target.is_healing_potion
+                        and b.is_mana_potion == target.is_mana_potion
+                        and b.is_rejuv_potion == target.is_rejuv_potion
                     )
-        elif panel_id == offsets.UI_NPCMENU and self.resurrect_works:
-            self.merc_alive = True
-            # Paid from the person first, then the stash (R76).
-            spend = min(self.gold, 50_000)
-            self.gold -= spend
-            self.gold_stash -= 50_000 - spend
+
+                held = sum(1 for b in self.belt if same_type(b))
+                if held >= self.belt_capacity(item):
+                    return
+                moved = self.inventory.pop(index)
+                self._uid += 1
+                self.belt.append(
+                    potion(900 + self._uid, moved.kind, belt_slot=len(self.belt))
+                )
 
     def press_key(self, vk):
         self.pressed.append(vk)
         if vk == 0x49:  # VK_I
             self.panels.add(offsets.UI_INVENTORY)
 
+    def panel_press_key(self, panel_id, vk):
+        """NPC dialogs driven by keyboard exactly as T34 observed them.
+
+        The highlight opens on row 1, Down advances it, and it WRAPS at the
+        end — the wrap is what round 4 of that drill proved, and a fake that
+        clamped instead would let through a bug the real game would not.
+
+        Row 1 is always Talk (gossip: no panel change) and the last row is
+        always Cancel. What row 2 does depends on WHOSE menu it is, and for
+        Kashya on whether the merc is dead — which is the whole R56 hazard,
+        so the fake reproduces it rather than smoothing it over.
+        """
+        self.pressed.append((panel_id, vk))
+        if panel_id == offsets.UI_STASH and vk == 0x0D:  # VK_RETURN
+            if self.gold_dialog:
+                self.gold_stash += self.gold  # the dialog defaults to all
+                self.gold = 0
+                self.gold_dialog = False
+            else:
+                # An Enter with no dialog under it opens the chat console —
+                # R89's mechanism from the other side, and the hazard the
+                # gold step has to clean up after (T37).
+                self.panels.add(offsets.UI_CHAT_CONSOLE)
+            return
+        if panel_id != offsets.UI_NPCMENU:
+            return
+        if vk == 0x28:  # VK_DOWN
+            self.dialog_row = self.dialog_row % self.dialog_rows + 1
+            return
+        if vk != 0x0D:  # VK_RETURN
+            return
+        if self.dialog_row == self.dialog_rows:  # Cancel, always last
+            self.panels.discard(offsets.UI_NPCMENU)
+        elif self.dialog_row == 2 and self.dialog_npc == offsets.NPC_CHARSI:
+            self.panels.add(offsets.UI_NPCSHOP)
+        elif self.dialog_row == 2 and self.dialog_npc == offsets.NPC_KASHYA:
+            if self.merc_alive:
+                return  # row 2 is HIRE here — opens a list, resurrects nothing
+            if self.resurrect_works:
+                self.merc_alive = True
+                # Paid from the person first, then the stash (R76).
+                spend = min(self.gold, 50_000)
+                self.gold -= spend
+                self.gold_stash -= 50_000 - spend
+
     def press_escape(self):
-        for panel_id in (offsets.UI_STASH, offsets.UI_NPCMENU, offsets.UI_INVENTORY):
+        # ESC closes one panel per press, whichever it is — the fake must
+        # not be choosier than the game, or a panel the layer fails to
+        # close would look closed here (R85).
+        for panel_id in uistate.blocking_panels():
             if panel_id in self.panels:
                 self.panels.discard(panel_id)
                 return
@@ -217,6 +381,7 @@ def layer(town_state, config=CALIBRATED):
     )
     panel = SimpleNamespace(
         click=town_state.panel_click,
+        press_key=town_state.panel_press_key,
         window=SimpleNamespace(client_rect=lambda: RECT),
         _ui_array=0,
     )
@@ -402,8 +567,14 @@ def test_stashed_gold_alone_pays_for_the_resurrect(town):
 
 def test_merc_dead_uncalibrated_halts_for_calibration(town):
     town.merc_alive = False
+    # Stripped explicitly: the shipped row is calibrated now, and what this
+    # pins is the refusal — the row can only be measured in a dead-merc
+    # window (R56), so a build that lacks it must halt and say so rather
+    # than click into a menu whose layout it does not know.
     config = TownConfig(
-        inventory_origin=(0.6, 0.4), inventory_cell=(0.02, 0.03), resurrect_row=None
+        inventory_origin=(0.6, 0.4),
+        inventory_cell=(0.02, 0.03),
+        ui_points=points({"kashya.resurrect": None}),
     )
     with pytest.raises(Uncalibrated):
         layer(town, config).resurrect_merc_if_dead(PreambleReport())
@@ -426,24 +597,195 @@ def test_merc_resurrect_failure_halts_with_diagnostics(town):
     and a click that did nothing costs nothing."""
     town.merc_alive = False
     town.resurrect_works = False
-    with pytest.raises(TownError, match="resurrect row:.*no effect"):
+    with pytest.raises(TownError, match=r"kashya\.resurrect:.*no effect"):
         layer(town).resurrect_merc_if_dead(PreambleReport())
-    npc_clicks = [c for c in town.panel_clicks if c[0] == offsets.UI_NPCMENU]
-    assert len(npc_clicks) == 1 + TownConfig().panel_click_retries
+    # Selection is by keyboard now (R104/R105): one Enter per attempt, and
+    # each attempt reopens the dialog so the highlight is known.
+    enters = [k for k in town.pressed if k == (offsets.UI_NPCMENU, 0x0D)]
+    assert len(enters) == 1 + TownConfig().panel_click_retries
     assert len(town.alerts) == 1
+
+
+# -- the inventory-management loop (R75) -------------------------------------------------
+
+
+def full_belt(town_state):
+    """A belt with no room left in any column.
+
+    Needed by any test about DRINKING or stashing potions: the loop fills
+    the belt first, so with room to spare a potion goes to the belt rather
+    than down the hatch, and nothing is excess (R107).
+    """
+    town_state.belt = (
+        [potion(500 + i, 606, belt_slot=i) for i in range(8)]  # healing x2 cols
+        + [potion(520 + i, 611, belt_slot=8 + i) for i in range(4)]  # mana
+        + [potion(540 + i, 530, belt_slot=12 + i) for i in range(4)]  # rejuv
+    )
+
+
+def test_the_loop_deposits_materials_first_then_the_rest(town):
+    """R75's core: attempt everything into MATERIALS, keep what it takes,
+    then switch and deposit the rest. The bot never classifies an item —
+    the game does, which is why it needs no item taxonomy to go stale."""
+    town.inventory = [loot(1, (0, 0), kind=530), loot(2, (1, 0), kind=522)]
+    town.material_kinds = {530}  # rejuvs are materials (R75); the sword is not
+    full_belt(town)
+
+    report = PreambleReport()
+    layer(town).manage_inventory(report)
+    assert town.inventory == []  # everything left the inventory
+    assert report.deposited == 2
+    assert any("1 into materials" in line for line in report.log)
+    assert any("1 into regular" in line for line in report.log)
+    assert town.stash_tab == "regular"  # left where the next run expects it
+
+
+def test_a_refusal_is_normal_in_materials_and_fatal_in_regular(town):
+    """The asymmetry the design turns on. If the materials phase treated a
+    bounce as an error it would halt on the first ordinary item every single
+    run; if the final phase ignored one, a full stash would go unnoticed."""
+    town.inventory = [loot(1, (0, 0), kind=522)]
+    town.material_kinds = set()  # materials takes nothing
+    full_belt(town)
+
+    # Materials refuses it and that is fine; regular takes it.
+    report = PreambleReport()
+    layer(town).manage_inventory(report)
+    assert town.inventory == [] and report.deposited == 1
+
+    # Now make the regular tab refuse too: that IS a fault.
+    town.inventory = [loot(3, (0, 0), kind=522)]
+    town.deposit_works = False
+    with pytest.raises(StashFull, match="left in the inventory"):
+        layer(town).manage_inventory(PreambleReport())
+    assert town.alerts  # and it is loud
+
+
+def test_excess_potions_are_drunk_but_rejuvs_are_not(town):
+    """Rejuvenations cannot be bought (R47.6) and are materials (R75), so
+    they go to the stash rather than down the hatch. Healing and mana left
+    over after the belt is full are genuinely excess."""
+    full_belt(town)
+    town.inventory = [
+        potion(1, 606, cell=(0, 0)),  # healing: drink
+        potion(2, 611, cell=(1, 0)),  # mana: drink
+        potion(3, 530, cell=(2, 0)),  # rejuv: keep, it is a material
+    ]
+    town.material_kinds = {530}
+
+    report = PreambleReport()
+    layer(town).manage_inventory(report)
+    assert any("drink: 2 excess" in line for line in report.log)
+    assert town.inventory == []  # the rejuv went to the stash, not the belt
+    assert report.deposited == 1
+
+
+def test_the_cube_is_never_deposited_in_either_phase(town):
+    """It opens on right-click instead of moving (R67), so an attempt would
+    fail forever and trip the halt every run."""
+    from pd2bot.offsets import UNMOVABLE_KINDS
+
+    cube = sorted(UNMOVABLE_KINDS)[0]
+    town.inventory = [loot(1, (0, 0), kind=cube)]
+    full_belt(town)
+
+    report = PreambleReport()
+    layer(town).manage_inventory(report)  # no StashFull despite it remaining
+    assert [i.unit_id for i in town.inventory] == [1]
+    assert any("unmovable" in line for line in report.log)
+
+
+def test_gold_is_deposited_and_verified_by_the_balance(town):
+    """The dialog raises no panel flag (T37), so the balance is the only
+    proof there is — and the dialog defaults to the whole carried amount."""
+    town.gold, town.gold_stash = 12435, 805539
+    full_belt(town)
+    town.inventory = [loot(1, (0, 0))]
+
+    report = PreambleReport()
+    layer(town).manage_inventory(report)
+    assert town.gold == 0 and town.gold_stash == 817974
+    assert any("gold: 12435 deposited" in line for line in report.log)
+
+
+def test_a_missed_gold_click_leaves_no_chat_console_behind(town):
+    """The sharp edge of an invisible dialog: with none open, the ENTER is
+    the key that opens the CHAT CONSOLE (R89 from the other side), and that
+    is a blocking panel. A failed deposit must not leave one up."""
+    town.gold, town.gold_stash = 500, 1000
+    full_belt(town)
+    town.inventory = [loot(1, (0, 0))]
+    original = town.panel_click
+
+    def gold_button_misses(panel_id, sx, sy, button="left", shift=False):
+        if (panel_id, sx, sy) == (offsets.UI_STASH, *_point_pixel("stash.gold_button")):
+            town.panel_clicks.append((panel_id, sx, sy, button, shift))
+            return  # the click lands on nothing; no dialog opens
+        original(panel_id, sx, sy, button, shift)
+
+    town.panel_click = gold_button_misses
+    with pytest.raises(TownError, match="gold deposit had no effect"):
+        layer(town).manage_inventory(PreambleReport())
+    assert town.gold == 500  # nothing moved
+    assert offsets.UI_CHAT_CONSOLE not in town.panels  # and nothing left open
+
+
+def test_no_carried_gold_is_not_an_error(town):
+    """Every other game will have nothing to bank — that is normal, not a
+    failure, and must not cost a click."""
+    town.gold = 0
+    full_belt(town)
+    town.inventory = [loot(1, (0, 0))]
+
+    report = PreambleReport()
+    layer(town).manage_inventory(report)
+    assert any("gold: none carried" in line for line in report.log)
+    gold_clicks = [
+        c for c in town.panel_clicks
+        if (c[0], c[1], c[2]) == (offsets.UI_STASH, *_point_pixel("stash.gold_button"))
+    ]
+    assert gold_clicks == []
+
+
+def test_an_unreadable_tab_refuses_rather_than_guessing(town):
+    """The user's requirement was reliable, not heuristic. With the regular
+    stash empty the stash lists nothing on either side of a toggle, so the
+    tab genuinely cannot be identified — and depositing blind would make the
+    phase-aware halt fire on the wrong items."""
+    town.stash = []  # nothing to see on either tab
+    town.inventory = [loot(1, (0, 0))]
+    full_belt(town)
+
+    with pytest.raises(TownError, match="cannot identify the stash tab"):
+        layer(town).manage_inventory(PreambleReport())
+
+
+def test_the_materials_tab_is_found_from_either_starting_side(town):
+    """The loop must not assume which tab the last run left up."""
+    full_belt(town)
+    for starting in ("regular", "materials"):
+        town.stash_tab = starting
+        town.panels.add(offsets.UI_STASH)
+        layer(town).ensure_materials_tab()
+        assert town.stash_tab == "materials", f"failed from {starting}"
 
 
 # -- the preamble ------------------------------------------------------------------------
 
 
 def test_preamble_runs_in_the_agreed_order(town):
+    """R46 Q5's order with repair after the heal (R70), and the middle now
+    served by the R75 loop rather than a deposit + refill pair — so the belt
+    is reported from inside the loop, before the stash phases."""
     town.inventory = [loot(1, (2, 1))]
     _stock_belt_at_minimums(town)
-    report = layer(town).run_preamble(lambda i: i.potion_name is None)
+    report = layer(town).run_preamble()
     assert report.healed and report.deposited == 1
     assert report.merc_action == "not_needed"
     steps = [line.split(":")[0] for line in report.log]
-    assert steps == ["heal", "repair", "stash", "belt", "merc"]
+    assert steps == [
+        "heal", "repair", "belt", "belt", "stash", "stash", "gold", "merc"
+    ]
 
 
 def charm(uid, cell):
@@ -644,6 +986,92 @@ def test_walk_does_not_retry_a_genuine_pathing_failure(town):
     assert len(attempts) == 1  # exactly one, then out
 
 
+def test_a_repeating_misclick_provokes_a_sidestep(town):
+    """R111, live in T27: the navigator clicks TOWARD the destination, so an
+    object on that line gets clicked instead of walked past — and closing the
+    panel and re-walking aims down the same line at the same object. The
+    waypoint sits almost in front of Akara, so every travel click toward her
+    rakes across it. A step sideways changes the angle."""
+    from pd2bot.navigate import NavigationError
+
+    destination = (5921, 5711)
+    attempts = []
+
+    def walk(pos):
+        attempts.append(pos)
+        if pos == destination and len(attempts) < 4:
+            town.panels.add(offsets.UI_WPMENU)  # clipped the waypoint again
+            raise NavigationError("input stayed refused: a blocking panel is open")
+        town.walked.append(pos)
+
+    step = layer(town)
+    step.walk_to = walk
+    step._walk_guarded(destination)
+    aside = [p for p in attempts if p != destination]
+    assert aside, "never stepped aside; it just repeated the same approach"
+    # And the sidestep is perpendicular to the route, not toward it.
+    px, py = town.player().position
+    dx, dy = destination[0] - px, destination[1] - py
+    ox, oy = aside[0][0] - px, aside[0][1] - py
+    assert abs(dx * ox + dy * oy) < abs(dx * dy) + 1  # near-zero dot product
+
+
+def test_a_known_obstacle_is_routed_around_not_merely_stepped_past(town):
+    """R111's second lesson. A small sidestep does nothing when the obstacle
+    is close — after the first misclick the character is standing beside it,
+    and 7 subtiles barely moves the angle. T27 proved that live: the waypoint
+    sits at the same y as Akara's approach point, dead on the route, and four
+    recoveries all clicked it again. So when the panel names a known object,
+    the detour goes around THAT."""
+    from pd2bot.navigate import NavigationError
+
+    destination = (5917, 5709)
+    waypoint = CALIBRATED.object_positions[offsets.OBJ_WAYPOINT_A1]
+    attempts = []
+
+    def walk(pos):
+        attempts.append(pos)
+        if pos == destination and len(attempts) < 4:
+            town.panels.add(offsets.UI_WPMENU)
+            raise NavigationError("input stayed refused: a blocking panel is open")
+        town.walked.append(pos)
+
+    step = layer(town)
+    step.walk_to = walk
+    step._walk_guarded(destination)
+
+    detours = [p for p in attempts if p != destination]
+    assert detours, "never detoured"
+    # The detour is measured from the OBSTACLE, not from the player — that is
+    # what makes it big enough to change the approach angle.
+    near_waypoint = min(
+        max(abs(p[0] - waypoint[0]), abs(p[1] - waypoint[1])) for p in detours
+    )
+    assert near_waypoint <= CALIBRATED.detour + 1
+
+
+def test_the_first_recovery_does_not_sidestep(town):
+    """One interruption may be bad luck — a bystander wandering across the
+    route. Only a REPEAT means the route itself is the problem, and a
+    sidestep on every recovery would add a detour to ordinary town traffic."""
+    from pd2bot.navigate import NavigationError
+
+    destination = (5921, 5711)
+    attempts = []
+
+    def walk(pos):
+        attempts.append(pos)
+        if len(attempts) == 1:
+            town.panels.add(offsets.UI_NPCMENU)
+            raise NavigationError("input stayed refused: npc_menu open")
+        town.walked.append(pos)
+
+    step = layer(town)
+    step.walk_to = walk
+    step._walk_guarded(destination)
+    assert attempts == [destination, destination]  # retried, no detour
+
+
 def test_walk_gives_up_after_bounded_dialog_recoveries(town):
     from pd2bot.navigate import NavigationError
 
@@ -653,8 +1081,217 @@ def test_walk_gives_up_after_bounded_dialog_recoveries(town):
 
     step = layer(town)
     step.walk_to = walk
-    with pytest.raises(TownError, match="kept opening dialogs"):
+    with pytest.raises(TownError, match="kept opening panels"):
         step._walk_guarded((5900, 5700))
+
+
+def test_walk_recovers_from_any_blocking_panel_not_just_dialogs(town):
+    """A travel click can open something no town step ever opens. During
+    T19 it hit the WAYPOINT (R85), whose panel blocks input just as hard as
+    an NPC dialog — but town.py listed only three panels and so could
+    neither recognise nor close it, and the walk died as a bare
+    NavigationError. The recovery list now comes from `uistate`."""
+    from pd2bot.navigate import NavigationError
+
+    attempts = []
+
+    def walk(pos):
+        attempts.append(pos)
+        if len(attempts) == 1:
+            town.panels.add(offsets.UI_WPMENU)
+            raise NavigationError("input stayed refused: a blocking panel is open")
+        town.walked.append(pos)
+
+    step = layer(town)
+    step.walk_to = walk
+    step._walk_guarded((5900, 5700))
+    assert len(attempts) == 2
+    assert offsets.UI_WPMENU not in town.panels
+
+
+def test_a_swallowed_escape_is_retried(town):
+    """R94: a key sent while a panel is still animating in is swallowed just
+    as a click is. T27 died at its first step on exactly this — the heal
+    opens Akara's dialog and closes it immediately, so the ESC arrived mid
+    animation and one 3-second wait declared the panel unclosable."""
+    town.panels.add(offsets.UI_NPCMENU)
+    presses = {"n": 0}
+
+    def swallow_the_first(_town=town):
+        presses["n"] += 1
+        if presses["n"] > 1:  # the first press is lost to the animation
+            _town.panels.discard(offsets.UI_NPCMENU)
+
+    town.press_escape = swallow_the_first
+    layer(town).close_panels()
+    assert presses["n"] == 2 and offsets.UI_NPCMENU not in town.panels
+
+
+def test_a_panel_that_never_closes_still_fails_loudly(town):
+    """Retrying must not become trying forever — a genuinely stuck panel is
+    a human problem and has to say so, naming what is still up."""
+    town.panels.add(offsets.UI_NPCMENU)
+    town.press_escape = lambda: None
+    with pytest.raises(TownError, match="closing npc_menu with ESC: no effect"):
+        layer(town).close_panels()
+
+
+def test_row_two_means_something_different_when_the_merc_lives(town):
+    """R105, the hazard in concrete form. Kashya dead: TALK / RESURRECT /
+    HIRE / CANCEL. Kashya alive: TALK / HIRE / CANCEL — so row 2 stops being
+    Resurrect and becomes HIRE. The index is stable; its MEANING is not, and
+    that is why the step re-confirms the merc is dead immediately before
+    selecting rather than trusting the check it made earlier."""
+    town.merc_alive = True
+    town._open_dialog(offsets.NPC_KASHYA)
+    assert town.dialog_rows == 3  # no resurrect row while the merc lives
+
+    town.merc_alive = False
+    town._open_dialog(offsets.NPC_KASHYA)
+    assert town.dialog_rows == 4
+
+    # And the guard: a merc that comes back to life between the outer check
+    # and the selection must abort, not press Enter on row 2.
+    town.merc_alive = False
+    step = layer(town)
+    original = step.snapshot
+    reads = {"n": 0}
+
+    def alive_by_the_time_the_dialog_is_open():
+        # Dead for the step's opening check, alive by the re-confirm — the
+        # window the guard exists to cover.
+        reads["n"] += 1
+        snap = original()
+        if reads["n"] >= 2:
+            town.merc_alive = True
+        return snap
+
+    step.snapshot = alive_by_the_time_the_dialog_is_open
+    with pytest.raises(TownError, match="merc reads alive"):
+        step.resurrect_merc_if_dead(PreambleReport())
+    assert (offsets.UI_NPCMENU, 0x0D) not in town.pressed  # no Enter was sent
+
+
+def test_reaching_an_object_survives_a_dialog_opened_en_route(town):
+    """R106, live in T35: a travel click that lands on a bystander opens
+    their dialog, and if that happens on the LAST click of the walk the walk
+    still succeeds — so the panel is still up when the deliberate click
+    comes, and `GatedInput` refuses it outright. The NPC path has always
+    coped with this; the object path did not."""
+    step = layer(town)
+    town.panels.add(offsets.UI_NPCMENU)  # waylaid on the way to the stash
+    step.open_object_panel(offsets.OBJ_STASH, "the stash", offsets.UI_STASH)
+    assert offsets.UI_STASH in town.panels
+    assert offsets.UI_NPCMENU not in town.panels  # cleared, not clicked through
+
+
+def test_a_keyboard_row_ignores_where_the_npc_is(town):
+    """R104, the whole point: an ordinal survives what no position could.
+    Charsi pacing moved every stored pixel and broke every calibration; it
+    cannot move which option is second."""
+    from pd2bot.uipoints import UIPoint
+
+    point = UIPoint(
+        "test.row", offsets.UI_NPCMENU, opens=offsets.UI_NPCSHOP,
+        anchor_npc=offsets.NPC_CHARSI, keyboard_row=2, row_count=3,
+    )
+    step = layer(town, TownConfig(ui_points={point.name: point}))
+    town.panels.add(offsets.UI_NPCMENU)
+    globals()["CHARSI_POS"] = (5900, 5800)  # nowhere near where she was
+    try:
+        step.click_point(point)
+    finally:
+        globals()["CHARSI_POS"] = (5824, 5724)
+    assert offsets.UI_NPCSHOP in town.panels
+    assert town.panel_clicks == []  # nothing was clicked at all
+
+
+def test_a_keyboard_retry_reopens_rather_than_pressing_on(town):
+    """The count only means anything from a freshly opened menu, where the
+    highlight is known to be on row 1. After a failed attempt it could be
+    anywhere, and pressing on from an unknown position selects something
+    nobody intended — which at Kashya costs 50,000 gold."""
+    from pd2bot.uipoints import UIPoint
+
+    point = UIPoint(
+        "test.row", offsets.UI_NPCMENU, opens=offsets.UI_NPCSHOP,
+        anchor_npc=offsets.NPC_CHARSI, keyboard_row=2, row_count=3,
+    )
+    def reopen(x, y, **kwargs):
+        town.world_clicks.append((x, y))
+        town._open_dialog(offsets.NPC_CHARSI)  # resets the highlight to row 1
+        return (0, 0)
+
+    # Bind the fake BEFORE building the layer: `layer()` captures the method
+    # by value, so a later assignment would never be seen.
+    town.click_world = reopen
+    step = layer(town, TownConfig(ui_points={point.name: point}))
+    town._open_dialog(offsets.NPC_CHARSI)
+    town.dialog_row = 3  # a stale highlight, as a failed attempt would leave
+
+    step.click_point(point)
+    assert offsets.UI_NPCSHOP in town.panels
+    assert town.world_clicks, "the retry must reopen the dialog, not press on"
+
+
+def test_an_npc_anchored_row_moves_with_the_npc(town):
+    """R97, the defect behind the whole T19/T27 history: an NPC dialog row
+    is drawn relative to the NPC, and NPCs wander. A stored screen position
+    is therefore a snapshot of one accidental arrangement — which is why
+    three separately verified fractions each worked once and then failed.
+    The click target must be recomputed from where the NPC is NOW."""
+    from pd2bot.uipoints import UIPoint
+
+    point = UIPoint(
+        "test.row", offsets.UI_NPCMENU,
+        anchor_npc=offsets.NPC_CHARSI, npc_offset=(8, -211),
+    )
+    step = layer(town, TownConfig(ui_points={point.name: point}))
+
+    here = step.point_pixel(point)
+    # Charsi takes a few steps; nothing else changes.
+    globals()["CHARSI_POS"] = (CHARSI_POS[0] + 6, CHARSI_POS[1] - 4)
+    try:
+        there = step.point_pixel(point)
+    finally:
+        globals()["CHARSI_POS"] = (5824, 5724)
+    assert here != there, "the row must follow the NPC, not stay put"
+
+
+def test_an_npc_anchored_row_refuses_when_the_npc_is_out_of_range(town):
+    """Better to fail naming the reason than to click a projected guess:
+    without the NPC there is no anchor, and the row could be anywhere."""
+    from pd2bot.uipoints import UIPoint
+
+    point = UIPoint(
+        "test.row", offsets.UI_NPCMENU,
+        anchor_npc=offsets.NPC_CHARSI, npc_offset=(8, -211),
+    )
+    town.charsi_present = False
+    step = layer(town, TownConfig(ui_points={point.name: point}))
+    with pytest.raises(TownError, match="not in perception range"):
+        step.point_pixel(point)
+
+
+def test_a_screen_anchored_point_ignores_the_npcs(town):
+    """The waypoint list and the stash really are fixed furniture — proven
+    live (T26, T16) — so they must not acquire NPC-dependent behaviour."""
+    from pd2bot.uipoints import UIPoint
+
+    point = UIPoint("test.fixed", offsets.UI_STASH, fraction=(0.5, 0.5))
+    step = layer(town, TownConfig(ui_points={point.name: point}))
+    before = step.point_pixel(point)
+    town.charsi_present = False
+    assert step.point_pixel(point) == before
+
+
+def test_closing_panels_covers_every_blocking_panel(town):
+    """The close list and the guard's refuse list must be the same list —
+    a panel in one and not the other is a panel the layer cannot clear."""
+    for panel_id in uistate.blocking_panels():
+        town.panels.add(panel_id)
+    layer(town).close_panels()
+    assert town.panels == set()
 
 
 # -- repair (R70) -------------------------------------------------------------
@@ -677,8 +1314,12 @@ def with_durability(town_state, monkeypatch, items):
 REPAIR_CFG = TownConfig(
     inventory_origin=(0.60, 0.40),
     inventory_cell=(0.02, 0.03),
-    trade_repair_row=(0.30, 0.60),
-    repair_all_button=(0.20, 0.80),
+    # The trade row is chosen by ordinal now, not by position (R104), so it
+    # takes a row index; the repair-all button lives in the shop panel,
+    # which really is fixed furniture, and stays a fraction.
+    ui_points=points(
+        {"charsi.trade_repair": 2, "charsi.repair_all": (0.20, 0.80)}
+    ),
 )
 
 
@@ -692,7 +1333,7 @@ def test_repair_goes_for_even_slight_wear(town, monkeypatch):
     def click_world(x, y, **kwargs):
         town.world_clicks.append((x, y))
         if (x, y) == charsi:
-            town.panels.add(offsets.UI_NPCMENU)
+            town._open_dialog(offsets.NPC_CHARSI)
         return (0, 0)
 
     def panel_click(panel_id, sx, sy, button="left", shift=False):
@@ -722,12 +1363,15 @@ def test_repair_skips_only_when_gear_is_pristine(town, monkeypatch):
 
 
 def test_repair_refuses_without_calibration(town, monkeypatch):
-    """TownConfig ships T18's measured fractions, so this strips them
-    explicitly: an uncalibrated build must refuse rather than guess."""
+    """An uncalibrated point must refuse rather than guess — and refuse
+    BEFORE the walk, since crossing town first buys nothing (R87)."""
     with_durability(town, monkeypatch, [worn(1, 5, 100)])
-    bare = TownConfig(trade_repair_row=None, repair_all_button=None)
-    with pytest.raises(Uncalibrated, match="repair UI is not calibrated"):
+    # Stripped explicitly rather than relying on what happens to ship
+    # uncalibrated today: the point is the refusal, not the inventory.
+    bare = TownConfig(ui_points=points({"charsi.trade_repair": None}))
+    with pytest.raises(Uncalibrated, match=r"charsi\.trade_repair is not calibrated"):
         layer(town, bare).repair_at_charsi(PreambleReport())
+    assert town.walked == [] and town.world_clicks == []
 
 
 def test_repair_walks_clicks_and_verifies_by_durability(town, monkeypatch):
@@ -742,7 +1386,7 @@ def test_repair_walks_clicks_and_verifies_by_durability(town, monkeypatch):
     def click_world(x, y, **kwargs):
         if (x, y) == charsi:
             town.world_clicks.append((x, y))
-            town.panels.add(offsets.UI_NPCMENU)
+            town._open_dialog(offsets.NPC_CHARSI)
             return (0, 0)
         return original_world(x, y, **kwargs)
 
@@ -760,7 +1404,11 @@ def test_repair_walks_clicks_and_verifies_by_durability(town, monkeypatch):
     report = PreambleReport()
     layer(town, REPAIR_CFG).repair_at_charsi(report)
     assert report.repaired == 2
-    assert [c[0] for c in town.panel_clicks] == [offsets.UI_NPCMENU, offsets.UI_NPCSHOP]
+    # The dialog row is chosen by KEYBOARD now (1 Down, then Enter, for row 2
+    # of 3) and only the shop's repair-all button is clicked (R104).
+    assert [c[0] for c in town.panel_clicks] == [offsets.UI_NPCSHOP]
+    assert (offsets.UI_NPCMENU, 0x28) in town.pressed  # a Down
+    assert (offsets.UI_NPCMENU, 0x0D) in town.pressed  # then Enter
     assert all(d.missing == 0 for d in items)
 
 
@@ -773,7 +1421,7 @@ def test_repair_halts_when_durability_does_not_recover(town, monkeypatch):
     def click_world(x, y, **kwargs):
         town.world_clicks.append((x, y))
         if (x, y) == charsi:
-            town.panels.add(offsets.UI_NPCMENU)
+            town._open_dialog(offsets.NPC_CHARSI)
         return (0, 0)
 
     def panel_click(panel_id, sx, sy, button="left", shift=False):
@@ -786,7 +1434,7 @@ def test_repair_halts_when_durability_does_not_recover(town, monkeypatch):
     town.panel_click = panel_click
     town.press_escape = lambda: town.panels.clear()
 
-    with pytest.raises(TownError, match="repair-all button:.*no effect"):
+    with pytest.raises(TownError, match=r"charsi\.repair_all:.*no effect"):
         layer(town, REPAIR_CFG).repair_at_charsi(PreambleReport())
     assert len(town.alerts) == 1
 
@@ -804,7 +1452,7 @@ def test_repair_retries_a_missed_npc_click(town, monkeypatch):
         attempts.append((x, y))
         town.world_clicks.append((x, y))
         if (x, y) == charsi and len(attempts) >= 2:  # the first click misses
-            town.panels.add(offsets.UI_NPCMENU)
+            town._open_dialog(offsets.NPC_CHARSI)
         return (700, 400)
 
     def panel_click(panel_id, sx, sy, button="left", shift=False):
@@ -872,7 +1520,7 @@ def test_panel_clicks_wait_for_the_panel_to_settle(town, monkeypatch):
     step._sleep = slept.append
     town.panels.add(offsets.UI_NPCMENU)
     step.click_in_panel_until(
-        offsets.UI_NPCMENU, (0.5, 0.5), lambda: True, what="a row"
+        offsets.UI_NPCMENU, lambda: (768, 432), lambda: True, what="a row"
     )
     assert slept and slept[0] == TownConfig().panel_settle_s
 
@@ -885,7 +1533,7 @@ def test_panel_click_retries_then_reports_what_is_on_screen(town):
     town.panel_click = lambda *a, **k: town.panel_clicks.append(a)  # no effect
     with pytest.raises(TownError, match=r"panels now open: npc_menu"):
         layer(town).click_in_panel_until(
-            offsets.UI_NPCMENU, (0.5, 0.5), lambda: False, what="a row"
+            offsets.UI_NPCMENU, lambda: (768, 432), lambda: False, what="a row"
         )
     assert len(town.panel_clicks) == 1 + TownConfig().panel_click_retries
 
@@ -901,7 +1549,7 @@ def test_panel_click_stops_if_the_panel_closes_under_it(town):
     town.panel_click = vanish
     with pytest.raises(TownError, match="no effect"):
         layer(town).click_in_panel_until(
-            offsets.UI_NPCMENU, (0.5, 0.5), lambda: False, what="a row"
+            offsets.UI_NPCMENU, lambda: (768, 432), lambda: False, what="a row"
         )
     assert len(town.panel_clicks) == 1  # did not keep clicking at nothing
 
@@ -927,7 +1575,7 @@ def test_a_stop_request_breaks_out_of_the_retry_ladders(town):
     step._should_stop = lambda: stop["now"]
     with pytest.raises(TownStopped):
         step.click_in_panel_until(
-            offsets.UI_NPCMENU, (0.5, 0.5), lambda: False, what="a row"
+            offsets.UI_NPCMENU, lambda: (768, 432), lambda: False, what="a row"
         )
     assert len(town.panel_clicks) == 1  # stopped instead of exhausting retries
 

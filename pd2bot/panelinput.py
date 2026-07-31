@@ -41,6 +41,7 @@ from pd2bot import offsets, uistate
 from pd2bot.input import (
     _CLICK_HOLD_S,
     _KEY_UP,
+    _MODIFIER_SETTLE_S,
     _MOUSE_LEFTDOWN,
     _MOUSE_LEFTUP,
     _MOUSE_RIGHTDOWN,
@@ -103,6 +104,26 @@ class PanelInput:
 
     # -- sends (all gated) ----------------------------------------------------
 
+    def press_key(self, expected_panel: int, vk: int) -> None:
+        """Guarded keypress while a named panel is open.
+
+        Exists because NPC dialogs can be driven by keyboard — arrows move
+        the highlight, Enter selects (user discovery, R104) — and neither
+        existing path may do it: `GatedInput` refuses while a blocking panel
+        is open (rightly: the key is not going to the world), and `MenuInput`
+        refuses in a game without the ESC menu. Same narrow guard as `click`:
+        the caller names the panel it believes is open, and that belief is
+        re-checked against a fresh read at send time.
+
+        The keys this exists to send are the dangerous ones — Enter into a
+        dialog CHOOSES something (R89) — so there is no unguarded variant
+        and no bypass, exactly as for clicks.
+        """
+        self.check(expected_panel)
+        _send_key(vk, 0)
+        time.sleep(_CLICK_HOLD_S)
+        _send_key(vk, _KEY_UP)
+
     def click(
         self,
         expected_panel: int,
@@ -111,8 +132,18 @@ class PanelInput:
         button: str = "left",
         *,
         shift: bool = False,
+        move_settle_s: float | None = None,
     ) -> None:
-        """Guarded click at absolute screen coordinates inside a named panel."""
+        """Guarded click at absolute screen coordinates inside a named panel.
+
+        `move_settle_s` overrides the pause between the cursor move and the
+        press. The default (50 ms, M1-proven against world clicks) is barely
+        over one 25 fps sim frame, and some panel controls only react to a
+        press once the hover has been processed — so a control that ignores
+        a normal click may take a slower one. Exposed rather than raised
+        blindly because a longer pause costs real time on every click; the
+        T24 battery measures which controls actually need it.
+        """
         self.check(expected_panel, sx, sy)
         down, up = (
             (_MOUSE_LEFTDOWN, _MOUSE_LEFTUP)
@@ -120,14 +151,21 @@ class PanelInput:
             else (_MOUSE_RIGHTDOWN, _MOUSE_RIGHTUP)
         )
         user32.SetCursorPos(sx, sy)
-        time.sleep(_PRE_CLICK_PAUSE_S)
+        time.sleep(_PRE_CLICK_PAUSE_S if move_settle_s is None else move_settle_s)
         self.check(expected_panel, sx, sy)  # the panel may have closed under us
         if shift:
+            # Settle a frame on each side of the click: shift and click in
+            # the SAME frame is a race the game can resolve as an unmodified
+            # click — which USED a Tome of Identify instead of stashing it
+            # (R113). See _MODIFIER_SETTLE_S in input.py.
             _send_key(VK_SHIFT, 0)
+            time.sleep(_MODIFIER_SETTLE_S)
         try:
             _send_mouse_flag(down)
             time.sleep(_CLICK_HOLD_S)
             _send_mouse_flag(up)
+            if shift:
+                time.sleep(_MODIFIER_SETTLE_S)
         finally:
             if shift:
                 _send_key(VK_SHIFT, _KEY_UP)

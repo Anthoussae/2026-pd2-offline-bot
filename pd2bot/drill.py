@@ -15,7 +15,7 @@ the next. This module is those fixes, factored, plus the user's protocol
                                     an input warning (hands-off or you-drive)
                                     TEST LIVE
     the body runs
-    at the end:                     TEST CONCLUDED — <status>
+    at the end:                     TEST <id> CONCLUDED — <status>
     every run appends one row to docs/drill-log.md (the human-readable
     record; the instruction log stays the request protocol)
 
@@ -33,10 +33,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from pd2bot import uistate
+from pd2bot import offsets, uistate
 from pd2bot.chat import Chat
 from pd2bot.items import CarriedItem, read_carried_items
 from pd2bot.memory import GameSession
+from pd2bot.menuinput import MenuInput
+from pd2bot.player import read_player
 from pd2bot.window import GameWindow
 
 DEFAULT_LOG = Path("docs/drill-log.md")
@@ -160,6 +162,91 @@ class DrillRun:
         print("chat> (never delivered)", flush=True)
         return False
 
+    def player_is_dead(self) -> bool:
+        """A conservative read of the death state, for send decisions.
+
+        The `SafetyMonitor` latch is per-instance and the harness has no
+        monitor, so this reads the same condition directly. It exists so the
+        rule survives here too: after a death the bot sends NOTHING, ever.
+        """
+        try:
+            player = read_player(self.session)
+        except Exception:
+            return True  # unreadable: assume the worst and send nothing
+        if player is None:
+            return False  # menus or loading, not death
+        return (
+            player.mode in (offsets.PLAYER_MODE_DEATH, offsets.PLAYER_MODE_DEAD)
+            or player.hp <= 0
+        )
+
+    def make_chat_possible(
+        self, *, may_send_input: bool, timeout_s: float = 25.0
+    ) -> bool:
+        """Clear the way for a chat message, and say whether it worked.
+
+        Chat refuses while a panel is open (R89) — and a failing drill tends
+        to end with exactly that, because the step that failed was usually
+        mid-panel. So the one message the user most needs, "this test is
+        over, you can stop waiting", was the one that could not be
+        delivered: T27 died with Akara's dialog up and its conclusion came
+        out `(never delivered)` (user request, R95).
+
+        A drill that already sends input may press ESC to clear the way; a
+        read-only one must not, so it waits for the human instead — the
+        no-input contract is not worth breaking for a status message.
+        """
+        def blocked() -> bool:
+            # Fails OPEN: this helper only clears the way, it is not the
+            # gate. If the UI array cannot be read we still attempt the
+            # message, and `Chat`'s own guard — which reads the same array —
+            # makes the real decision about whether a key may be sent.
+            try:
+                return uistate.read_ui_state(self.session, self.ui_array).blocks_input
+            except Exception:
+                return False
+
+        if not blocked():
+            return True
+        if may_send_input and not self.player_is_dead():
+            menu = MenuInput(self.session, ui_array=self.ui_array)
+            for _ in range(6):
+                if not blocked():
+                    return True
+                try:
+                    menu.press_escape()
+                except Exception:
+                    pass  # refused (focus, state) — the wait below still applies
+                self.sleep(0.5)
+            return not blocked()
+        deadline = self.clock() + timeout_s
+        while self.clock() < deadline and blocked():
+            self.sleep(0.3)
+        return not blocked()
+
+    def wait_until(
+        self,
+        condition: Callable[[], bool],
+        *,
+        timeout_s: float = 300.0,
+        poll_s: float = 0.15,
+    ) -> bool:
+        """Wait for `condition` in SILENCE — no chat, no keys, nothing sent.
+
+        `announce_until` cannot be used once a panel is on screen: it repeats
+        a chat message, and chat opens with Enter, which an NPC dialog reads
+        as choosing an option (R89). A calibration that talks its way through
+        a dialog is a calibration that changes what it is measuring. So drills
+        that work inside panels brief the user up front and then go quiet,
+        watching instead of prompting."""
+        deadline = self.clock() + timeout_s
+        while self.clock() < deadline:
+            self.check_cancel()
+            if condition():
+                return True
+            self.sleep(poll_s)
+        return False
+
     def announce_until(
         self,
         text: str,
@@ -206,13 +293,26 @@ class DrillRun:
     ) -> tuple[int, int, float, float] | None:
         """Wait for the cursor to hold still, return (x, y, fx, fy).
 
-        Carries both paid-for fixes: the capture cannot fire until the
-        cursor has moved `rearm_px` away from `last_point` (R57), and it
-        only samples while `required_panel` is open and the cursor is
-        inside the client rect."""
+        The capture cannot fire until the cursor has moved `rearm_px` away
+        from `last_point` (R57), and it only samples while `required_panel`
+        is open and the cursor is inside the client rect.
+
+        `last_point=None` used to mean "armed immediately", and that was the
+        R57 defect wearing a different hat (R86). The FIRST capture of a
+        drill is precisely when the hand is resting on something the user
+        has just clicked — the NPC they opened the dialog with — so an
+        immediately-armed capture returns that click point, silently, as a
+        plausible-looking calibration. T18 and T20 both did exactly this;
+        T18's "trade/repair row" was really Charsi's portrait, 488 px off,
+        and it took three failed live runs to catch. So None now means
+        "arm against wherever the cursor is right now": every capture
+        demands a deliberate move onto the target, and the worst case is
+        that a user already on the target moves off and back."""
         rect = self.window.client_rect()
         history: list[tuple[int, int]] = []
-        armed = last_point is None
+        if last_point is None:
+            last_point = self.cursor()
+        armed = False
         deadline = self.clock() + timeout_s
         while self.clock() < deadline:
             self.check_cancel()
@@ -361,14 +461,30 @@ def run_drill(
 
     if started:
         try:
+            # Getting this message THROUGH matters as much as sending it
+            # (user request, R95): the user is watching the game, not the
+            # console, and a drill that ends without saying so leaves them
+            # waiting on a bot that stopped minutes ago. A failing drill
+            # usually ends mid-panel, and chat refuses while a panel is open
+            # — so clear the way first, by ESC if this drill was already
+            # sending input, by waiting if it was not.
+            run.make_chat_possible(may_send_input=drill.sends_input)
+            # Name the test in the chat line, not just in the transcript
+            # (user request, R85): a suite announces several conclusions into
+            # the same chat window, and "CONCLUDED — FAILED" on its own
+            # leaves the person watching to work out which test that was.
             # A cancelled run should not spend thirty seconds announcing it,
             # and must not raise the cancel again on the way out.
-            run.say(
-                f"TEST CONCLUDED — {status}",
-                patience_s=3.0 if run.cancelled else 30.0,
-            )
+            patience = 3.0 if run.cancelled else 30.0
+            run.say(f"TEST {drill.test_id} CONCLUDED — {status}", patience_s=patience)
+            if status != "PASS":
+                # The reason too, trimmed: enough to decide what to do next
+                # without alt-tabbing to read the transcript.
+                run.say(f"T{drill.test_id[1:]} reason: {result[:160]}", patience_s=patience)
         except DrillAborted:
             pass
+        except Exception as exc:  # noqa: BLE001 - never let reporting mask the result
+            print(f"(could not announce the conclusion in game: {exc})", flush=True)
 
     print(f"\nTEST {drill.test_id} CONCLUDED — {status}: {result}", flush=True)
     append_log_row(log_path, drill, status, result)

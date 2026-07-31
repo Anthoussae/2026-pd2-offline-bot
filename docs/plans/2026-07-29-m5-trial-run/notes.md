@@ -402,6 +402,46 @@ Two structural lessons outlast the specific bugs:
   to intervene short of killing the bridge. Every ladder now honours an
   outside veto wired to the cancel file.
 
+### The calibration crisis (R85–R90) — three bugs, all in our own tooling
+
+T19 failed live four times at Charsi. None of the causes were in the game,
+and none were where the failure appeared. Worth recording as a set, because
+they only became findable once each one stopped hiding the next:
+
+1. **The measuring instrument was wrong.** `capture_hover(last_point=None)`
+   meant "armed immediately", and the first capture of a drill happens
+   exactly when the user's hand is still resting where they clicked the NPC.
+   So T18 recorded Charsi's portrait as the "trade/repair row" — a
+   plausible-looking number, 149 px off in X, which made every later click
+   land past the end of the line. T20's resurrect row was measured the same
+   way. **A calibration procedure can produce confident, precise, wrong
+   numbers, and nothing downstream can tell.**
+2. **The instrument disturbed what it measured.** Chat opens with Enter, and
+   Enter into an open NPC dialog *selects an option*. Every prompt the drill
+   chatted while a dialog was up was silently clicking through menus — and
+   because the console then never opened, `say` retried once a second for a
+   minute, doing it again each time. Two runs of the same drill measured the
+   same row 46 px apart for this reason alone. The user diagnosed it from
+   watching the screen, not from the logs.
+3. **The stop button was broken.** `drill-cancel.ps1` had an em dash inside
+   a string, and PowerShell 5.1 reads a BOM-less `.ps1` as ANSI — so the one
+   tool whose whole job is to work in an emergency died on a parse error at
+   the moment it was needed. Tool scripts are ASCII-only now and cancel is
+   exercised in both directions.
+
+The structural lesson is about *where* to look. Six live failures were read
+as game-behaviour puzzles (does the menu shift? does the click register?)
+when three were instrument defects. The tell, in hindsight: measurements that
+disagreed with each other. Two runs producing different numbers for the same
+fixed thing is not noise to average — it is the instrument reporting itself
+broken.
+
+The fix that came out of it is the user's design (R87): a click target is
+**data** — `UIPoint(name, panel, fraction, opens)` — with one code path for
+clicking any of them, one drill for calibrating any of them, and a hard rule
+that an uncalibrated point refuses rather than guesses. Calibration runs with
+the bot sending nothing at all, briefed up front and silent throughout.
+
 ### T17 (R68) — the kind table was innocent; travel clicks are the hazard
 
 T17 measured NPCs by proximity (stand on them, read the nearest non-merc

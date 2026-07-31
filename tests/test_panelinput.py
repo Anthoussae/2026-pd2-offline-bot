@@ -59,7 +59,10 @@ def sent(monkeypatch):
     monkeypatch.setattr(
         "pd2bot.panelinput._send_key", lambda vk, f: record.append(("key", vk, f))
     )
-    monkeypatch.setattr("pd2bot.panelinput.time", SimpleNamespace(sleep=lambda s: None))
+    monkeypatch.setattr(
+        "pd2bot.panelinput.time",
+        SimpleNamespace(sleep=lambda s: record.append(("sleep", s))),
+    )
     monkeypatch.setattr(
         "pd2bot.panelinput.user32",
         SimpleNamespace(SetCursorPos=lambda x, y: record.append(("cursor", x, y))),
@@ -79,6 +82,62 @@ def test_click_allowed_when_the_named_panel_is_open(sent):
     panel(session).click(offsets.UI_NPCMENU, 400, 300)
     assert ("cursor", 400, 300) in sent
     assert ("mouse", 0x0002) in sent and ("mouse", 0x0004) in sent
+
+
+def test_shift_settles_a_frame_clear_of_the_click_on_both_sides(sent):
+    """R113: shift and click sent in the same frame is a race the game can
+    resolve as an UNMODIFIED click — which used a Tome of Identify instead
+    of stashing it. Shift must be provably down a frame before the press
+    and provably still down a frame after the release."""
+    from pd2bot.input import _MODIFIER_SETTLE_S, VK_SHIFT
+
+    session = make_session(open_panels=(offsets.UI_STASH,))
+    panel(session).click(offsets.UI_STASH, 400, 300, button="right", shift=True)
+
+    def index(event):
+        return sent.index(event)
+
+    shift_down = index(("key", VK_SHIFT, 0))
+    mouse_down = index(("mouse", 0x0008))
+    mouse_up = index(("mouse", 0x0010))
+    shift_up = index(("key", VK_SHIFT, 0x0002))
+    assert shift_down < mouse_down < mouse_up < shift_up
+    # A settle sleep sits between shift-down and the press, and between the
+    # release and shift-up — the two sides of the race.
+    assert ("sleep", _MODIFIER_SETTLE_S) in sent[shift_down:mouse_down]
+    assert ("sleep", _MODIFIER_SETTLE_S) in sent[mouse_up:shift_up]
+
+
+def test_key_allowed_when_the_named_panel_is_open(sent):
+    """R104: NPC dialogs are keyboard-navigable, and neither other gate may
+    send those keys — GatedInput refuses with a blocking panel open, and
+    MenuInput refuses in a game without the ESC menu."""
+    from pd2bot.input import VK_RETURN
+
+    session = make_session(open_panels=(offsets.UI_NPCMENU,))
+    panel(session).press_key(offsets.UI_NPCMENU, VK_RETURN)
+    assert ("key", VK_RETURN, 0) in sent  # pressed
+    assert ("key", VK_RETURN, 0x0002) in sent  # and released
+
+
+def test_key_refused_when_the_named_panel_is_not_open(sent):
+    """The key this exists to send is Enter, and an Enter that misses its
+    panel is exactly the R89 defect — it chooses something elsewhere."""
+    from pd2bot.input import VK_RETURN
+
+    session = make_session(open_panels=(offsets.UI_INVENTORY,))
+    with pytest.raises(InputRefused, match="npc_menu panel is not open"):
+        panel(session).press_key(offsets.UI_NPCMENU, VK_RETURN)
+    assert sent == []
+
+
+def test_key_refused_without_foreground(sent):
+    from pd2bot.input import VK_DOWN
+
+    session = make_session(open_panels=(offsets.UI_NPCMENU,))
+    with pytest.raises(InputRefused, match="foreground"):
+        panel(session, foreground=False).press_key(offsets.UI_NPCMENU, VK_DOWN)
+    assert sent == []
 
 
 def test_refused_out_of_a_game(sent):

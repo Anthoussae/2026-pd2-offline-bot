@@ -44,6 +44,13 @@ STUCK_EPSILON = 1  # the drift (in subtiles) that counts as movement
 POLL_SECONDS = 0.1
 UI_WAIT_TIMEOUT = 10.0  # how long we tolerate a blocking panel before failing
 WAYPOINT_TIMEOUT = 20.0  # hard per-waypoint cap, whatever else happens
+# A travel click landing near an interactive unit INTERACTS instead of
+# moving: an NPC opens their dialog, the town waypoint opens its menu (R68,
+# and live again in T27/R111 — Akara's approach passes the waypoint at the
+# same y, so every retry re-clicked it). Clicks aimed within this many
+# subtiles of a known interactive thing are nudged away before being sent.
+AVOID_RADIUS = 4
+AVOID_MARGIN = 2  # how far beyond the radius the nudged click lands
 MAX_FAILURES = 5  # consecutive no-progress plan cycles before giving up
 PROGRESS_RESET = 3.0  # subtiles closer to the goal that make a cycle "progress"
 
@@ -86,12 +93,16 @@ class Navigator:
         grid_provider: Callable[[], Grid],
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        avoid_provider: Callable[[], tuple[Point, ...]] | None = None,
     ) -> None:
         self._position = position_reader
         self._input = gated_input
         self._grid_provider = grid_provider
         self._clock = clock
         self._sleep = sleep
+        # Where the clickable hazards are RIGHT NOW (NPCs pace), or None for
+        # environments with nothing interactive to hit (tests, open field).
+        self._avoid = avoid_provider
 
     # -- pieces ---------------------------------------------------------------
 
@@ -126,10 +137,39 @@ class Navigator:
                     ) from refused
                 self._sleep(POLL_SECONDS)
 
+    def _safe_click_point(self, waypoint: Point, result: WalkResult) -> Point:
+        """Nudge a travel click off anything interactive near it.
+
+        The click's only job is to make the character walk that way; landing
+        a few subtiles off costs nothing (the loop re-plans freely), while
+        landing ON a unit costs the whole walk — the dialog or menu it opens
+        blocks all further input (R68/R111). So the trade is always worth it.
+        The character's own arrival is unaffected: this adjusts clicks, and
+        arrival is judged by position.
+        """
+        if self._avoid is None:
+            return waypoint
+        wx, wy = waypoint
+        for ax, ay in self._avoid():
+            dx, dy = wx - ax, wy - ay
+            span = max(abs(dx), abs(dy))
+            if span >= AVOID_RADIUS:
+                continue
+            if span == 0:
+                dx, dy, span = 1, 1, 1  # dead centre: any direction will do
+            push = AVOID_RADIUS + AVOID_MARGIN
+            wx = round(ax + dx / span * push)
+            wy = round(ay + dy / span * push)
+            result.log.append(
+                f"click nudged off interactive unit at ({ax}, {ay}): "
+                f"{waypoint} -> ({wx}, {wy})"
+            )
+        return (wx, wy)
+
     def _walk_one_waypoint(self, waypoint: Point, result: WalkResult) -> bool:
         """Walk until inside the arrival radius. True on arrival, False when
         stuck (caller decides whether to re-plan)."""
-        self._click(waypoint, result)
+        self._click(self._safe_click_point(waypoint, result), result)
         waypoint_deadline = self._clock() + WAYPOINT_TIMEOUT
         last_position = self.position()
         last_moved = self._clock()
@@ -151,7 +191,7 @@ class Navigator:
                     reclicked = True
                     result.reclicks += 1
                     result.log.append(f"re-click at {position} toward {waypoint}")
-                    self._click(waypoint, result)
+                    self._click(self._safe_click_point(waypoint, result), result)
                     last_moved = self._clock()
                     continue
                 result.log.append(f"stuck at {position} toward {waypoint}")
@@ -307,10 +347,31 @@ def live_navigator(session, store, difficulty: int = 2) -> Navigator:
         explored.record(live)
         return OverlayGrid(base=explored, overlay=live)
 
+    def clickable_hazards() -> tuple[Point, ...]:
+        """Everything a travel click must not land on, where it is NOW.
+
+        NPCs and world objects both interact on click (R68/R111): a dialog
+        or menu opens and blocks all further input, killing the walk. Read
+        fresh per click because NPCs pace. Corpses are excluded — nothing
+        opens — and monsters are deliberately NOT avoided: outside town a
+        click near a monster is at worst an attack, and dodging every
+        hostile would make Cold Plains unwalkable.
+        """
+        from pd2bot.snapshot import Perception
+
+        try:
+            snap = Perception(session).snapshot()
+        except Exception:
+            return ()  # unreadable mid-load: no avoidance beats no walk
+        points = [o.position for o in snap.objects]
+        points += [a.position for a in snap.allies if a.is_alive]
+        return tuple(points)
+
     return Navigator(
         position_reader=position,
         gated_input=GatedInput(session),
         grid_provider=grid,
+        avoid_provider=clickable_hazards,
     )
 
 

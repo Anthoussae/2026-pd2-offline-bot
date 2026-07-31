@@ -22,7 +22,7 @@
 #
 # Trust model (user decision, R31): while this loop runs, anything that can
 # write to the queue directory executes as Administrator. That is the point
-# — sole-user machine, and the agent's commands still appear in the app's
+# - sole-user machine, and the agent's commands still appear in the app's
 # normal tool flow. Every command is also echoed here before it runs, so
 # this window doubles as a live audit log. Stale *.cmd.ps1 files found at
 # startup are quarantined (renamed *.stale), never executed.

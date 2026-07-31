@@ -63,6 +63,10 @@ Pathfinding algorithms like A* operate on this grid. Our bot reads them
 from the live game's memory and remembers them in a per-seed atlas
 (single-player maps never change).
 
+**flaky test** — a test that sometimes passes and sometimes fails with no code change in between. Usually a symptom of a race condition, a timing assumption, or a fragile selector in the test itself; professionals treat flakiness as a bug in the test harness to be fixed, not ignored. *(First seen: 2026-07-31, when the tools lie.)*
+
+**fragile selector** — locating something by where it happens to be (a pixel position, "the third element on the page") rather than by a stable identity. Breaks silently the moment the layout shifts. The cure is addressing by identity: an ID, a label, or an ordinal in a structure that cannot move. *(First seen: 2026-07-31, when the tools lie.)*
+
 **hang** — when a program stops making progress but does not exit: it sits
 there, using no CPU, waiting for something that will never happen. Different
 from a crash (which ends the program) and often worse, because nothing
@@ -78,6 +82,8 @@ keyboard — just "here is a seed, give me the layout" over a pipe.
 when computing the exact answer up front would be too slow; "good guess
 math." In A*, the heuristic is the straight-line distance to the goal,
 used to decide which route to try extending next.
+
+**idempotent** — describes an operation where doing it twice has the same effect as doing it once, which makes retries and resumes safe. Achieved most simply by checking the world before acting ("is there anything to do?") rather than keeping a checklist. *(First seen: 2026-07-31, when the tools lie.)*
 
 **in-process vs out-of-process** — whether your code runs *inside* the
 target program (injected, typically as a DLL) or as a separate program
@@ -102,6 +108,8 @@ until a human clicks a button ("OK", "Retry"). Fine on a desktop; fatal for
 automation, because a headless program that pops one has no human to click
 it — it hangs until someone notices. This is exactly how PD2's bundled
 display mod stopped our map generator.
+
+**modifier key** — Shift, Ctrl, or Alt held down to change what another input means. In automation, the modifier must provably be down before, during, and after the click it modifies — sending both in the same instant is a race condition. *(First seen: 2026-07-31, when the tools lie.)*
 
 **package / module** — a module is a single `.py` file; a package is a directory
 of modules imported under one name (here, `pd2bot`). The boundaries you draw
@@ -131,6 +139,8 @@ seen in [the game cycle](2026-07-29-the-game-cycle.md).
 before software can continue. We now log every such request (type and
 outcome) in `docs/instruction-log.md`, so the load can be measured and
 engineered down instead of guessed at.
+
+**race condition** — a bug where two events arrive so close together that the processing order is effectively random, and one order is wrong. Notoriously hard to find because the wrong order may be rare, and harmless in most places it occurs. Fixed by forcing the order (waits, locks, sequencing). *(First seen: 2026-07-31, when the tools lie.)*
 
 **SHA (commit hash)** — every git commit is identified by a fingerprint
 computed from its entire content (files, message, parent, author) using

@@ -154,6 +154,17 @@ _BLOCKING_PANELS = frozenset(
     }
 )
 
+def blocking_panels() -> tuple[int, ...]:
+    """The panels that make world input illegal, in a stable order.
+
+    Published so callers that must *recover* from a blocking panel (close
+    it, name it in an error) work from the same list as the guard that
+    refuses because of it. A caller keeping its own shorter copy is how a
+    stray waypoint click became an undiagnosable NavigationError (R85).
+    """
+    return tuple(sorted(_BLOCKING_PANELS))
+
+
 _PANEL_COUNT = 0x26  # the bounds check compiled into GetUiVar_I
 
 

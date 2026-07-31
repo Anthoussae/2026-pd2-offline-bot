@@ -84,13 +84,14 @@ class FakeInput:
         return (0, 0)
 
 
-def navigator(world, sim, fake_input, grid_provider=None):
+def navigator(world, sim, fake_input, grid_provider=None, avoid=None):
     return Navigator(
         position_reader=world.position,
         gated_input=fake_input,
         grid_provider=grid_provider or (lambda: OpenGrid()),
         clock=sim.clock,
         sleep=sim.sleep,
+        avoid_provider=avoid,
     )
 
 
@@ -103,6 +104,48 @@ def test_walks_to_target():
     assert result.clicks >= 2  # at least two waypoints on a 20-cell run
     assert result.replans == 0
     assert result.duration_seconds > 0
+
+
+def test_travel_clicks_avoid_interactive_units():
+    """R68/R111, fixed at the level the notes prescribed: a travel click
+    near an NPC or object INTERACTS instead of moving, and the panel it
+    opens kills the walk. So clicks aimed near a known hazard are nudged
+    away before being sent — Akara's approach can pass the town waypoint
+    without ever clicking it."""
+    from pd2bot.navigate import AVOID_RADIUS
+
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    hazard = (10, 0)  # squarely on the route to (20, 0)
+    result = navigator(world, sim, fake, avoid=lambda: (hazard,)).walk_to((20, 0))
+    assert abs(result.arrived_at[0] - 20) <= 3  # still arrives
+    for click in fake.clicks:
+        span = max(abs(click[0] - hazard[0]), abs(click[1] - hazard[1]))
+        assert span >= AVOID_RADIUS, f"click {click} landed on the hazard"
+    assert any("nudged" in line for line in result.log)
+
+
+def test_no_avoid_provider_changes_nothing():
+    """Environments with nothing interactive (tests, open field) pass None
+    and get the untouched click stream."""
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    result = navigator(world, sim, fake, avoid=None).walk_to((20, 0))
+    assert abs(result.arrived_at[0] - 20) <= 3
+    assert not any("nudged" in line for line in result.log)
+
+
+def test_a_hazard_off_the_route_is_ignored():
+    """Only clicks AIMED near a hazard are adjusted — avoidance must not
+    warp a walk that was never going to touch anything."""
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    result = navigator(world, sim, fake, avoid=lambda: ((10, 40),)).walk_to((20, 0))
+    assert abs(result.arrived_at[0] - 20) <= 3
+    assert not any("nudged" in line for line in result.log)
 
 
 def test_already_there():

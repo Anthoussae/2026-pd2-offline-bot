@@ -54,7 +54,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from pd2bot import offsets, uistate
-from pd2bot.input import VK_I, GatedInput
+from pd2bot.input import VK_DOWN, VK_I, VK_RETURN, GatedInput
 from pd2bot.items import (
     CarriedItem,
     CarriedItems,
@@ -66,7 +66,9 @@ from pd2bot.menuinput import MenuInput
 from pd2bot.navigate import NavigationError
 from pd2bot.panelinput import PanelInput
 from pd2bot.player import Player, read_player
+from pd2bot.screen import projection_for
 from pd2bot.snapshot import GameSnapshot
+from pd2bot.uipoints import UIPoint, default_points
 
 
 class TownError(RuntimeError):
@@ -87,6 +89,22 @@ class BeltBelowMinimum(TownError):
 
 class Uncalibrated(TownError):
     """A step needs a hover calibration that has not been run."""
+
+
+def _potion_type(item: CarriedItem) -> str | None:
+    """"healing" / "mana" / "rejuv", or None for anything else.
+
+    Coarser than `potion_name`, which is per-kind ("healing_606"), because
+    the belt fills by COLUMN: whether a potion fits depends on its type, not
+    on which tier of that type it happens to be (R53).
+    """
+    if item.is_healing_potion:
+        return "healing"
+    if item.is_mana_potion:
+        return "mana"
+    if item.is_rejuv_potion:
+        return "rejuv"
+    return None
 
 
 def _default_alert(reason: str) -> None:  # pragma: no cover - exercised live
@@ -160,7 +178,27 @@ class TownConfig:
     interact_retries: int = 2
     transfer_attempts: int = 2  # shift-clicks per item before StashFull
     verify_timeout_s: float = 3.0
+    # Between arrow presses when walking an NPC dialog by keyboard
+    # (R104). The menu highlights per key, and D2 samples input per
+    # frame at 25 fps, so this is comfortably more than one frame.
+    key_step_s: float = 0.15
     poll_s: float = 0.2
+    # The stash's contents populate progressively after a tab switch — T15
+    # caught a read with 10 of 18 items still in flight — so a tab toggle
+    # must settle before its effect is read.
+    tab_settle_s: float = 1.0
+    # How long to WAIT for a tab switch to show in the item listing.
+    # Sleeping a fixed interval and reading once failed T35: the list
+    # was still changing (T15's progressive population), so the switch
+    # read as 'did not happen'. Poll instead.
+    tab_timeout_s: float = 3.0
+    # The materials phase attempts EVERY item and expects most to bounce
+    # (R75): the game does the classification, so a refusal is information,
+    # not a fault. At the normal 2 attempts x 3 s that would cost about a
+    # minute of dead time per run, so it fails fast and only the final
+    # phase — where a refusal really is a problem — pays full price.
+    materials_attempts: int = 1
+    materials_verify_s: float = 0.6
     # Calibrated client-rect fractions. None = refuse rather than guess.
     #
     # The inventory pair is T11's snake-sweep fit (R61, 1536x864 window):
@@ -174,11 +212,12 @@ class TownConfig:
     # rule as M4's Save-and-Exit fractions (game-cycle.md).
     inventory_origin: tuple[float, float] | None = (0.5301, 0.4385)
     inventory_cell: tuple[float, float] | None = (0.0268, 0.0461)
-    # Dead-merc state ONLY (R56): the row does not exist while the merc
-    # lives. Captured by T20 (R80) during a real dead-merc window, which
-    # is the only time it can be measured — so it is kept here rather than
-    # re-captured, and T21 re-confirms the merc is dead before trusting it.
-    resurrect_row: tuple[float, float] | None = (0.5716, 0.2569)
+    # Every calibrated click target inside a panel, by name (R87). One
+    # registry rather than a field per control: the per-field version grew
+    # a consumer per field, and the consumers drifted — the same failure
+    # the three NPC steps had before `open_npc_dialog` merged them. See
+    # uipoints.py for what a point is and how each was measured.
+    ui_points: dict[str, UIPoint] = field(default_factory=default_points)
     # Where to stand to find each NPC when they are beyond perception range
     # (80 subtiles). T12 failed exactly here: the bot asked perception for
     # Akara while standing too far away and gave up rather than walking.
@@ -205,12 +244,15 @@ class TownConfig:
     # lands where the button used to be is indistinguishable from success,
     # and the first sign of trouble is gear breaking mid-run in Hell.
     repair_below_pct: float = 100.0
-    # Hover-calibrated at Charsi (T18, R72, 1536x864 window). Re-run T18
-    # after any window or resolution change, and note the R56 caveat: these
-    # belong to the menu as it stood, and NPC rows move with NPC state.
-    trade_repair_row: tuple[float, float] | None = (0.5879, 0.2072)
-    repair_all_button: tuple[float, float] | None = (0.4707, 0.7523)
     walk_retries: int = 3  # travel clicks that open a dialog (see _walk_guarded)
+    # How far to step aside when a route keeps clicking the same object
+    # (R111). Far enough to change the angle, short enough that the
+    # sidestep itself is unlikely to cross anything interactive.
+    sidestep: int = 7
+    # How far to the SIDE of a known obstacle to route, when one keeps
+    # being clicked. Bigger than `sidestep` because it is measured from
+    # the obstacle rather than from us, and has to clear it properly.
+    detour: int = 14
     # Objects need the same treatment as NPCs, and for a stronger reason:
     # perception is capped at 80 subtiles, but the client only keeps NEARBY
     # ROOMS loaded at all, so a distant stash is not merely out of range —
@@ -222,11 +264,6 @@ class TownConfig:
             offsets.OBJ_WAYPOINT_A1: (5884, 5709),
         }
     )
-    # The stash's materials-tab toggle, hover-calibrated (T15, R72).
-    # Nothing uses it yet — which items belong there is P5's pickit work —
-    # but see the tab caveats in this module's docstring before anything
-    # does.
-    materials_tab_button: tuple[float, float] | None = (0.2188, 0.8426)
 
 
 @dataclass
@@ -304,11 +341,22 @@ class TownLayer:
                 return ally.position
         return None
 
+    def _blocking_panels_open(self) -> list[int]:
+        """Which panels are currently making world input illegal.
+
+        Asked of `uistate` rather than a list kept here, because the two
+        lists disagreeing is a silent bug: a panel that blocks input but is
+        absent from this side is one the layer can neither recognise nor
+        close, so the walk it broke surfaces as a bare NavigationError with
+        no diagnosis and no recovery. That is exactly what happened when a
+        travel click landed on the WAYPOINT during T19 (R85) — the waypoint
+        panel has been in the blocking set since P2, but town.py only knew
+        about the NPC menu, the stash, and the inventory.
+        """
+        return [p for p in uistate.blocking_panels() if self._panel_open(p)]
+
     def _any_panel_open(self) -> bool:
-        return any(
-            self._panel_open(p)
-            for p in (offsets.UI_NPCMENU, offsets.UI_STASH, offsets.UI_INVENTORY)
-        )
+        return bool(self._blocking_panels_open())
 
     def _walk_guarded(self, destination: tuple[int, int]) -> None:
         """Walk, surviving travel clicks that land on a bystander.
@@ -327,20 +375,111 @@ class TownLayer:
         attempt makes real progress. Any other NavigationError is a genuine
         pathing failure and propagates untouched.
         """
-        for _ in range(1 + self.config.walk_retries):
+        interrupted_by: list[str] = []
+        for attempt in range(1 + self.config.walk_retries):
             self._check_stop()
             try:
                 self.walk_to(destination)
                 return
             except NavigationError:
-                if not self._any_panel_open():
+                blocking = self._blocking_panels_open()
+                if not blocking:
                     raise  # a real pathing failure, not an accidental chat
-                self._close_panels()
+                interrupted_by += [
+                    offsets.UI_NAMES.get(p, f"ui_{p:#x}") for p in blocking
+                ]
+                self.close_panels()
+                if attempt:
+                    # It has happened before, so the same route will do it
+                    # again: closing the panel and re-walking repeats the
+                    # identical trajectory and the identical misclick. The
+                    # waypoint sits almost in front of Akara, so every
+                    # travel click toward her rakes across it (R111, live in
+                    # T27). Move sideways first and the ray changes.
+                    self._sidestep(destination, blocking)
         raise TownError(
             f"could not reach {destination}: travel clicks kept opening "
-            f"dialogs after {self.config.walk_retries} recoveries — the route "
-            "may run straight through a crowd"
+            f"panels after {self.config.walk_retries} recoveries "
+            f"({', '.join(interrupted_by)}) — the route may run straight "
+            "through a crowd, or past something clickable"
         )
+
+    # Which world object raises which panel, for routing around the thing
+    # that keeps being clicked. Only objects we know the position of are
+    # useful here, which is exactly the set that has a configured position.
+    _PANEL_OBSTACLE = {
+        offsets.UI_WPMENU: offsets.OBJ_WAYPOINT_A1,
+        offsets.UI_STASH: offsets.OBJ_STASH,
+    }
+
+    def _sidestep(
+        self, destination: tuple[int, int], blocking: list[int] | None = None
+    ) -> None:
+        """Break a repeating misclick by changing where we walk FROM.
+
+        The navigator moves by clicking TOWARD the destination, so anything
+        interactive on that line gets clicked instead of walked past — and
+        retrying from the same spot aims down the same line at the same
+        object, forever.
+
+        Stepping a few subtiles sideways is not enough when the obstacle is
+        close: after the first misclick the character is standing right
+        beside it, and a small step barely moves the angle. T27 hit exactly
+        that — the waypoint sits at the same y as Akara's approach point, so
+        it is squarely on the route (R111). So when the offending panel
+        identifies a known object, this walks around THAT, to a point well
+        to its side, and the final approach then comes in from a new angle.
+        Both sides are tried before giving up.
+
+        Best-effort by design: a failed detour must not replace the error the
+        caller actually cares about. Preferred to clicking somewhere "empty"
+        to dismiss the panel, which trades a known misclick for an unknown
+        one — in town, "empty" ground is frequently an NPC.
+        """
+        player = self._read_player(self.session)
+        if player is None:
+            return
+        px, py = player.position
+        dx, dy = destination[0] - px, destination[1] - py
+        span = max(abs(dx), abs(dy))
+        if not span:
+            return
+        perp = (-dy / span, dx / span)
+
+        obstacle = None
+        for panel_id in blocking or []:
+            kind = self._PANEL_OBSTACLE.get(panel_id)
+            if kind is not None:
+                obstacle = self._find_object(kind) or self.config.object_positions.get(
+                    kind
+                )
+                if obstacle:
+                    break
+
+        if obstacle is None:
+            self._try_walk((round(px + perp[0] * self.config.sidestep),
+                            round(py + perp[1] * self.config.sidestep)))
+            return
+        # Round the obstacle, not ourselves: the far side is what changes the
+        # approach angle enough to matter.
+        for sign in (1, -1):
+            target = (
+                round(obstacle[0] + perp[0] * sign * self.config.detour),
+                round(obstacle[1] + perp[1] * sign * self.config.detour),
+            )
+            if self._try_walk(target):
+                return
+
+    def _try_walk(self, target: tuple[int, int]) -> bool:
+        """Walk somewhere, tolerating failure. Returns whether it arrived."""
+        try:
+            self.walk_to(target)
+            return True
+        except NavigationError:
+            return False
+        finally:
+            if self._any_panel_open():
+                self.close_panels()
 
     def _walk_near(self, target: tuple[int, int]) -> None:
         """Get within clicking distance of `target` WITHOUT walking onto it.
@@ -448,18 +587,76 @@ class TownLayer:
         fy = self.config.inventory_origin[1] + cell[1] * self.config.inventory_cell[1]
         return rect.left + round(fx * rect.width), rect.top + round(fy * rect.height)
 
-    def _close_panels(self) -> None:
-        """ESC closes whatever town panel is up; verify it actually closed."""
-        for panel_id in (offsets.UI_STASH, offsets.UI_NPCMENU, offsets.UI_INVENTORY):
-            if self._panel_open(panel_id):
-                self.menu.press_escape()
-                if not self._await(
-                    lambda p=panel_id: not self._panel_open(p),
-                    self.config.verify_timeout_s,
-                ):
-                    raise TownError(
-                        f"{offsets.UI_NAMES.get(panel_id, panel_id)} did not close on ESC"
-                    )
+    def send_until(
+        self,
+        send: Callable[[], None],
+        condition: Callable[[], bool],
+        *,
+        what: str,
+    ) -> int:
+        """Send something until its effect is observed. Returns sends made.
+
+        One place for the lesson this codebase has now paid for four times:
+        **a send that arrives while the UI is animating is simply lost**, so
+        anything sent once and verified once will eventually fail on a bad
+        frame. It was lost clicks on a dialog row (R80), then a lost click on
+        the stash, then a lost ESC that killed T27 at its first step (R94).
+        Clicks, keys and ESC are all the same problem, so they get the same
+        answer rather than three similar ones that drift apart.
+
+        The first send is immediate — the common case pays nothing — and only
+        a send that did not take pays the settle before the next try.
+        """
+        attempts = 1 + self.config.panel_click_retries
+        sent = 0
+        for attempt in range(attempts):
+            if attempt:
+                self._sleep(self.config.panel_settle_s)
+                if condition():  # the earlier send landed late
+                    return sent
+            self._check_stop()
+            send()
+            sent += 1
+            if self._await(condition, self.config.verify_timeout_s):
+                return sent
+        state = uistate.read_ui_state(self.session, self.panel._ui_array)
+        raise TownError(
+            f"{what}: no effect after {sent} attempt(s); panels open: "
+            f"{', '.join(state.names) or 'none'}"
+        )
+
+    def close_panels(self) -> None:
+        """ESC closes whatever panel is up; verify each one actually closed.
+
+        Every panel that blocks input, not the three the town steps happen
+        to open themselves: the point of this call is to make the NEXT walk
+        legal, so the list has to match what `GatedInput` refuses on. A
+        stray travel click can open a panel no town step ever opens — the
+        waypoint, during T19 (R85) — and a panel absent from this list can
+        neither be closed nor named.
+
+        Some ESC presses close two panels at once (the shop and the dialog
+        behind it), which is why each is re-checked rather than pressed for
+        blindly.
+
+        **The ESC is retried**, because a key sent while a panel is still
+        animating in is swallowed exactly like a click is (R80) — and this
+        was the last place still sending one hopeful press. T27 died on it
+        at the first step: the heal opens Akara's dialog and closes it
+        immediately, so the ESC arrived while the dialog was still opening,
+        and a 3-second wait then declared the panel unclosable (R94). The
+        first press stays immediate, so the common case costs nothing; only
+        a press that failed pays the settle.
+        """
+        for panel_id in uistate.blocking_panels():
+            if not self._panel_open(panel_id):
+                continue
+            name = offsets.UI_NAMES.get(panel_id, str(panel_id))
+            self.send_until(
+                self.menu.press_escape,
+                lambda p=panel_id: not self._panel_open(p),
+                what=f"closing {name} with ESC",
+            )
 
     def _begin_step(self) -> None:
         """Start from a state where walking is possible.
@@ -471,43 +668,173 @@ class TownLayer:
         that way, with the stash still open. Closing up front is cheap and
         makes each step independent of what came before it.
         """
-        self._close_panels()
+        self.close_panels()
+
+    def point(self, name: str) -> UIPoint:
+        """Look up a calibrated point, refusing an unknown or unmeasured one.
+
+        Refusing here rather than at click time is deliberate: a step that
+        cannot possibly succeed should not first walk across town.
+        """
+        found = self.config.ui_points.get(name)
+        if found is None:
+            known = ", ".join(sorted(self.config.ui_points)) or "none"
+            raise Uncalibrated(f"no UI point named {name!r} (known: {known})")
+        if not found.calibrated:
+            raise Uncalibrated(
+                f"{name} is not calibrated — run the T25 calibration battery. "
+                f"{found.note}"
+            )
+        return found
+
+    def point_pixel(self, point: UIPoint) -> tuple[int, int]:
+        """Where to click for `point`, resolved NOW.
+
+        Screen-anchored points come straight off the client rect. NPC-anchored
+        ones must be projected from where the NPC is *at this moment* (R97):
+        the dialog is drawn relative to them, they wander, and the camera
+        follows the player — so a position computed a second ago is already
+        the wrong answer. Both readings are taken fresh here for that reason.
+        """
+        rect = self.panel.window.client_rect()
+        if not point.npc_anchored:
+            return point.pixel(rect)
+        player = self._read_player(self.session)
+        if player is None:
+            raise TownError(f"{point.name}: player unreadable, cannot project")
+        npc_world = self._find_ally(point.anchor_npc)
+        if npc_world is None:
+            raise TownError(
+                f"{point.name}: the anchoring NPC (kind {point.anchor_npc}) is "
+                "not in perception range, so the row cannot be located — a "
+                "dialog row is positioned relative to its NPC, not the screen"
+            )
+        npc_screen = projection_for(player.position, rect).world_to_screen(*npc_world)
+        return point.pixel_from_npc(npc_screen)
+
+    def click_point(
+        self,
+        point: UIPoint,
+        condition: Callable[[], bool] | None = None,
+    ) -> None:
+        """Click a named point until its effect is observed.
+
+        `condition` defaults to the point's own `opens` panel, so a caller
+        with a better proof (durability restored, a live merc) passes it and
+        a caller without one still never trusts the click itself.
+        """
+        if condition is None:
+            if point.opens is None:
+                raise Uncalibrated(
+                    f"{point.name} has no expected panel and no condition was "
+                    "given — there would be no way to tell the click worked"
+                )
+            opens = point.opens
+            condition = lambda: self._panel_open(opens)  # noqa: E731
+        if point.by_keyboard:
+            self.select_dialog_row(point, condition)
+            return
+        # `point_pixel` is passed, not called: every retry re-locates the
+        # target. For an NPC-anchored row that matters — the NPC can take a
+        # step between attempts, and re-clicking where they used to be is
+        # how a retry becomes a click on a different row (R97).
+        self.click_in_panel_until(
+            point.panel,
+            lambda: self.point_pixel(point),
+            condition,
+            what=point.name,
+        )
+
+    def select_dialog_row(
+        self, point: UIPoint, condition: Callable[[], bool]
+    ) -> None:
+        """Choose an NPC dialog row by ordinal: N-1 Downs, then Enter.
+
+        The highlight opens on row 1, Down advances it, and it wraps at the
+        end (T34). Nothing on screen is located, which is the whole point:
+        the row's PIXELS move when the NPC paces, its INDEX does not. Every
+        positional approach this replaces failed for that one reason.
+
+        A retry REOPENS the dialog rather than pressing more keys. The count
+        only means anything from a freshly opened menu, where the highlight
+        is known to be on row 1; after a failed attempt it could be anywhere,
+        and pressing on from an unknown position is how you select something
+        you did not intend — which at Kashya costs 50,000 gold.
+        """
+        if point.keyboard_row is None or point.keyboard_row < 1:
+            raise Uncalibrated(f"{point.name} has no keyboard row")
+        npc_name = offsets.NPC_KINDS.get(point.anchor_npc or -1, "the NPC")
+        for attempt in range(1 + self.config.panel_click_retries):
+            self._check_stop()
+            if attempt:
+                self.close_panels()
+                if point.anchor_npc is None:
+                    break  # nothing to reopen; the caller owns this dialog
+                self.open_npc_dialog(point.anchor_npc, npc_name)
+            self._sleep(self.config.panel_settle_s)
+            if not self._panel_open(point.panel):
+                break
+            for _ in range(point.keyboard_row - 1):
+                self.panel.press_key(point.panel, VK_DOWN)
+                self._sleep(self.config.key_step_s)
+            self.panel.press_key(point.panel, VK_RETURN)
+            if self._await(condition, self.config.interact_timeout_s):
+                return
+        state = uistate.read_ui_state(self.session, self.panel._ui_array)
+        raise TownError(
+            f"{point.name}: row {point.keyboard_row}"
+            + (f" of {point.row_count}" if point.row_count else "")
+            + " selected by keyboard had no effect; panels now open: "
+            f"{', '.join(state.names) or 'none'} — this menu may have a "
+            "different number of rows in this state (R56)"
+        )
 
     def click_in_panel_until(
         self,
         panel_id: int,
-        fraction: tuple[float, float],
+        locate: Callable[[], tuple[int, int]],
         condition: Callable[[], bool],
         *,
         what: str,
     ) -> None:
-        """Click a calibrated spot inside a panel until it has its effect.
+        """Click a spot inside a panel until it has its effect.
 
-        The flag going up does not mean the panel is ready: D2 animates
-        dialogs in, and clicks landing during that window are simply lost —
-        which is what a single immediate click ran into (R80). So: settle,
-        click, watch for the effect, retry a couple of times, and if it
-        never lands say what WAS on screen rather than only what was not.
+        `locate` is a callable, not a point, because the answer can change
+        between attempts: an NPC dialog row is positioned relative to the
+        NPC, and the NPC can take a step (R97). Re-clicking where the row
+        used to be is how a retry lands on a different option.
+
+        The flag going up does not mean the panel is ready either: D2
+        animates dialogs in, and clicks landing during that window are
+        simply lost — which is what a single immediate click ran into (R80).
+        So: settle, locate, click, watch for the effect, retry a couple of
+        times, and if it never lands say what WAS on screen rather than only
+        what was not.
         """
-        rect = self.panel.window.client_rect()
-        sx = rect.left + round(fraction[0] * rect.width)
-        sy = rect.top + round(fraction[1] * rect.height)
+        clicks = 0
+        tried: list[tuple[int, int]] = []
         for _ in range(1 + self.config.panel_click_retries):
             self._check_stop()
             self._sleep(self.config.panel_settle_s)
             if not self._panel_open(panel_id):
                 break  # the panel we were told to click in has gone
+            sx, sy = locate()
+            tried.append((sx, sy))
             self.panel.click(panel_id, sx, sy)
+            clicks += 1
             if self._await(condition, self.config.interact_timeout_s):
                 return
         state = uistate.read_ui_state(self.session, self.panel._ui_array)
+        # Report the clicks actually SENT and where, not the budget: the
+        # loop stops early when the panel vanishes, and "clicked 3 times"
+        # hid whether T19's menu closed on the first click or survived to
+        # the third (R85). The positions matter too now that they can differ
+        # between attempts.
         raise TownError(
-            f"{what}: clicked ({sx}, {sy}) in "
+            f"{what}: clicked {tried or 'nowhere'} in "
             f"{offsets.UI_NAMES.get(panel_id, panel_id)} "
-            f"{1 + self.config.panel_click_retries} times with no effect; "
-            f"panels now open: {', '.join(state.names) or 'none'} — the "
-            "calibrated position may be wrong or the menu may have shifted "
-            "(NPC menus are state-dependent, R56)"
+            f"{clicks} time(s) with no effect; "
+            f"panels now open: {', '.join(state.names) or 'none'}"
         )
 
     def open_object_panel(self, kind: int, name: str, panel_id: int) -> tuple[int, int]:
@@ -519,13 +846,27 @@ class TownLayer:
         the single un-retried attempt it replaced was the exact pair of
         mistakes that broke the NPC path (R80). Fixed here before it could
         be discovered live a third time.
+
+        The approach can also END with somebody's dialog open: a travel click
+        that lands on a bystander opens it, and if that happens on the last
+        click of the walk the walk still succeeds. `_walk_guarded` only
+        recovers when the navigator actually failed, so the panel survives to
+        the deliberate click — which `GatedInput` then refuses outright,
+        killing the step (R106, live in T35). The NPC path has always handled
+        this shape; the object path never did. Clear the way each attempt.
         """
         clicked = None
         for _ in range(1 + self.config.interact_retries):
             self._check_stop()
             if self._panel_open(panel_id):
                 return clicked if clicked is not None else self._find_object(kind)
+            if self._any_panel_open():
+                self.close_panels()
             clicked = self._approach_object(kind, name)
+            if self._any_panel_open():
+                # The approach itself opened something; a world click now
+                # would be refused rather than land.
+                self.close_panels()
             self.gated.click_world(*clicked)
             if self._await(
                 lambda: self._panel_open(panel_id), self.config.npc_walk_timeout_s
@@ -603,7 +944,7 @@ class TownLayer:
         # retried here is the EFFECT: a dialog that opened but did not heal.
         for _ in range(1 + self.config.interact_retries):
             talked_to = self.open_npc_dialog(offsets.NPC_AKARA, "Akara")
-            self._close_panels()
+            self.close_panels()
 
             def _full() -> bool:
                 now = self._read_player(self.session)
@@ -644,11 +985,11 @@ class TownLayer:
         if not damaged:
             report.log.append(f"repair: nothing worn ({len(worn)} items checked)")
             return
-        if self.config.trade_repair_row is None or self.config.repair_all_button is None:
-            raise Uncalibrated(
-                "the repair UI is not calibrated (trade row / repair-all "
-                "button) — run the T18 drill before repairing"
-            )
+        # Both points are looked up BEFORE the walk: an uncalibrated one
+        # can only fail, and failing after crossing town is a worse way to
+        # learn that than failing here.
+        trade_row = self.point("charsi.trade_repair")
+        repair_all = self.point("charsi.repair_all")
 
         missing_before = sum(d.missing for d in worn)
         self._begin_step()
@@ -658,29 +999,21 @@ class TownLayer:
         # two steps doing the same thing is a bug waiting for a bad day.
         self.open_npc_dialog(offsets.NPC_CHARSI, "Charsi")
         try:
-            self.click_in_panel_until(
-                offsets.UI_NPCMENU,
-                self.config.trade_repair_row,
-                lambda: self._panel_open(offsets.UI_NPCSHOP),
-                what="trade/repair row",
-            )
+            self.click_point(trade_row)  # proof: the shop screen opens
         except TownError:
-            self._close_panels()
+            self.close_panels()
             raise
 
         def _repaired() -> bool:
             return sum(d.missing for d in read_equipped_durability(self.session)) == 0
 
         try:
-            self.click_in_panel_until(
-                offsets.UI_NPCSHOP,
-                self.config.repair_all_button,
-                _repaired,
-                what="repair-all button",
-            )
+            # Proof is durability, not a flag: a click that lands where the
+            # button used to be must not read as a successful repair.
+            self.click_point(repair_all, _repaired)
         except TownError:
             still = sum(d.missing for d in read_equipped_durability(self.session))
-            self._close_panels()
+            self.close_panels()
             self._alert(
                 f"repair did not restore durability ({missing_before} -> "
                 f"{still} missing) — see the error for what was on screen"
@@ -744,9 +1077,336 @@ class TownLayer:
                     f"deposit failed after {self.config.transfer_attempts} attempts"
                 )
         report.log.append(f"stash: {report.deposited} deposited")
-        self._close_panels()
+        self.close_panels()
 
     # -- step 3: belt refill ---------------------------------------------------------
+
+    # -- the inventory-management loop (R75, user-designed) ---------------------
+
+    def _stash_visible(self) -> int:
+        """How many items the stash currently LISTS.
+
+        Load-bearing subtlety (T15): the materials tab makes the ordinary
+        stash read empty — switching to it took 18 items to 0 and back — so
+        this is not "how full is the stash", it is "how much of the stash is
+        on screen". That is exactly what makes it a tab signal.
+
+        **And it is the only one.** T36 and a direct probe (R110) compared
+        the whole store array across both tabs: every store is identical
+        except the stash store's item-chain head, which the game nulls while
+        materials is displayed. Same 10x15 dimensions, same grid pointer, and
+        no separate store appears for the materials container — so the
+        visibly different grid on screen is not represented here at all.
+        There is no shape or count to read the tab from, which means the
+        inference below cannot be replaced by a direct read, and the
+        empty-stash ambiguity is a real limit rather than a missing offset.
+        """
+        return len(self._carried(self.session).stash)
+
+    def _click_tab_toggle(self) -> None:
+        point = self.point("stash.materials_tab")
+        self._check_stop()
+        self.panel.click(offsets.UI_STASH, *self.point_pixel(point))
+
+    def _probe_stash_tab(self) -> int:
+        """Toggle and WAIT for the listing to change; return what it settles
+        on. Returns the UNCHANGED count if it never moves.
+
+        Deliberately does not *require* a change: identifying the tab means
+        clicking and looking, and in one case the honest answer is "still
+        cannot tell" (see `ensure_materials_tab`). A version that insisted on
+        an effect could not express that.
+
+        But "no change" has to mean it really did not change, not that one
+        click went missing — so the toggle is retried before that conclusion
+        is drawn. A single probe click failed live (R108): the user had
+        fetched a rune, which meant leaving the stash on the materials tab,
+        and one lost click reported a perfectly readable stash as unreadable.
+
+        Polls rather than sleeping a fixed interval, because stash contents
+        arrive progressively (T15).
+        """
+        before = self._stash_visible()
+        for attempt in range(1 + self.config.panel_click_retries):
+            self._check_stop()
+            self._sleep(self.config.panel_settle_s if attempt else 0.0)
+            self._click_tab_toggle()
+            if self._await(
+                lambda: self._stash_visible() != before, self.config.tab_timeout_s
+            ):
+                return self._stash_visible()
+        return self._stash_visible()
+
+    def _switch_tab_until(self, condition: Callable[[], bool], what: str) -> None:
+        """Toggle the tab until the listing proves it, retried like any send.
+
+        `send_until` is the one path for "send, verify, retry" (R94), and a
+        tab toggle is no different from an ESC or a row click: sent once and
+        checked once, it will eventually land on a bad frame.
+        """
+        self.send_until(self._click_tab_toggle, condition, what=what)
+
+    def ensure_materials_tab(self) -> None:
+        """Leave the MATERIALS tab showing, proven, or refuse.
+
+        The user's requirement was that tab identification be reliable and
+        not heuristic, so this reasons only from a fact that cannot be
+        misread: **the ordinary stash lists items only on the regular tab.**
+
+            lists items      -> definitely REGULAR; toggle once
+            lists nothing    -> ambiguous: materials, or a regular stash that
+                                is genuinely empty. Toggle and look: if items
+                                appear we were on materials, so toggle back.
+                                If nothing appears either way, the tab is
+                                genuinely unreadable and this refuses.
+
+        The refusal case is rare (it needs an empty regular stash) and loud,
+        which is the right trade: depositing into the wrong tab would make
+        the phase-aware overflow halt fire on the wrong items.
+        """
+        if self._stash_visible() > 0:
+            self._switch_tab_until(
+                lambda: self._stash_visible() == 0,
+                "hiding the regular stash (switching to materials)",
+            )
+            return
+        if self._probe_stash_tab() > 0:
+            # We had been on materials all along; that probe moved us to
+            # regular, so go back.
+            self._switch_tab_until(
+                lambda: self._stash_visible() == 0,
+                "returning to the materials tab",
+            )
+            return
+        raise TownError(
+            "cannot identify the stash tab: the stash lists nothing on "
+            "either side of a toggle, which happens when the regular stash "
+            "is empty. Refusing rather than guessing which tab is up (R75)"
+        )
+
+    def ensure_regular_tab(self) -> None:
+        """Leave the REGULAR tab showing, proven by its items reappearing.
+
+        Unambiguous by this point: `ensure_materials_tab` only returns having
+        seen the regular stash hold something, so its items reappearing is a
+        reliable proof that we are back on it.
+        """
+        if self._stash_visible() > 0:
+            return
+        self._switch_tab_until(
+            lambda: self._stash_visible() > 0,
+            "bringing the regular stash back (switching from materials)",
+        )
+
+    def _attempt_deposit(self, item: CarriedItem, *, attempts: int, verify_s: float) -> bool:
+        """Shift+right-click one item toward the stash. Did it leave?"""
+        for _ in range(attempts):
+            self._check_stop()
+            self.panel.click(
+                offsets.UI_STASH, *self._grid_pixel(item.position),
+                button="right", shift=True,
+            )
+
+            def _gone(uid: int = item.unit_id) -> bool:
+                return all(
+                    i.unit_id != uid
+                    for i in self._carried(self.session).main_inventory
+                )
+
+            if self._await(_gone, verify_s):
+                return True
+        return False
+
+    def _deposit_everything(self, *, strict: bool) -> tuple[int, list[CarriedItem]]:
+        """Try every movable item into whatever tab is showing.
+
+        `strict` is the whole difference between the two phases (R75). In the
+        materials phase a refusal is the NORMAL answer — the game is doing
+        the classification for us, which is the point of the design, because
+        it means the bot needs no item taxonomy that would go stale every
+        patch. In the final phase a refusal means the stash is full, and that
+        is a human problem.
+        """
+        attempts = self.config.transfer_attempts if strict else self.config.materials_attempts
+        verify_s = self.config.verify_timeout_s if strict else self.config.materials_verify_s
+        moved, refused = 0, []
+        for item in self._carried(self.session).main_inventory:
+            if not item.is_movable:
+                continue  # the Cube opens on right-click instead of moving
+            if self._attempt_deposit(item, attempts=attempts, verify_s=verify_s):
+                moved += 1
+            else:
+                refused.append(item)
+        return moved, refused
+
+    def fill_belt(self, report: PreambleReport) -> int:
+        """Move every potion the belt will take — not merely enough to reach
+        the minimums.
+
+        The distinction matters inside the R75 loop and is where it differs
+        from the older `refill_belt` step (R48). Topping up to minimums and
+        then drinking the rest throws away potions the belt had room for; the
+        loop's "drink the excess" only means anything if the belt is FULL
+        first, so that what remains is genuinely excess (user, R107).
+
+        A column that will not take another potion is how the belt reports
+        itself full — shift-click routes by type, so a refusal is per type,
+        not global, and the other types keep going.
+        """
+        moved = 0
+        full: set[str] = set()
+        while True:
+            self._check_stop()
+            carried = self._carried(self.session)
+            pool = [
+                i
+                for i in carried.main_inventory
+                if _potion_type(i) is not None and _potion_type(i) not in full
+            ]
+            if not pool:
+                break
+            potion = pool[0]
+            before = len(carried.belt)
+            self.panel.click(
+                offsets.UI_INVENTORY, *self._grid_pixel(potion.position), shift=True
+            )
+            if self._await(
+                lambda b=before: len(self._carried(self.session).belt) > b,
+                self.config.verify_timeout_s,
+            ):
+                moved += 1
+            else:
+                # By TYPE, not by kind: the belt routes by column, so a full
+                # healing column is full for every healing kind. Keying this
+                # on `potion_name` (which is per-kind, "healing_606") would
+                # retry the same full column for each variant.
+                full.add(_potion_type(potion))
+        report.refilled += moved
+        report.log.append(
+            f"belt: {moved} moved"
+            + (f"; full for {', '.join(sorted(full))}" if full else "")
+        )
+        return moved
+
+    def assert_belt_minimums(self, report: PreambleReport) -> None:
+        """Halt loudly if the belt is still short. Manual restock (R48)."""
+        shortfall = self._belt_shortfall()
+        if any(shortfall.values()):
+            missing = ", ".join(f"{k} short {v}" for k, v in shortfall.items() if v)
+            self._alert(f"belt below minimum after refill: {missing} — manual restock")
+            raise BeltBelowMinimum(missing)
+        report.log.append("belt: minimums hold")
+
+    def deposit_gold(self, report: PreambleReport) -> int:
+        """Bank the carried gold. Returns the amount moved.
+
+        Click the gold button, press Enter, and check the balance — because
+        the balance is all there is to check. **The amount dialog raises no
+        panel flag** (T37), so unlike every other panel in this layer its
+        presence cannot be verified before acting, and the usual
+        settle-then-confirm-the-flag pattern has nothing to confirm.
+
+        That makes a missed click genuinely hazardous rather than merely
+        useless: with no dialog open, the Enter is the key that opens the
+        CHAT CONSOLE (R89's mechanism, from the other side), leaving a
+        blocking panel behind. So a failed attempt clears any console before
+        retrying, and the proof of success is carried gold actually falling.
+        """
+        player = self._read_player(self.session)
+        if player is None:
+            raise TownError("player unreadable at gold-deposit time")
+        carried = player.gold
+        if carried == 0:
+            report.log.append("gold: none carried")
+            return 0
+        point = self.point("stash.gold_button")
+
+        def carried_now() -> int:
+            now = self._read_player(self.session)
+            return now.gold if now else carried
+
+        for attempt in range(1 + self.config.panel_click_retries):
+            self._check_stop()
+            if attempt:
+                self._dismiss_chat_console()
+            self._sleep(self.config.panel_settle_s)
+            if not self._panel_open(offsets.UI_STASH):
+                break
+            self.panel.click(offsets.UI_STASH, *self.point_pixel(point))
+            # Nothing to wait FOR — the dialog is invisible to us — so this
+            # is a settle, not a verification.
+            self._sleep(self.config.panel_settle_s)
+            self.panel.press_key(offsets.UI_STASH, VK_RETURN)
+            if self._await(
+                lambda: carried_now() < carried, self.config.verify_timeout_s
+            ):
+                moved = carried - carried_now()
+                report.log.append(f"gold: {moved} deposited")
+                return moved
+        self._dismiss_chat_console()
+        raise TownError(
+            f"gold deposit had no effect: still carrying {carried_now()} after "
+            f"{1 + self.config.panel_click_retries} attempts — the gold button "
+            "may have moved, and note the dialog is invisible to perception "
+            "so a miss cannot be distinguished from a refusal (T37)"
+        )
+
+    def _dismiss_chat_console(self) -> None:
+        """Close a chat console opened by an Enter that missed its dialog.
+
+        Cheap insurance in exactly one place: gold is the only step that
+        sends Enter without being able to confirm what will receive it.
+        """
+        if self._panel_open(offsets.UI_CHAT_CONSOLE):
+            self.send_until(
+                self.menu.press_escape,
+                lambda: not self._panel_open(offsets.UI_CHAT_CONSOLE),
+                what="closing a chat console left by a stray Enter",
+            )
+
+    def drink_excess_potions(self, report: PreambleReport) -> int:
+        """Drink leftover healing and mana potions out of the inventory.
+
+        Runs after the belt is filled, so what is left is genuinely excess.
+        Rejuvenations are deliberately NOT drunk: they are materials (R75)
+        and cannot be bought, so they fall through to the stash instead.
+
+        Drinking always works, even at full health (R75), so a potion that
+        does not disappear was not clicked — worth reporting, not worth a
+        fallback.
+        """
+        drunk = 0
+        while True:
+            self._check_stop()
+            excess = [
+                i
+                for i in self._carried(self.session).main_inventory
+                if i.is_healing_potion or i.is_mana_potion
+            ]
+            if not excess:
+                break
+            potion = excess[0]
+            self.panel.click(
+                offsets.UI_INVENTORY, *self._grid_pixel(potion.position),
+                button="right",
+            )
+
+            def _gone(uid: int = potion.unit_id) -> bool:
+                return all(
+                    i.unit_id != uid
+                    for i in self._carried(self.session).main_inventory
+                )
+
+            if not self._await(_gone, self.config.verify_timeout_s):
+                report.log.append(
+                    f"drink: potion {potion.kind} at {potion.position} would "
+                    "not drink — stopping rather than clicking in a loop"
+                )
+                break
+            drunk += 1
+        if drunk:
+            report.log.append(f"drink: {drunk} excess potion(s)")
+        return drunk
 
     def _belt_shortfall(self) -> dict[str, int]:
         carried = self._carried(self.session)
@@ -771,12 +1431,14 @@ class TownLayer:
             # same shift-click sends the potion to the stash instead.
             self._begin_step()
             if not self._panel_open(offsets.UI_INVENTORY):
-                self.gated.press_key(VK_I)
-                if not self._await(
+                # Retried like every other send: this one follows the ESC
+                # that `_begin_step` just issued, which is precisely the
+                # frame where a keypress is most likely to be eaten (R94).
+                self.send_until(
+                    lambda: self.gated.press_key(VK_I),
                     lambda: self._panel_open(offsets.UI_INVENTORY),
-                    self.config.verify_timeout_s,
-                ):
-                    raise TownError("the inventory never opened for the refill")
+                    what="opening the inventory for the refill",
+                )
 
             selectors: dict[str, Callable[[CarriedItem], bool]] = {
                 "healing": lambda i: i.is_healing_potion,
@@ -802,7 +1464,7 @@ class TownLayer:
                         self.config.verify_timeout_s,
                     ):
                         report.refilled += 1
-            self._close_panels()
+            self.close_panels()
 
         shortfall = self._belt_shortfall()
         if any(shortfall.values()):
@@ -810,6 +1472,97 @@ class TownLayer:
             self._alert(f"belt below minimum after refill: {missing} — manual restock")
             raise BeltBelowMinimum(missing)
         report.log.append(f"belt: {report.refilled} moved, minimums hold")
+
+    def manage_inventory(self, report: PreambleReport) -> None:
+        """The R75 loop: belt, drink, materials, regular — halt on leftovers.
+
+        The user's design, and the good idea in it is that **the game does
+        the classification**. Attempting every item into the materials tab
+        and keeping whatever it accepts means the bot needs no item taxonomy
+        — precisely the kind of knowledge that goes stale every patch.
+        Potions are the one category it must recognise, and it already does.
+
+        Panel state is part of the instruction, not ambient context (R64):
+        shift-click means inventory->belt with the stash CLOSED and
+        inventory<->stash with it OPEN. So the belt and drinking phases run
+        with the stash shut, and only then is the stash opened.
+
+        Replaces `deposit_to_stash` + `refill_belt` as a pair; both remain
+        for the drills that test them in isolation.
+        """
+        self._begin_step()
+        if self._carried(self.session).main_inventory:
+            # Stash CLOSED for both of these: shift-click means "to the belt"
+            # only while it is shut, and would stash the potion otherwise
+            # (R64). Fill the belt BEFORE drinking, so that what gets drunk
+            # is genuinely surplus rather than potions the belt had room for.
+            self.press_inventory_open()
+            self.fill_belt(report)
+            self.drink_excess_potions(report)
+            self.close_panels()
+        self.assert_belt_minimums(report)
+
+        carried = self._carried(self.session).main_inventory
+        remaining = [i for i in carried if i.is_movable]
+        unmovable = len(carried) - len(remaining)
+        if not remaining:
+            # Say what is being left behind even on the do-nothing path: an
+            # inventory holding only the Cube looks identical to an empty one
+            # in the report otherwise, and the difference matters when a
+            # later run halts on a full inventory.
+            report.log.append(
+                "stash: nothing left to deposit"
+                + (f"; skipped {unmovable} unmovable (cube/quest)" if unmovable else "")
+            )
+            return
+
+        self._begin_step()
+        self.open_object_panel(offsets.OBJ_STASH, "the stash", offsets.UI_STASH)
+        self._sleep(self.config.tab_settle_s)  # the list arrives progressively
+
+        self.ensure_materials_tab()
+        moved_materials, _ = self._deposit_everything(strict=False)
+        report.log.append(f"stash: {moved_materials} into materials")
+
+        self.ensure_regular_tab()
+        moved_regular, refused = self._deposit_everything(strict=True)
+        report.deposited = moved_materials + moved_regular
+        report.log.append(f"stash: {moved_regular} into regular")
+
+        skipped = [
+            i for i in self._carried(self.session).main_inventory if not i.is_movable
+        ]
+        if skipped:
+            report.log.append(f"stash: skipped {len(skipped)} unmovable (cube/quest)")
+        # Gold last, while the stash is still open (R75). Deliberately after
+        # the items: it is the only step that cannot verify what it is
+        # talking to, so it runs when nothing else depends on what follows.
+        self.deposit_gold(report)
+        self.close_panels()
+
+        if refused:
+            # Only the FINAL phase treats a refusal as a fault — in the
+            # materials phase it is the expected answer, and a halt there
+            # would fire on the first ordinary item every single run.
+            self._alert(
+                f"{len(refused)} item(s) would not go into the regular stash "
+                "— it is full, or the grid calibration is wrong"
+            )
+            raise StashFull(
+                f"{len(refused)} item(s) left in the inventory after the "
+                f"regular-tab deposit (kinds "
+                f"{sorted({i.kind for i in refused})})"
+            )
+
+    def press_inventory_open(self) -> None:
+        """Open the inventory panel, verified, retried like every other send."""
+        if self._panel_open(offsets.UI_INVENTORY):
+            return
+        self.send_until(
+            lambda: self.gated.press_key(VK_I),
+            lambda: self._panel_open(offsets.UI_INVENTORY),
+            what="opening the inventory",
+        )
 
     # -- step 4: conditional merc resurrect ---------------------------------------------
 
@@ -827,20 +1580,22 @@ class TownLayer:
                 f"(carried + stashed) <= {self.config.resurrect_gold_floor} — skipped"
             )
             return
-        if self.config.resurrect_row is None:
+        try:
+            resurrect = self.point("kashya.resurrect")
+        except Uncalibrated:
             self._alert(
                 "merc is dead with enough gold, but the resurrect row is "
                 "uncalibrated (it only exists in the dead-merc state, R56) — "
-                "hover-calibrate now while it is on screen"
+                "calibrate now, while it is on screen and measurable"
             )
-            raise Uncalibrated("resurrect row fraction is None")
+            raise
 
         self._begin_step()
         self.open_npc_dialog(offsets.NPC_KASHYA, "Kashya")
         # Re-confirm the state the calibration belongs to (R56): the row is
         # only where we measured it while the merc is dead.
         if self.snapshot().merc is not None:
-            self._close_panels()
+            self.close_panels()
             raise TownError(
                 "merc reads alive with Kashya's menu open — resurrect row "
                 "position is not trustworthy in this state; aborting"
@@ -856,14 +1611,10 @@ class TownLayer:
             )
 
         try:
-            self.click_in_panel_until(
-                offsets.UI_NPCMENU,
-                self.config.resurrect_row,
-                _resurrected,
-                what="resurrect row",
-            )
+            # Proof is both halves: a live merc AND gold actually spent.
+            self.click_point(resurrect, _resurrected)
         except TownError:
-            self._close_panels()
+            self.close_panels()
             self._alert(
                 "resurrect did not produce a live merc AND spent gold — see "
                 "the error for what was on screen"
@@ -871,24 +1622,32 @@ class TownLayer:
             raise
         report.merc_action = "resurrected"
         report.log.append("merc: resurrected (verified alive + gold spent)")
-        self._close_panels()
+        self.close_panels()
 
     # -- the preamble ----------------------------------------------------------------
 
-    def run_preamble(
-        self, keep: Callable[[CarriedItem], bool], report: PreambleReport | None = None
-    ) -> PreambleReport:
-        """heal -> repair -> stash -> refill -> merc. Raises on the first
+    def run_preamble(self, report: PreambleReport | None = None) -> PreambleReport:
+        """heal -> repair -> inventory loop -> merc. Raises on the first
         failed step; the caller (the cycle) owns what happens next.
 
         Order is R46 Q5's with repair inserted after the heal (R70): both
         are NPC visits, and repair is conditional, so a game that needs no
         repair walks no further than before.
+
+        The middle used to be `deposit_to_stash(keep)` then `refill_belt`,
+        with the caller supplying a predicate saying which items belonged in
+        the stash. `manage_inventory` replaces both and takes no predicate,
+        which is the point of R75's design: **the game classifies the items,
+        not us.** Everything is offered to the materials tab, whatever it
+        accepts stays there, and the rest goes to the regular stash — so
+        there is no taxonomy to keep current as PD2 patches.
+
+        Both old steps remain for the drills that exercise them alone
+        (T13, T14).
         """
         report = report if report is not None else PreambleReport()
         self.heal_at_akara(report)
         self.repair_at_charsi(report)
-        self.deposit_to_stash(keep, report)
-        self.refill_belt(report)
+        self.manage_inventory(report)
         self.resurrect_merc_if_dead(report)
         return report

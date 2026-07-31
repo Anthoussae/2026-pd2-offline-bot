@@ -19,7 +19,7 @@
 # The bridge itself (tools\elevated-bridge.ps1) must already be running in
 # an elevated window; this script only drops the command file and reads the
 # answer back. Exit codes: 0 = answer received (whatever the command's own
-# exit was — that is in the output), 1 = no bridge answer in time.
+# exit was - that is in the output), 1 = no bridge answer in time.
 
 param(
     [Parameter(Mandatory = $true)][string]$Id,

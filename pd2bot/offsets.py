@@ -588,6 +588,18 @@ OBJECT_KINDS = {
     OBJ_STASH: "stash",
 }
 
+# --- Area ids (classic D2 level numbering; act 1 surface) -------------------
+# The trial run's whole route: town waypoint -> Cold Plains waypoint (R46 Q1).
+# Treated as expectations, not facts, until a live read confirms them — the
+# waypoint calibration drill reports the area it actually lands in, which is
+# the same trust-nothing pattern as the difficulty guard.
+AREA_ROGUE_ENCAMPMENT = 1
+AREA_COLD_PLAINS = 3
+AREA_NAMES = {
+    AREA_ROGUE_ENCAMPMENT: "Rogue Encampment",
+    AREA_COLD_PLAINS: "Cold Plains",
+}
+
 # --- UI state (BH Constants.h:65-89) ---------------------------------------
 # P2 discovers the array these index into; the enum itself is stable.
 UI_GAME = 0x00
