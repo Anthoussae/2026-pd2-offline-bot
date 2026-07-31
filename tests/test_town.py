@@ -1684,7 +1684,12 @@ def test_cleanse_drops_junk_and_stashes_the_rest(town):
     ]
     full_belt(town)
     report = PreambleReport()
-    layer(town, keep_item=lambda item: item.kind == 999).manage_inventory(report)
+    # Explicit empty baseline: this test is about the DROP, not the
+    # protection default (review 001), so it opts out deliberately.
+    layer(
+        town, keep_item=lambda item: item.kind == 999,
+        protected_ids=lambda: set(),
+    ).manage_inventory(report)
     assert [i.kind for i in town.dropped] == [700]
     assert town.inventory == []
     assert report.deposited == 1  # the keeper, stashed as usual
@@ -1740,7 +1745,9 @@ def test_a_stuck_drop_alerts_and_leaves_the_item_to_the_stash(town):
     town.drop_works = False
     full_belt(town)
     report = PreambleReport()
-    layer(town, keep_item=junk_only).manage_inventory(report)
+    layer(
+        town, keep_item=junk_only, protected_ids=lambda: set()
+    ).manage_inventory(report)
     assert town.dropped == []
     assert any("would not drop" in alert for alert in town.alerts)
     assert town.inventory == []  # the stash phases still took it
@@ -1766,3 +1773,36 @@ def test_cleanse_never_drops_protected_items(town):
         town, keep_item=junk_only, protected_ids=lambda: {1}
     ).manage_inventory(report)
     assert [i.kind for i in town.dropped] == [700]  # only the accident fell
+
+
+def test_cleanse_protects_everything_when_no_baseline_is_wired(town):
+    """The safe default (review 001): a caller that supplies a whitelist
+    but forgets the baseline must NOT get the most destructive setting.
+
+    T43's audit showed the stakes on real data — 4 of 12 carried items
+    would have been dropped, one of them a magic grand charm. Half-done
+    wiring should cost nothing, not everything.
+    """
+    town.inventory = [loot(1, (0, 0), kind=700), loot(2, (1, 0), kind=701)]
+    full_belt(town)
+    report = PreambleReport()
+    # keep_item recognises nothing; protected_ids deliberately omitted.
+    layer(town, keep_item=junk_only).manage_inventory(report)
+    assert town.dropped == []  # nothing fell
+
+
+def test_the_implicit_baseline_still_cleans_later_accidents(town):
+    """Protecting the startup set must not make the cleanse useless: an
+    item picked up AFTER that point is still junk and still goes."""
+    town.inventory = [loot(1, (0, 0), kind=700)]
+    full_belt(town)
+    layer_under_test = layer(town, keep_item=junk_only)
+
+    # First pass captures the baseline and drops nothing.
+    layer_under_test.cleanse_inventory(PreambleReport())
+    assert town.dropped == []
+
+    # An accidental pickup arrives afterwards.
+    town.inventory.append(loot(99, (2, 0), kind=702))
+    layer_under_test.cleanse_inventory(PreambleReport())
+    assert [i.kind for i in town.dropped] == [702]

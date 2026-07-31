@@ -1,0 +1,104 @@
+diff --git a/docs/drill-log.md b/docs/drill-log.md
+index 3f9d3bc..797a4d2 100644
+--- a/docs/drill-log.md
++++ b/docs/drill-log.md
+@@ -78,3 +78,5 @@ R-numbers.
+ | T38 | 1 | 2026-07-31 03:28 | Socket-count stat, carried and on the ground | perception | PASS | stat 194 CONFIRMED by the user: inventory kind 441 = 3 sockets, same value read off the ground, equipped: 1/1/5/1/3 |
+ | T42 | 1 | 2026-07-31 03:54 | Item code table by triangulation | perception | PASS | 800 codes written to item_codes.toml (stride 0x1a8); 6 known ids corroborate |
+ | T39 | 1 | 2026-07-31 04:02 | Item ids by conversation (the R117 vocabulary) | perception | ABORTED | cancelled by request |
++| T43 | 1 | 2026-07-31 06:00 | Ctrl+right-click drop, and a whitelist audit | bot control | ABORTED | kind 529 left the inventory but did NOT appear on the ground — the click may have USED the item rather than dropping it (the R113 unmodified-click hazard). Do not enable the cleanse. |
++| T44 | 1 | 2026-07-31 06:05 | Which CTRL spelling the client honours for drop | bot control | PASS | CTRL DROP VERIFIED with VK_CONTROL 0x11, 1-frame settle: kind 690 left the inventory AND appeared on the ground |
+diff --git a/docs/instruction-log.md b/docs/instruction-log.md
+index 31e0e97..b100674 100644
+--- a/docs/instruction-log.md
++++ b/docs/instruction-log.md
+@@ -263,6 +263,8 @@ with guardrails) — 259 tests green.
+ | R117 | inform | The real pickup spec, the potion-cap town rule, and the inventory cleanse | User check-in at the gate: (1) a full pickup whitelist — potion caps (2 heal / 2 mana / 4 rejuv), flawless+perfect gems/skulls, all runes, unique charms, rare+unique jewels/rings/amulets, named unique/set/socketed bases, and ~30 PD2 quest-and-map items — with `filters/local/eqN-All-In-One.filter` as the display/vocabulary reference and "easily amendable by a human" as the format bar; (2) the town loop should drink only potions in excess of 2 per type, keep up to 2 of each in inventory, and never stash potions; (3) a new accidental-pickup recovery: CTRL+right-click drops items, an "inventory cleanse" whitelist-check runs only when no enemies are near, queued after a failed pickup. | Recorded; clarifications batched as R118. Supersedes parts of R46 Q3 (simple pickit) and R75 (drink-all-excess, rejuvs-to-materials). |
+ | R118 | decision | Pickup-spec confirmation batch (Q1–Q5) | Q1 potion-cap semantics · Q2 rejuv end-state · Q3 rule format · Q4 discovery drills for item ids + socket stat · Q5 cleanse details (town handling, drop-at-feet) | **All five answered.** Q1: belt first (4 rejuvs), then up to 2 of EACH type in inventory, all excess drunk "just like other potions". Q2: never stash potions, drink all excess including rejuvs — retires R75's rejuvs-to-materials. Q3: TOML stays. Q4: approved. Q5: yes — dropping junk is always advisable as overflow insurance; the town preamble drops rather than stashes non-whitelisted items. Built same-day as phase 05b (sim-side); T38/T39 drills pending → R119. |
+ | R119 | execute | Run the T38 + T39 discovery drills (bridge) | Start the elevated bridge, then run T38 (socket stat) and T39 (item ids). Both read-only; the bot sends nothing but its own chat. | **T38 PASS** (see R124). T39 not yet run — redesigned first around the chat return channel (R120–R123), which landed between the request and the run. |
++| R130 | inform | "We can try again — just make sure to ctrl+right click" | User, on T43's abort: a plain right-click drinks a potion, so check the modifier is really being held. | **Right instinct, wrong culprit — and the retry proved it.** T44 tried four ctrl spellings on a GEM (whose unmodified right-click is a no-op, so a failure would cost nothing and be visible, unlike a potion where both hypotheses end in a drunk potion). The FIRST variant worked — the original `VK_CONTROL` 0x11 with a one-frame settle — and a ground read then found T43's "lost" antidote lying at (5890, 5735). It had dropped correctly all along. **T43's verification was the defect**: it read the ground ONCE, immediately, and a just-dropped item takes a moment to enter the unit table. Fixed by polling; the speculative `VK_LCONTROL` is kept only as a documented alternative with a note not to reach for it. Same shape as the P3 calibration crisis (R86): the instrument was wrong, not the game. |
++| R129 | decision | P6 stage A — go | User: "OK, lets do P6 stage A. We leave B for tomorrow. After that, we do a yona review, and ideally get ready to push and finish for the night." | **PASSED** (via T43's audit + T44's verification). The ctrl+right-click drop is live-verified by effect, the last untested input path in the bot. T43's whitelist audit also did its job: of 12 carried items it would keep 8 and drop 4 — the two tomes, a misc item, and a **magic grand charm** — which is correct for an accidental pickup and would have been unwelcome for a charm, exactly the distinction the startup-baseline guard (R128) exists to protect. No combat, no travel, nothing lost. |
+ | R128 | decision | The R127 option-A review table | Presented all 53 remaining names with proposed code, live-read kind, confidence and evidence (`pickit-id-proposal.md`); asked for corrections on the 7 low-confidence elite armours and the 6 recipe-triangle inferences. | **"Looks right to me. The ones you didn't find likely can't drop (can only be crafted)."** All 44 proposals accepted; vocabulary now **105 names, zero pending**, and the inventory cleanse gate opened by itself. The craft-only remark did real work: those 9 names are retired rather than left pending (a pickup rule for an item that cannot drop can never fire, and leaving them pending would have held the cleanse disabled forever) — **and it exposed a hole**: an item that can only be crafted can never teach the whitelist its id from a live pickup, so one sitting in the inventory would look exactly like junk. Closed with a startup-baseline guard: the cleanse now refuses to drop anything the bot was already carrying when it started, because the feature exists to clean up the bot's OWN accidents. 584 tests. |
+ | R127 | decision | How to resolve the last ~45 names | (A) a table to eyeball, (B) extract the MPQ string tables, (C) leave pending and resolve opportunistically. | **A, with C as fallback.** A worked: the filter names items through their CUBE RECIPES — each rune's tooltip reads "3x Hel + Key = Io", and the quest items name each other ("Cube this item with: Black Soul Stone & Prime Evil Soul" identifies the third by elimination). 44 of 53 resolved from that plus block position; B never needed. |
+ | R126 | verify | T39 run 1 — ABORTED by the user, and worth more than a pass | User: the drill demanded "very precise nomenclature I'm not familiar with" — it rejected `hel rune`, `rune`, `hel_rune` and `Perfect Sapphire` — and they do not have many of the listed items to hand. Asked for a redesign, and offered to help if some information cannot be got from the game or filter files. | **The abort log caught a real bug in MY work, in its first 30 seconds.** The user's Hel rune read kind **713 = `r15s`** and their Perfect Sapphire **690 = `gpbs`**, while the R125 join had bound those names to the classic `r15` (639) and `gpb` (586). **PD2 carries two parallel item families** — the classic records and an `s`-suffixed set (`r01s`-`r33s` at 699-731, `gzvs`-`skzs` at 685-698) — and the `s` family is what drops. So ~49 of the 53 auto-resolved ids were wrong. This is exactly the systematic mis-pairing the spot-check existed to catch, and asking for a rune and a gem FIRST is why it cost seconds. Fixes: `ItemTable` now maps a name to a TUPLE of kinds (both records bound, since an item is one or the other); vocabulary regenerated with the two live ids asserted at generation time; regression tests added. Second defect, purely UX and also mine: the drill accepted only PENDING names, so a correct answer for an already-known item was rejected as "not on the wanted list" — the question was open but the answer space was not. |
+diff --git a/pd2bot/input.py b/pd2bot/input.py
+index 2a7946f..68d995f 100644
+--- a/pd2bot/input.py
++++ b/pd2bot/input.py
+@@ -45,7 +45,24 @@ _KEY_UP = 0x0002
+ # owns the SendInput plumbing; the *meaning* of a key (which skill, which
+ # belt column) lives with the caller's config, not here.
+ VK_SHIFT = 0x10
+-VK_CONTROL = 0x11  # ctrl+right-click drops an inventory item (R117)
++# Ctrl+right-click drops an inventory item (R117). VK_CONTROL is the one
++# the client honours — verified live in T44, first variant, gem dropped
++# and found on the ground.
++#
++# VK_LCONTROL exists only as a documented alternative, and the story is
++# worth keeping: T43 concluded ctrl was being ignored, because the item
++# it dropped could not be found on the floor. That was wrong. The drop
++# had worked; T43 read the ground ONCE, immediately, and a just-dropped
++# item takes a moment to enter the unit table. The antidote it "lost" was
++# later found lying exactly where it fell.
++#
++# So the bug was in the instrument, not the game — the same shape as the
++# whole P3 calibration crisis (R86). A verification that polls would have
++# passed first time, and the speculative per-side keycode below was never
++# needed. Keep it for the day some other client really does read key
++# state per-side; do not reach for it before a poll-based test says so.
++VK_CONTROL = 0x11
++VK_LCONTROL = 0xA2
+ VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6 = 0x70, 0x71, 0x72, 0x73, 0x74, 0x75
+ VK_1, VK_2, VK_3, VK_4 = 0x31, 0x32, 0x33, 0x34
+ # NPC dialogs are keyboard-navigable: arrows move the highlight, Enter
+diff --git a/pd2bot/panelinput.py b/pd2bot/panelinput.py
+index 14e0f46..6943028 100644
+--- a/pd2bot/panelinput.py
++++ b/pd2bot/panelinput.py
+@@ -66,12 +66,23 @@ class PanelInput:
+         session: GameSession,
+         window: GameWindow | None = None,
+         ui_array: int | None = None,
++        *,
++        ctrl_vk: int = VK_CONTROL,
++        modifier_settle_s: float = _MODIFIER_SETTLE_S,
+     ) -> None:
+         self.session = session
+         self.window = window if window is not None else GameWindow(session.process_id)
+         self._ui_array = (
+             ui_array if ui_array is not None else uistate.find_ui_array(session)
+         )
++        # Which control key to send, and how long to let a modifier settle.
++        # Both are parameters rather than constants because T43 proved the
++        # defaults are not automatically right: a ctrl+right-click went in
++        # as an unmodified click and drank the potion it was aimed at. A
++        # drill can now COMPARE spellings through this same gated path
++        # instead of hand-rolling raw sends that skip the guard.
++        self._ctrl_vk = ctrl_vk
++        self._modifier_settle_s = modifier_settle_s
+ 
+     # -- the gate ------------------------------------------------------------
+ 
+@@ -164,17 +175,19 @@ class PanelInput:
+         user32.SetCursorPos(sx, sy)
+         time.sleep(_PRE_CLICK_PAUSE_S if move_settle_s is None else move_settle_s)
+         self.check(expected_panel, sx, sy)  # the panel may have closed under us
+-        modifiers = [vk for vk, held in ((VK_SHIFT, shift), (VK_CONTROL, ctrl)) if held]
++        modifiers = [
++            vk for vk, held in ((VK_SHIFT, shift), (self._ctrl_vk, ctrl)) if held
++        ]
+         for vk in modifiers:
+             _send_key(vk, 0)
+         if modifiers:
+-            time.sleep(_MODIFIER_SETTLE_S)
++            time.sleep(self._modifier_settle_s)
+         try:
+             _send_mouse_flag(down)
+             time.sleep(_CLICK_HOLD_S)
+             _send_mouse_flag(up)
+             if modifiers:
+-                time.sleep(_MODIFIER_SETTLE_S)
++                time.sleep(self._modifier_settle_s)
+         finally:
+             for vk in reversed(modifiers):
+                 _send_key(vk, _KEY_UP)

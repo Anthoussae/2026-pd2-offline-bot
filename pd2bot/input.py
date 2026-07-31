@@ -45,7 +45,24 @@ _KEY_UP = 0x0002
 # owns the SendInput plumbing; the *meaning* of a key (which skill, which
 # belt column) lives with the caller's config, not here.
 VK_SHIFT = 0x10
-VK_CONTROL = 0x11  # ctrl+right-click drops an inventory item (R117)
+# Ctrl+right-click drops an inventory item (R117). VK_CONTROL is the one
+# the client honours — verified live in T44, first variant, gem dropped
+# and found on the ground.
+#
+# VK_LCONTROL exists only as a documented alternative, and the story is
+# worth keeping: T43 concluded ctrl was being ignored, because the item
+# it dropped could not be found on the floor. That was wrong. The drop
+# had worked; T43 read the ground ONCE, immediately, and a just-dropped
+# item takes a moment to enter the unit table. The antidote it "lost" was
+# later found lying exactly where it fell.
+#
+# So the bug was in the instrument, not the game — the same shape as the
+# whole P3 calibration crisis (R86). A verification that polls would have
+# passed first time, and the speculative per-side keycode below was never
+# needed. Keep it for the day some other client really does read key
+# state per-side; do not reach for it before a poll-based test says so.
+VK_CONTROL = 0x11
+VK_LCONTROL = 0xA2
 VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6 = 0x70, 0x71, 0x72, 0x73, 0x74, 0x75
 VK_1, VK_2, VK_3, VK_4 = 0x31, 0x32, 0x33, 0x34
 # NPC dialogs are keyboard-navigable: arrows move the highlight, Enter

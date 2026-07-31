@@ -66,12 +66,23 @@ class PanelInput:
         session: GameSession,
         window: GameWindow | None = None,
         ui_array: int | None = None,
+        *,
+        ctrl_vk: int = VK_CONTROL,
+        modifier_settle_s: float = _MODIFIER_SETTLE_S,
     ) -> None:
         self.session = session
         self.window = window if window is not None else GameWindow(session.process_id)
         self._ui_array = (
             ui_array if ui_array is not None else uistate.find_ui_array(session)
         )
+        # Which control key to send, and how long to let a modifier settle.
+        # Both are parameters rather than constants because T43 proved the
+        # defaults are not automatically right: a ctrl+right-click went in
+        # as an unmodified click and drank the potion it was aimed at. A
+        # drill can now COMPARE spellings through this same gated path
+        # instead of hand-rolling raw sends that skip the guard.
+        self._ctrl_vk = ctrl_vk
+        self._modifier_settle_s = modifier_settle_s
 
     # -- the gate ------------------------------------------------------------
 
@@ -164,17 +175,19 @@ class PanelInput:
         user32.SetCursorPos(sx, sy)
         time.sleep(_PRE_CLICK_PAUSE_S if move_settle_s is None else move_settle_s)
         self.check(expected_panel, sx, sy)  # the panel may have closed under us
-        modifiers = [vk for vk, held in ((VK_SHIFT, shift), (VK_CONTROL, ctrl)) if held]
+        modifiers = [
+            vk for vk, held in ((VK_SHIFT, shift), (self._ctrl_vk, ctrl)) if held
+        ]
         for vk in modifiers:
             _send_key(vk, 0)
         if modifiers:
-            time.sleep(_MODIFIER_SETTLE_S)
+            time.sleep(self._modifier_settle_s)
         try:
             _send_mouse_flag(down)
             time.sleep(_CLICK_HOLD_S)
             _send_mouse_flag(up)
             if modifiers:
-                time.sleep(_MODIFIER_SETTLE_S)
+                time.sleep(self._modifier_settle_s)
         finally:
             for vk in reversed(modifiers):
                 _send_key(vk, _KEY_UP)

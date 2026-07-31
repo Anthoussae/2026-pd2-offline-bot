@@ -331,6 +331,10 @@ class TownLayer:
         # would look exactly like junk. Protecting the startup baseline
         # closes that hole without needing those ids at all.
         self._protected_ids = protected_ids
+        # Where a lazily-captured baseline lands when the caller supplied
+        # none. See `_protected` for why the default is not "protect
+        # nothing".
+        self._implicit_baseline: set[int] | None = None
         # An outside veto, checked in every wait. A bot stuck in a retry
         # ladder was previously unstoppable: the drill harness could only
         # cancel its OWN waits, and a loop inside this layer ran to
@@ -1554,6 +1558,30 @@ class TownLayer:
                 return True
         return False
 
+    def _protected(self) -> set[int]:
+        """Unit ids the cleanse may not drop.
+
+        **The default protects everything, not nothing.** A caller that
+        supplies a whitelist but forgets the baseline would otherwise get
+        the most destructive configuration available by doing half the
+        wiring — and the audit in T43 showed what that costs: 4 of 12
+        carried items would have gone on the floor, including a magic
+        grand charm the keep list never mentions.
+
+        So with no baseline supplied, one is captured the first time the
+        cleanse runs. Everything present then predates the bot's own
+        accidents by definition, which is exactly the set this feature
+        must not touch. A session-wide baseline is still better and the
+        wiring should pass one; this is the floor, not the goal.
+        """
+        if self._protected_ids is not None:
+            return self._protected_ids()
+        if self._implicit_baseline is None:
+            self._implicit_baseline = {
+                i.unit_id for i in self._carried(self.session).main_inventory
+            }
+        return self._implicit_baseline
+
     def cleanse_inventory(self, report: PreambleReport) -> int:
         """Drop accidental-pickup junk on the ground (R117).
 
@@ -1570,7 +1598,7 @@ class TownLayer:
         """
         if self._keep_item is None:
             return 0
-        protected = self._protected_ids() if self._protected_ids else set()
+        protected = self._protected()
         junk = [
             i
             for i in self._carried(self.session).main_inventory

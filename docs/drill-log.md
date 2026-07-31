@@ -78,3 +78,5 @@ R-numbers.
 | T38 | 1 | 2026-07-31 03:28 | Socket-count stat, carried and on the ground | perception | PASS | stat 194 CONFIRMED by the user: inventory kind 441 = 3 sockets, same value read off the ground, equipped: 1/1/5/1/3 |
 | T42 | 1 | 2026-07-31 03:54 | Item code table by triangulation | perception | PASS | 800 codes written to item_codes.toml (stride 0x1a8); 6 known ids corroborate |
 | T39 | 1 | 2026-07-31 04:02 | Item ids by conversation (the R117 vocabulary) | perception | ABORTED | cancelled by request |
+| T43 | 1 | 2026-07-31 06:00 | Ctrl+right-click drop, and a whitelist audit | bot control | ABORTED | kind 529 left the inventory but did NOT appear on the ground — the click may have USED the item rather than dropping it (the R113 unmodified-click hazard). Do not enable the cleanse. |
+| T44 | 1 | 2026-07-31 06:05 | Which CTRL spelling the client honours for drop | bot control | PASS | CTRL DROP VERIFIED with VK_CONTROL 0x11, 1-frame settle: kind 690 left the inventory AND appeared on the ground |
