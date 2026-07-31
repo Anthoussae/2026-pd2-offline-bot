@@ -1,0 +1,44 @@
+# P6 stage B: the first time the bot fights anything, supervised.
+#
+# The same run as cold-plains.toml with ONE difference — radius 50 instead
+# of 150 — and the difference is the whole point. Stage B is a look at the
+# combat shape, not a clearance: everything in necro.py and ladder rungs
+# 3-7 is sim-proven only, and the sim is a model of the game rather than
+# the game. A small radius keeps the fight near the waypoint, which is
+# where the user is watching and where the character can be recovered.
+#
+# The other stage-B setting is NOT here, because it is not a property of
+# the run: the chicken comes up from 35% to 50% on the command line.
+#
+#   python -m pd2bot.wiring --games 1 --chicken 50 \
+#       --run runs/cold-plains-stage-b.toml
+#
+# Watch for (phase file 06, stage B): the wait-for-revives beat, the
+# dash/strike/retreat shape, bone-armor recasts, desecrate -> revive
+# maintenance, and the first potion drinks. The decision trace is on the
+# executor; compare it against docs/plans/.../p5-sim-trace.md.
+#
+# Abort paths, both standing and neither needing the bot's cooperation:
+# take the mouse (the focus guard yields immediately) or press ESC (offline
+# SP pauses). Any death stops the milestone for a conversation — the latch
+# does its job and there is no same-day retry without an explicit decision.
+
+name = "cold-plains-stage-b"
+
+[[step]] # heal -> repair -> R75 inventory loop -> merc; town layer, P3
+name = "town_preamble"
+
+[[step]] # town waypoint -> Cold Plains (area 3), arrival verified by area id
+name = "waypoint"
+dest = 3
+
+[[step]] # deliberately 50, not 150: a look at the fight, not a clearance
+name = "clear_radius"
+center = "arrival"
+radius = 50
+
+[[step]] # collect what the pickit rules want from the cleared ground
+name = "pickup"
+
+[[step]] # run complete; the cycle takes it from here (leave, next game)
+name = "done"
