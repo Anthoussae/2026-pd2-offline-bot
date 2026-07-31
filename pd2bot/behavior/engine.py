@@ -193,6 +193,11 @@ class BehaviorEngine:
     def complete(self) -> bool:
         return self._index >= len(self._states)
 
+    @property
+    def step_names(self) -> list[str]:
+        """The run this engine will execute, in order. For the operator."""
+        return [state.name for state in self._states]
+
     # -- the tick ---------------------------------------------------------------
 
     def _mark_activity(self, now: float) -> None:

@@ -21,10 +21,10 @@ M5 = the first end-to-end run (Cold Plains clearance, Hell). Phases:
 | P5b real pickit + hygiene (R117) | **done**; vocabulary closed (105 names, 0 pending) |
 | P6 stage A (town, drop gesture) | **PASSED** — T43 audit + T44 verification |
 | Review findings 002/003 + R132 batch | **done** (this session) |
-| P6 wiring checklist (review 005) | **next** | ← here
-| P6 stage B (supervised Cold Plains clear) | after the wiring |
+| P6 wiring checklist (review 005) | **done** — `pd2bot/wiring.py`, dry-run verified live |
+| P6 stage B (supervised Cold Plains clear) | **next** | ← here
 
-`609 tests, ruff clean.` All committed and pushed on `m5-trial-run`.
+`623 tests, ruff clean.` All committed and pushed on `m5-trial-run`.
 **R130 is closed** — the commits were rewritten to the GitHub noreply
 address and pushed in the session that raised it; the log row saying
 otherwise was stale, and so was the claim here that four commits were
@@ -65,22 +65,50 @@ early on a full inventory was considered and NOT done — it changes what
 the clearance step does, and stage B exists to validate that step as
 designed.
 
+## The wiring (done — `pd2bot/wiring.py`)
+
+The production assembly finally has a home; every review-005 checklist
+item is in it, and the resolution table is in that issue file. What a
+future session most needs to know:
+
+- **Session-scoped**: `SafetyMonitor` (the death latch is instance state
+  — a per-game monitor would clear it), `TownLayer` (so the cleanse
+  baseline is session-wide), the navigator, the pickit and configs.
+- **Per-game**: the combat module, the ladder, the executor and
+  `RunServices` — that is what bounds the collections review 005 called
+  unbounded.
+- `SessionBaseline` **refuses to capture outside a game**: the inventory
+  reads empty there, and an empty baseline protects nothing rather than
+  everything.
+- The CLI is `python -m pd2bot.wiring --games N [--chicken PCT]
+  [--run FILE] [--dry-run]`. `--dry-run` assembles everything, builds a
+  throwaway engine (which is what proves the run file and step registry
+  compose) and prints what resolved, sending nothing.
+
+Live dry-run through the bridge resolved to: necromancer, cold-plains
+(`town_preamble, waypoint, clear_radius, pickup, done`), 16 pickit rules
+/ 0 pending, cleanse ENABLED, belt capacity `{healing 8, mana 4, rejuv
+4}`, chicken 35%, idle bail 10 s, refusal limit 50.
+
 ## START HERE
 
-**The P6 wiring checklist** (review issue 005), which is now the only
-thing between here and stage B: `cleanse_keep(pickit)` ->
-`TownLayer.keep_item`; a SESSION-wide baseline -> `protected_ids` (the
-implicit one is a floor, not the goal); `RunServices.cleanse`; belt
-capacity -> `Pickit.belt_capacity`; `chicken_life_pct` -> `SafetyConfig`.
-One addition from R132: wire the reflex ladder's `carried` callable to
-`read_carried_items(with_sockets=False)` — it only reads the belt and
-runs every tick, so it should not pay for 40 stat reads; everything else
-takes the default.
-
-**Then stage B, a supervised Cold Plains clear** — the first time the
+**Stage B, a supervised Cold Plains clear** — the first time the
 bot fights anything. Everything in `necro.py`, ladder rungs 3-7 and the
 clearance step is sim-proven only, and the sim is a model of the game,
 not the game.
+
+Per the phase file, stage B is ONE game at radius ~50 with the chicken
+raised to 50%, user hovering, hands near the controls:
+
+```
+python -m pd2bot.wiring --games 1 --chicken 50 --run runs/cold-plains-stageb.toml
+```
+
+That run file does not exist yet — stage B's radius-50 variant is the
+first thing to write. Watch for: the wait-for-revives beat, the
+dash/strike/retreat shape, bone-armor recasts, desecrate->revive
+maintenance, first potion drinks. Collect the decision trace
+(`executor.trace`) and compare it against `p5-sim-trace.md`.
 
 **R115** (IdleBail sharing the cycle's chicken counter) is still
 unanswered. Note it is now the same shape as `StashFullHalt`, which took
