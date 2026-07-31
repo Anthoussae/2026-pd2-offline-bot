@@ -4,7 +4,8 @@ Written 2026-07-31. Read this plus [notes.md](notes.md) ("P4 build
 notes", "P5 build notes", "P5b — the R117 amendment") and you have the
 state; the gate artifact is [p5-sim-trace.md](p5-sim-trace.md), the
 architecture is in `docs/adr/2026-07-29-behavior-architecture.md`, and
-R115/R116/R119 are open in `docs/instruction-log.md`.
+R115 is the only request still open in `docs/instruction-log.md`
+(R116/R119 resolved; the review's 002 and 003 are the live work).
 
 ## Where the milestone is
 
@@ -21,8 +22,10 @@ M5 = the first end-to-end run (Cold Plains clearance, Hell). Phases:
 | P6 stage A (town, drop gesture) | **PASSED** — T43 audit + T44 verification |
 | P6 stage B (supervised Cold Plains clear) | **next** | ← here
 
-`546 tests, ruff clean.` Nothing since cb63b67 is committed (no commit
-was requested).
+`586 tests, ruff clean.` All committed and pushed on `m5-trial-run`
+(`fe19d88`). The vocabulary is closed and the inventory cleanse is
+enabled; the only input path with no live evidence — ctrl+right-click —
+was verified in stage A.
 
 ## START HERE TOMORROW
 
@@ -130,12 +133,14 @@ Encampment 1, Cold Plains 3.
 
 ## Suggested opening prompt for a fresh conversation
 
-> Continuing the PD2 bot, milestone M5. P4 and P5 are both complete and
-> sim-proven (524 tests, ruff clean) but uncommitted, and the P5 gate
-> (R116, go/no-go for live) is unanswered — check with me on that
-> before starting P6. Read
-> `docs/plans/2026-07-29-m5-trial-run/RESUME.md` first, then
-> `notes.md` ("P4 build notes" and "P5 build notes"), then
-> `p5-sim-trace.md` and the phase file
-> `06-staged-acceptance-closeout.md`. Instruction-log IDs continue
-> from R116.
+> Continuing the PD2 bot, milestone M5. P6 stage A is done — the
+> ctrl+right-click drop is live-verified and the item vocabulary is
+> closed. Next is stage B, the first supervised Cold Plains clear, but
+> fix review findings 002 and 003 first
+> (`docs/reviews/2026-07-31-m5-trial-run/`): a refused send currently
+> escapes the engine and ends the run loop, and the idle watchdog can
+> fire during waits the design asks for. Read
+> `docs/plans/2026-07-29-m5-trial-run/RESUME.md` first, then that
+> review's `summary.md`, then the phase file
+> `06-staged-acceptance-closeout.md`. Stage B needs the bridge and a
+> human watching. Instruction-log IDs continue from R130.
