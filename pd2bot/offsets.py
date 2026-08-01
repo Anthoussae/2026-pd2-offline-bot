@@ -447,6 +447,17 @@ STORAGE_INVENTORY = 3
 STORAGE_TRADE = 5
 STORAGE_CUBE = 6
 STORAGE_STASH = 7
+# PD2's own addition, absent from kolbot's 1.13c list. Spotted in T38 as "a
+# large unnamed container" holding 25 socketed items and identified in T45,
+# where the live character had **350 items here and zero in STORAGE_STASH** —
+# so on a PD2 character this, not location 7, is where the stash lives.
+# Anything measuring "how full is the stash" must count both.
+#
+# NOT the materials tab, which T45 also settled: a gem deposited there left
+# the player's inventory chain entirely and never appeared in this container.
+# The materials tab is not enumerable at all, which is why T15/T36 could find
+# no store for it.
+STORAGE_EXPANDED_STASH = 8
 STORAGE_NAMES = {
     STORAGE_EQUIPPED: "equipped",
     STORAGE_BELT: "belt",
@@ -454,6 +465,7 @@ STORAGE_NAMES = {
     STORAGE_TRADE: "trade",
     STORAGE_CUBE: "cube",
     STORAGE_STASH: "stash",
+    STORAGE_EXPANDED_STASH: "expanded_stash",
 }
 
 # NodePage values = kolbot `sdk.node` (libs/modules/sdk.js:2644-2650).

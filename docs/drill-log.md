@@ -80,3 +80,4 @@ R-numbers.
 | T39 | 1 | 2026-07-31 04:02 | Item ids by conversation (the R117 vocabulary) | perception | ABORTED | cancelled by request |
 | T43 | 1 | 2026-07-31 06:00 | Ctrl+right-click drop, and a whitelist audit | bot control | ABORTED | kind 529 left the inventory but did NOT appear on the ground — the click may have USED the item rather than dropping it (the R113 unmodified-click hazard). Do not enable the cleanse. |
 | T44 | 1 | 2026-07-31 06:05 | Which CTRL spelling the client honours for drop | bot control | PASS | CTRL DROP VERIFIED with VK_CONTROL 0x11, 1-frame settle: kind 690 left the inventory AND appeared on the ground |
+| T45 | 1 | 2026-07-31 17:24 | materials self-route from the regular stash tab | hybrid | PASS | material (kind 689): left the inventory -> somewhere neither counter saw — investigate (regular 0->0, expanded 350->350); ordinary (kind 534): left the inventory -> the REGULAR stash (regular 0->1, expanded 350->350) |

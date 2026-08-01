@@ -639,44 +639,75 @@ def full_belt(town_state):
     )
 
 
-def test_the_loop_deposits_materials_first_then_the_rest(town):
-    """R75's core: attempt everything into MATERIALS, keep what it takes,
-    then switch and deposit the rest. The bot never classifies an item —
-    the game does, which is why it needs no item taxonomy to go stale.
-    (The material here is a rune-shaped thing, not a rejuv: since R118 no
-    potion is ever offered to the stash at all.)"""
+def test_the_loop_deposits_everything_in_one_pass_without_toggling(town):
+    """R134/T45: a material self-routes from the REGULAR tab, so one pass on
+    whatever tab is up empties the inventory and no toggle happens at all.
+
+    R75's good idea survives intact — the GAME classifies the items, so the
+    bot still needs no taxonomy to go stale. What went is the machinery that
+    tried to identify the tab first. (The material here is a rune-shaped
+    thing, not a rejuv: since R118 no potion is offered to the stash.)"""
     town.inventory = [loot(1, (0, 0), kind=800), loot(2, (1, 0), kind=522)]
     town.material_kinds = {800}  # the game accepts the rune, not the sword
+    town.stash_tab = "regular"
     full_belt(town)
 
     report = PreambleReport()
     layer(town).manage_inventory(report)
     assert town.inventory == []  # everything left the inventory
     assert report.deposited == 2
-    assert any("1 into materials" in line for line in report.log)
-    assert any("1 into regular" in line for line in report.log)
-    assert town.stash_tab == "regular"  # left where the next run expects it
+    assert any("2 deposited on the displayed tab" in line for line in report.log)
+    assert not any("after switching tab" in line for line in report.log)
+    assert town.stash_tab == "regular"  # never toggled
 
 
-def test_a_refusal_is_normal_in_materials_and_fatal_in_regular(town):
-    """The asymmetry the design turns on. If the materials phase treated a
-    bounce as an error it would halt on the first ordinary item every single
-    run; if the final phase ignored one, a full stash would go unnoticed."""
-    town.inventory = [loot(1, (0, 0), kind=522)]
-    town.material_kinds = set()  # materials takes nothing
+def test_a_stash_opened_on_materials_self_heals_with_one_toggle(town):
+    """The user's one foreseeable risk at the R134 gate, and the reason the
+    design toggles at all. Starting on materials, the ordinary item bounces,
+    the blind toggle happens, and the retry lands it — no halt, no human."""
+    town.inventory = [loot(1, (0, 0), kind=800), loot(2, (1, 0), kind=522)]
+    town.material_kinds = {800}
+    town.stash_tab = "materials"
     full_belt(town)
 
-    # Materials refuses it and that is fine; regular takes it.
+    report = PreambleReport()
+    layer(town).manage_inventory(report)
+    assert town.inventory == []
+    assert report.deposited == 2
+    assert any("after switching tab" in line for line in report.log)
+    assert town.stash_tab == "regular"
+
+
+def test_an_empty_regular_stash_is_no_longer_a_problem(town):
+    """The exact condition that killed stage B attempt 1.
+
+    The old design toggled and counted the classic stash to identify the
+    tab; on this character it lists nothing on either side, so it refused
+    and the whole preamble died. Nothing asks the question now."""
+    town.stash = []  # what a PD2 expanded-stash character actually looks like
+    town.inventory = [loot(1, (0, 0), kind=522)]
+    town.material_kinds = set()
+    full_belt(town)
+
+    report = PreambleReport()
+    layer(town).manage_inventory(report)  # no raise
+    assert town.inventory == [] and report.deposited == 1
+
+
+def test_an_item_no_tab_wants_is_still_deposited_not_halted_on(town):
+    """The old design's asymmetry — a bounce is normal in the materials
+    phase, fatal in the regular one — is gone with the phases themselves.
+    What has to survive it is the behaviour that asymmetry protected: an
+    ordinary item the materials tab would never take must still be stashed
+    without anything treating it as a fault."""
+    town.inventory = [loot(1, (0, 0), kind=522)]
+    town.material_kinds = set()  # materials takes nothing at all
+    full_belt(town)
+
     report = PreambleReport()
     layer(town).manage_inventory(report)
     assert town.inventory == [] and report.deposited == 1
-
-    # Now make the regular tab refuse too: that IS a fault.
-    town.inventory = [loot(3, (0, 0), kind=522)]
-    town.deposit_works = False
-    with pytest.raises(StashFull, match="left in the inventory"):
-        layer(town).manage_inventory(PreambleReport())
-    assert town.alerts  # and it is loud
+    assert not town.alerts
 
 
 def test_potion_reserve_kept_and_excess_drunk_including_rejuvs(town):
@@ -781,27 +812,19 @@ def test_no_carried_gold_is_not_an_error(town):
     assert gold_clicks == []
 
 
-def test_an_unreadable_tab_refuses_rather_than_guessing(town):
-    """The user's requirement was reliable, not heuristic. With the regular
-    stash empty the stash lists nothing on either side of a toggle, so the
-    tab genuinely cannot be identified — and depositing blind would make the
-    phase-aware halt fire on the wrong items."""
-    town.stash = []  # nothing to see on either tab
-    town.inventory = [loot(1, (0, 0))]
+def test_a_refusal_on_both_tabs_is_a_full_stash(town):
+    """Once a refusal has survived the toggle, the tab is no longer a
+    candidate explanation — so this is the genuine full-stash case, and it
+    must still halt loudly."""
+    town.inventory = [loot(1, (0, 0), kind=522)]
+    town.deposit_works = False
     full_belt(town)
 
-    with pytest.raises(TownError, match="cannot identify the stash tab"):
+    with pytest.raises(StashFull, match="both deposit passes"):
         layer(town).manage_inventory(PreambleReport())
-
-
-def test_the_materials_tab_is_found_from_either_starting_side(town):
-    """The loop must not assume which tab the last run left up."""
-    full_belt(town)
-    for starting in ("regular", "materials"):
-        town.stash_tab = starting
-        town.panels.add(offsets.UI_STASH)
-        layer(town).ensure_materials_tab()
-        assert town.stash_tab == "materials", f"failed from {starting}"
+    assert town.alerts
+    # The message must not name a container it cannot measure.
+    assert any("materials tab cannot be measured" in a for a in town.alerts)
 
 
 # -- the preamble ------------------------------------------------------------------------
@@ -817,8 +840,11 @@ def test_preamble_runs_in_the_agreed_order(town):
     assert report.healed and report.deposited == 1
     assert report.merc_action == "not_needed"
     steps = [line.split(":")[0] for line in report.log]
+    # One "stash" line, not two: the materials/regular split went with the
+    # tab inference (R134). Nothing toggles unless something refuses, so the
+    # happy path reports a single deposit pass.
     assert steps == [
-        "heal", "repair", "belt", "belt", "stash", "stash", "gold", "merc"
+        "heal", "repair", "belt", "belt", "stash", "gold", "merc"
     ]
 
 

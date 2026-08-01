@@ -196,18 +196,17 @@ class TownConfig:
     # caught a read with 10 of 18 items still in flight — so a tab toggle
     # must settle before its effect is read.
     tab_settle_s: float = 1.0
-    # How long to WAIT for a tab switch to show in the item listing.
-    # Sleeping a fixed interval and reading once failed T35: the list
-    # was still changing (T15's progressive population), so the switch
-    # read as 'did not happen'. Poll instead.
-    tab_timeout_s: float = 3.0
-    # The materials phase attempts EVERY item and expects most to bounce
-    # (R75): the game does the classification, so a refusal is information,
-    # not a fault. At the normal 2 attempts x 3 s that would cost about a
-    # minute of dead time per run, so it fails fast and only the final
-    # phase — where a refusal really is a problem — pays full price.
-    materials_attempts: int = 1
-    materials_verify_s: float = 0.6
+    # The two deposit passes, tuned in opposite directions (R134). Pass one
+    # runs on whatever tab is displayed and fails FAST, because a refusal
+    # there is cheap — pass two retries it after a blind toggle. Pass two
+    # uses `transfer_attempts` x `verify_timeout_s` instead, because a
+    # refusal there is terminal and worth being patient about.
+    #
+    # (These numbers were tuned for the old materials phase, which attempted
+    # every item and expected most to bounce. The rationale carried over
+    # unchanged — cheap where recoverable — so the values did too.)
+    first_pass_attempts: int = 1
+    first_pass_verify_s: float = 0.6
     # How many potions of EACH type stay in the inventory as reserve after
     # the belt is filled (R118 Q1: belt first, then up to this many). The
     # rest are drunk — all types, rejuvs included (R118 Q2, superseding
@@ -1119,120 +1118,40 @@ class TownLayer:
 
     # -- the inventory-management loop (R75, user-designed) ---------------------
 
-    def _stash_visible(self) -> int:
-        """How many items the stash currently LISTS.
-
-        Load-bearing subtlety (T15): the materials tab makes the ordinary
-        stash read empty — switching to it took 18 items to 0 and back — so
-        this is not "how full is the stash", it is "how much of the stash is
-        on screen". That is exactly what makes it a tab signal.
-
-        **And it is the only one.** T36 and a direct probe (R110) compared
-        the whole store array across both tabs: every store is identical
-        except the stash store's item-chain head, which the game nulls while
-        materials is displayed. Same 10x15 dimensions, same grid pointer, and
-        no separate store appears for the materials container — so the
-        visibly different grid on screen is not represented here at all.
-        There is no shape or count to read the tab from, which means the
-        inference below cannot be replaced by a direct read, and the
-        empty-stash ambiguity is a real limit rather than a missing offset.
-        """
-        return len(self._carried(self.session).stash)
+    # What the tab signal was, and why nothing reads it any more (T15/T36/T45).
+    #
+    # `len(carried.stash)` is not "how full is the stash", it is "how much of
+    # the classic stash is ON SCREEN": the materials tab nulls that store's
+    # item-chain head, so switching to it took 18 items to 0 and back. That
+    # made it the tab signal — and T36 plus a direct probe (R110) established
+    # it was the ONLY one, every other store being byte-identical across
+    # tabs.
+    #
+    # T45 finished the story. The signal is absent exactly when a PD2
+    # character keeps their items in the expanded stash (location 8): the
+    # classic store is empty, reads 0 on both tabs, and the inference has
+    # nothing to work with. That is not a missing offset, it is a real limit
+    # — and the R134 design routes around it by never asking the question.
+    # `_stash_held` counts what is OWNED instead, which needs no tab at all.
 
     def _click_tab_toggle(self) -> None:
         point = self.point("stash.materials_tab")
         self._check_stop()
         self.panel.click(offsets.UI_STASH, *self.point_pixel(point))
 
-    def _probe_stash_tab(self) -> int:
-        """Toggle and WAIT for the listing to change; return what it settles
-        on. Returns the UNCHANGED count if it never moves.
-
-        Deliberately does not *require* a change: identifying the tab means
-        clicking and looking, and in one case the honest answer is "still
-        cannot tell" (see `ensure_materials_tab`). A version that insisted on
-        an effect could not express that.
-
-        But "no change" has to mean it really did not change, not that one
-        click went missing — so the toggle is retried before that conclusion
-        is drawn. A single probe click failed live (R108): the user had
-        fetched a rune, which meant leaving the stash on the materials tab,
-        and one lost click reported a perfectly readable stash as unreadable.
-
-        Polls rather than sleeping a fixed interval, because stash contents
-        arrive progressively (T15).
-        """
-        before = self._stash_visible()
-        for attempt in range(1 + self.config.panel_click_retries):
-            self._check_stop()
-            self._sleep(self.config.panel_settle_s if attempt else 0.0)
-            self._click_tab_toggle()
-            if self._await(
-                lambda: self._stash_visible() != before, self.config.tab_timeout_s
-            ):
-                return self._stash_visible()
-        return self._stash_visible()
-
-    def _switch_tab_until(self, condition: Callable[[], bool], what: str) -> None:
-        """Toggle the tab until the listing proves it, retried like any send.
-
-        `send_until` is the one path for "send, verify, retry" (R94), and a
-        tab toggle is no different from an ESC or a row click: sent once and
-        checked once, it will eventually land on a bad frame.
-        """
-        self.send_until(self._click_tab_toggle, condition, what=what)
-
-    def ensure_materials_tab(self) -> None:
-        """Leave the MATERIALS tab showing, proven, or refuse.
-
-        The user's requirement was that tab identification be reliable and
-        not heuristic, so this reasons only from a fact that cannot be
-        misread: **the ordinary stash lists items only on the regular tab.**
-
-            lists items      -> definitely REGULAR; toggle once
-            lists nothing    -> ambiguous: materials, or a regular stash that
-                                is genuinely empty. Toggle and look: if items
-                                appear we were on materials, so toggle back.
-                                If nothing appears either way, the tab is
-                                genuinely unreadable and this refuses.
-
-        The refusal case is rare (it needs an empty regular stash) and loud,
-        which is the right trade: depositing into the wrong tab would make
-        the phase-aware overflow halt fire on the wrong items.
-        """
-        if self._stash_visible() > 0:
-            self._switch_tab_until(
-                lambda: self._stash_visible() == 0,
-                "hiding the regular stash (switching to materials)",
-            )
-            return
-        if self._probe_stash_tab() > 0:
-            # We had been on materials all along; that probe moved us to
-            # regular, so go back.
-            self._switch_tab_until(
-                lambda: self._stash_visible() == 0,
-                "returning to the materials tab",
-            )
-            return
-        raise TownError(
-            "cannot identify the stash tab: the stash lists nothing on "
-            "either side of a toggle, which happens when the regular stash "
-            "is empty. Refusing rather than guessing which tab is up (R75)"
-        )
-
-    def ensure_regular_tab(self) -> None:
-        """Leave the REGULAR tab showing, proven by its items reappearing.
-
-        Unambiguous by this point: `ensure_materials_tab` only returns having
-        seen the regular stash hold something, so its items reappearing is a
-        reliable proof that we are back on it.
-        """
-        if self._stash_visible() > 0:
-            return
-        self._switch_tab_until(
-            lambda: self._stash_visible() > 0,
-            "bringing the regular stash back (switching from materials)",
-        )
+    # Gone with R134, and worth knowing why rather than just that they went:
+    # `ensure_materials_tab`, `ensure_regular_tab`, `_probe_stash_tab` and
+    # `_switch_tab_until` all existed to answer "which tab is displayed?"
+    # before depositing. T45 established that the question has no reliable
+    # answer (the regular stash lists nothing on either tab when it is empty,
+    # and the materials tab is not enumerable at all) AND that it does not
+    # need one, because materials self-route from the regular tab. A whole
+    # mechanism whose only job was an unanswerable question is now one blind
+    # toggle in `deposit_all`, taken only when something actually refuses.
+    #
+    # The R108 lesson they carried survives in `_attempt_deposit` and
+    # `send_until`: a single click that goes missing must never be read as a
+    # fact about the game.
 
     def _attempt_deposit(self, item: CarriedItem, *, attempts: int, verify_s: float) -> bool:
         """Shift+right-click one item toward the stash. Did it leave?"""
@@ -1253,20 +1172,25 @@ class TownLayer:
                 return True
         return False
 
-    def _deposit_everything(self, *, strict: bool) -> tuple[int, list[CarriedItem]]:
-        """Try every movable item into whatever tab is showing.
+    def _deposit_items(
+        self,
+        items: list[CarriedItem] | None = None,
+        *,
+        attempts: int,
+        verify_s: float,
+    ) -> tuple[int, list[CarriedItem]]:
+        """Try each item into whatever tab is showing. Returns (moved, refused).
 
-        `strict` is the whole difference between the two phases (R75). In the
-        materials phase a refusal is the NORMAL answer — the game is doing
-        the classification for us, which is the point of the design, because
-        it means the bot needs no item taxonomy that would go stale every
-        patch. In the final phase a refusal means the stash is full, and that
-        is a human problem.
+        `items` defaults to everything movable in the main inventory; pass a
+        list to retry a specific set (the second deposit pass does).
+
+        Nothing here knows or cares which tab is displayed, which is the
+        point of the R134 design — see `deposit_all`.
         """
-        attempts = self.config.transfer_attempts if strict else self.config.materials_attempts
-        verify_s = self.config.verify_timeout_s if strict else self.config.materials_verify_s
         moved, refused = 0, []
-        for item in self._carried(self.session).main_inventory:
+        for item in (
+            self._carried(self.session).main_inventory if items is None else items
+        ):
             if not item.is_movable:
                 continue  # the Cube opens on right-click instead of moving
             if _potion_type(item) is not None:
@@ -1280,6 +1204,68 @@ class TownLayer:
             else:
                 refused.append(item)
         return moved, refused
+
+    def deposit_all(self, report: PreambleReport) -> list[CarriedItem]:
+        """Empty the inventory into the stash. Returns whatever would not go.
+
+        **Toggle on REFUSAL, not on inference (R134).** The old design
+        identified the displayed tab up front, by toggling and counting what
+        the regular stash listed. That count is not always a signal: on a
+        character whose regular stash is empty it reads zero on both tabs,
+        the identification refuses, and the whole preamble dies — which is
+        exactly how stage B's first attempt ended, on a character with 350
+        items in PD2's expanded stash and none in the classic one.
+
+        Two live findings (T45) removed the need to identify it at all:
+
+        1. **A material self-routes.** Shift+right-click a rune or gem with
+           the REGULAR tab displayed and it goes to materials anyway (the
+           user's observation at the R134 gate, confirmed: the gem left the
+           inventory while the regular stash stayed at zero).
+        2. **The materials tab is not readable.** That gem landed somewhere
+           the player's inventory chain does not enumerate — its kind never
+           appeared in the expanded container either. So there was never a
+           count to identify the materials tab BY, which retro-explains
+           T15/T36 finding no store for it.
+
+        So: deposit onto whatever tab happens to be up, and let the game
+        classify (still R75's good idea — no item taxonomy to go stale).
+        Verification is per item and tab-independent: the item leaves the
+        inventory. Only if something refuses does the tab become a question
+        at all, and then the answer is a BLIND toggle and one retry, because
+        the effect settles it either way. Still refused after that means the
+        stash is genuinely full.
+
+        The two passes are tuned in opposite directions on purpose. Pass one
+        fails fast — a refusal there is cheap, pass two fixes it. Pass two is
+        patient, because a refusal there is terminal.
+        """
+        moved, refused = self._deposit_items(
+            attempts=self.config.first_pass_attempts,
+            verify_s=self.config.first_pass_verify_s,
+        )
+        report.log.append(f"stash: {moved} deposited on the displayed tab")
+        if refused:
+            # The blind toggle. No condition to verify it by — that is the
+            # whole problem — so this is the one send in the town layer that
+            # is not effect-verified in itself. What IS verified is the
+            # retry: if the items go now, the toggle worked, and if they do
+            # not, they were never going anywhere.
+            self._sleep(self.config.panel_settle_s)
+            self._click_tab_toggle()
+            self._sleep(self.config.tab_settle_s)
+            retried, refused = self._deposit_items(
+                refused,
+                attempts=self.config.transfer_attempts,
+                verify_s=self.config.verify_timeout_s,
+            )
+            moved += retried
+            report.log.append(
+                f"stash: {retried} more after switching tab "
+                f"({len(refused)} still refused)"
+            )
+        report.deposited = moved
+        return refused
 
     def fill_belt(self, report: PreambleReport) -> int:
         """Move every potion the belt will take — not merely enough to reach
@@ -1633,12 +1619,29 @@ class TownLayer:
         report.log.append(f"cleanse: {dropped} junk item(s) dropped")
         return dropped
 
+    def _stash_held(self) -> int:
+        """Every stashed item the inventory chain can see, both containers.
+
+        The classic stash (`STORAGE_STASH`) and PD2's expanded one
+        (`STORAGE_EXPANDED_STASH`) are counted together because a human
+        thinks of them as one place with tabs, and because counting only the
+        classic one measures nothing on a character who uses the other:
+        location 7 read ZERO while location 8 held 350 items (T45's probe),
+        which is the shape that broke stage B.
+
+        Materials are NOT counted, because they cannot be — T45 put a gem in
+        there and it left the readable world entirely. That is a real limit,
+        stated here rather than hidden behind a number that looks complete.
+        """
+        return sum(
+            1
+            for i in self._carried(self.session).items
+            if i.game_location
+            in (offsets.STORAGE_STASH, offsets.STORAGE_EXPANDED_STASH)
+        )
+
     def warn_on_stash_pressure(self, report: PreambleReport) -> None:
         """Say the stash is filling up, while there is still time to act.
-
-        Called with the REGULAR tab displayed, which is the only moment the
-        count means anything: the materials tab nulls the stash store's item
-        chain, so `_stash_visible` reads 0 there (T15/T36).
 
         Deliberately a warning and never a halt. The count is a lower bound
         on occupancy — a 2x4 armour and a rune both count as one item, and
@@ -1648,17 +1651,21 @@ class TownLayer:
         feature: `StashFull` is a hard stop with no workaround (the bot
         cannot make room), and arriving at it with no notice is the part
         worth fixing (R132).
+
+        Unlike the old tab inference this does not care which tab is
+        displayed: it counts what the character OWNS, not what is on screen.
         """
-        listed = self._stash_visible()
-        if listed < self.config.stash_pressure_at:
+        held = self._stash_held()
+        if held < self.config.stash_pressure_at:
             return
         message = (
-            f"stash pressure: the regular tab lists {listed} items "
-            f"(warning at {self.config.stash_pressure_at}). Item sizes are "
-            "unreadable, so this is a floor, not an occupancy — clear space "
-            "before a deposit refuses and halts the session."
+            f"stash pressure: {held} items stashed (warning at "
+            f"{self.config.stash_pressure_at}). Item sizes are unreadable and "
+            "the materials tab cannot be counted at all, so this is a floor, "
+            "not an occupancy — clear space before a deposit refuses and "
+            "halts the session."
         )
-        report.log.append(f"stash: WARNING — {listed} items listed")
+        report.log.append(f"stash: WARNING — {held} items stashed")
         self._alert(message)
 
     def manage_inventory(self, report: PreambleReport) -> None:
@@ -1718,14 +1725,7 @@ class TownLayer:
         self.open_object_panel(offsets.OBJ_STASH, "the stash", offsets.UI_STASH)
         self._sleep(self.config.tab_settle_s)  # the list arrives progressively
 
-        self.ensure_materials_tab()
-        moved_materials, _ = self._deposit_everything(strict=False)
-        report.log.append(f"stash: {moved_materials} into materials")
-
-        self.ensure_regular_tab()
-        moved_regular, refused = self._deposit_everything(strict=True)
-        report.deposited = moved_materials + moved_regular
-        report.log.append(f"stash: {moved_regular} into regular")
+        refused = self.deposit_all(report)
 
         self.warn_on_stash_pressure(report)
 
@@ -1741,17 +1741,19 @@ class TownLayer:
         self.close_panels()
 
         if refused:
-            # Only the FINAL phase treats a refusal as a fault — in the
-            # materials phase it is the expected answer, and a halt there
-            # would fire on the first ordinary item every single run.
+            # Survived both tabs, so the tab is not the explanation any more.
+            # The message names all three remaining causes rather than
+            # guessing: the materials tab cannot be counted (T45), so "which
+            # container is full" is not a question this layer can answer.
             self._alert(
-                f"{len(refused)} item(s) would not go into the regular stash "
-                "— it is full, or the grid calibration is wrong"
+                f"{len(refused)} item(s) would not go into the stash on "
+                "EITHER tab — a stash is full (the materials tab cannot be "
+                "measured, so it may be that one), or the grid calibration "
+                "is wrong"
             )
             raise StashFull(
-                f"{len(refused)} item(s) left in the inventory after the "
-                f"regular-tab deposit (kinds "
-                f"{sorted({i.kind for i in refused})})"
+                f"{len(refused)} item(s) left in the inventory after both "
+                f"deposit passes (kinds {sorted({i.kind for i in refused})})"
             )
 
     def press_inventory_open(self) -> None:
