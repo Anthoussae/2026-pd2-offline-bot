@@ -312,13 +312,16 @@ def test_being_boxed_in_still_produces_a_click():
 # -- which units count as hazards at all (stage B run 3) --------------------------
 
 
-def _hazards_for(monkeypatch, *, objects, allies, in_town):
+def _hazards_for(monkeypatch, *, objects, allies, in_town, ground_items=None):
     """Run `live_navigator`'s hazard provider over a scripted snapshot."""
     from types import SimpleNamespace
 
     from pd2bot.navigate import live_navigator
 
-    snap = SimpleNamespace(objects=objects, allies=allies, in_town=in_town)
+    snap = SimpleNamespace(
+        objects=objects, allies=allies, in_town=in_town,
+        ground_items=ground_items or [],
+    )
     monkeypatch.setattr(
         "pd2bot.snapshot.Perception",
         lambda session: SimpleNamespace(snapshot=lambda: snap),
@@ -382,3 +385,20 @@ def test_allies_are_hazards_in_town_only(monkeypatch):
     )
     assert in_town == {(5, 5)}
     assert in_field == set()
+
+
+def test_ground_items_are_hazards(monkeypatch):
+    """Clicking a ground item picks it up — the same hazard class as a
+    waypoint menu, and the one the user watched loop in stage B run 4: the
+    cleanse drops junk at the character's feet, the next travel click lands
+    on it, and it comes straight back into the inventory to be cleansed
+    again. Deliberate pickups go through the executor's own click, not the
+    navigator, so they are unaffected."""
+    hazards = _hazards_for(
+        monkeypatch,
+        objects=[],
+        allies=[],
+        in_town=False,
+        ground_items=[_obj(999, (7, 7))],
+    )
+    assert hazards == {(7, 7)}

@@ -420,6 +420,14 @@ def live_navigator(session, store, difficulty: int = 2) -> Navigator:
             for o in snap.objects
             if o.kind in offsets.INTERACTIVE_OBJECT_KINDS
         ]
+        # Ground items, because clicking one PICKS IT UP. That is the same
+        # hazard class — a travel click doing something other than moving —
+        # and it produced a loop the user watched in stage B run 4: the
+        # cleanse drops junk at the character's feet, the next travel click
+        # lands on it, and the junk comes straight back into the inventory
+        # to be cleansed again. Deliberate pickups are unaffected; they go
+        # through the executor's own click, not the navigator.
+        points += [i.position for i in snap.ground_items]
         if snap.in_town:
             points += [a.position for a in snap.allies if a.is_alive]
         return tuple(points)

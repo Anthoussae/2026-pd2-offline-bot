@@ -1900,3 +1900,44 @@ def test_stash_pressure_is_a_warning_and_never_a_halt(town):
     report = PreambleReport()
     layer(town).manage_inventory(report)  # no raise
     assert report.deposited == 1
+
+
+# -- the drop gesture's blast radius (stage B run 4) ------------------------------
+
+
+def test_the_cleanse_never_aims_at_a_tome(town):
+    """Run 4 opened a town portal, which is exactly what an unmodified
+    right-click on tome 533 does — so the ctrl modifier did not land that
+    time. Potions were already excluded for the same reason (an unmodified
+    right-click drinks one); tomes belong in the same set. 534 is worse
+    than 533: it arms the identify cursor, and every later click identifies."""
+    town.inventory = [
+        loot(1, (0, 0), kind=offsets.TOME_OF_TOWN_PORTAL),
+        loot(2, (1, 0), kind=offsets.TOME_OF_IDENTIFY),
+        loot(3, (2, 0), kind=700),  # ordinary junk, and it still goes
+    ]
+    full_belt(town)
+    layer(
+        town, keep_item=lambda item: False, protected_ids=lambda: set()
+    ).cleanse_inventory(PreambleReport())
+    assert [i.kind for i in town.dropped] == [700]
+
+
+def test_a_failed_drop_abandons_the_cleanse_rather_than_continuing(town):
+    """A drop that did not land means the gesture did not do what we asked,
+    and the likeliest reason is the modifier not registering — in which case
+    every further attempt is an unmodified right-click on an inventory item,
+    which USES it. One surprise is recoverable; a sequence is not."""
+    town.inventory = [
+        loot(1, (0, 0), kind=700),
+        loot(2, (1, 0), kind=701),
+        loot(3, (2, 0), kind=702),
+    ]
+    town.drop_works = False
+    full_belt(town)
+    layer(
+        town, keep_item=lambda item: False, protected_ids=lambda: set()
+    ).cleanse_inventory(PreambleReport())
+    assert town.dropped == []
+    assert len(town.alerts) == 1, "one alert, not one per item"
+    assert "abandoning the cleanse" in town.alerts[0]

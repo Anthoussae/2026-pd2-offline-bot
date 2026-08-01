@@ -1620,7 +1620,7 @@ class TownLayer:
             i
             for i in self._carried(self.session).main_inventory
             if i.is_movable
-            and _potion_type(i) is None
+            and i.kind not in offsets.RIGHT_CLICK_HAZARD_KINDS
             and i.unit_id not in protected
             and not self._keep_item(i)
         ]
@@ -1632,11 +1632,21 @@ class TownLayer:
         for item in junk:
             if self.drop_item(item):
                 dropped += 1
-            else:
-                self._alert(
-                    f"junk item kind {item.kind} at {item.position} would "
-                    "not drop — leaving it to the stash phases"
-                )
+                continue
+            # STOP, rather than move on to the next item. A drop that did
+            # not land means the gesture did not do what we asked, and the
+            # most likely reason is the ctrl modifier not registering — in
+            # which case every further attempt is an unmodified right-click
+            # on an inventory item, which USES it. Stage B run 4 opened a
+            # town portal that way. One surprise is recoverable; carrying on
+            # through the rest of the inventory turns it into a sequence.
+            self._alert(
+                f"junk item kind {item.kind} at {item.position} would not "
+                "drop — abandoning the cleanse for this game rather than "
+                "aiming the same gesture at more items. The rest falls "
+                "through to the stash phases."
+            )
+            break
         self.close_panels()
         report.log.append(f"cleanse: {dropped} junk item(s) dropped")
         return dropped

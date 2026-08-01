@@ -550,6 +550,34 @@ REJUV_POTION_KINDS = {
 }
 POTION_KINDS = {**HEALING_POTION_KINDS, **MANA_POTION_KINDS, **REJUV_POTION_KINDS}
 
+# Both live-verified by the T38 probe (64 and 72 charges respectively), and
+# 534 corroborated at R112 where the bot identified an item by accident.
+TOME_OF_TOWN_PORTAL = 533
+TOME_OF_IDENTIFY = 534
+
+# Items whose RIGHT-CLICK does something instead of nothing, and which the
+# inventory cleanse must therefore never point its drop gesture at.
+#
+# The cleanse drops with ctrl+right-click. That gesture is only safe while
+# the modifier actually lands — and in stage B run 4 the bot opened a town
+# portal, which is precisely what an unmodified right-click on tome 533
+# does. Potions were already excluded (an unmodified right-click drinks
+# one, the hazard behind R131), and tomes belong in the same category for
+# the same reason: 533 opens a portal, 534 arms the identify cursor, and an
+# armed identify cursor turns every later click into an identify.
+#
+# Exclusion beats detection here. A portal opens in the WORLD, not in a
+# panel, so no UI read would catch it after the fact — and the identify
+# cursor is not a cursor ITEM either. Never aiming at them is the only
+# guardrail that works.
+#
+# Individual TP/ID scrolls belong here too and are not in the vocabulary
+# yet; they get added the moment a drill reads one.
+RIGHT_CLICK_HAZARD_KINDS = frozenset(POTION_KINDS) | {
+    TOME_OF_TOWN_PORTAL,
+    TOME_OF_IDENTIFY,
+}
+
 # Gold's kind: kolbot sdk/types/sdk.d.ts:3467 says 523, but after the potion
 # renumbering above no classic id is trusted untested. NOT yet verified live
 # — check against the first real gold drop (P5/P6 pickup drills).
