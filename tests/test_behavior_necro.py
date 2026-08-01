@@ -175,6 +175,31 @@ def test_a_struck_monster_is_not_restruck_immediately():
     assert drift.target != (1002, 1000)  # away from it, not into it
 
 
+def test_offense_advances_once_a_single_tank_is_in_front():
+    """R163: the gate was the biggest reason it stood back.
+
+    Holding offense until the FULL wall (3) meant waiting through two
+    desecrates and three revive casts before the first dash — most of a
+    fight, spent watching. One tank in front is enough to stop being the
+    closest target, and upkeep keeps building the rest while the fight is
+    already on. `revive_target` still says 3; this is a different
+    question and now has its own number.
+    """
+    necro, _ = make(skirmishing())
+    target = monster(1, (1020, 1000))
+    assert necro.engage(
+        snap(allies=[ally(900, (1018, 1000))], monsters=[target])
+    ) == MoveTo((1008, 1000))
+
+
+def test_offense_still_waits_with_no_tank_at_all():
+    # The protocol is relaxed, not abandoned: walking into a pack with
+    # nothing in front is what it was written to prevent (R47.4).
+    necro, _ = make(skirmishing())
+    action = necro.engage(snap(monsters=[monster(1, (1020, 1000))]))
+    assert action != MoveTo((1008, 1000)), "it dashed in with nothing tanking"
+
+
 def test_the_drift_goes_sideways_rather_than_out_of_the_fight():
     """Review 001, plus the user's rule that stillness is the real danger.
 

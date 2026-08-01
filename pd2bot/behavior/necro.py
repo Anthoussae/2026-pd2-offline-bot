@@ -59,7 +59,13 @@ class CombatConfig:
     # standing still, and 'the best defense is a good offense'. The
     # number is the passivity — with a small pack, everything is on
     # cooldown almost all the time.
-    restrike_s: float = 2.0
+    # Was 6.0, then 2.0, now 1.0 — every cut from the same source, the user
+    # watching it play. The theory it keeps losing to is "poison does the
+    # killing, so a re-hit is wasted": true about the damage, wrong about
+    # the time, because the tick spent not striking is spent standing
+    # still. R163: *ducking in for a click and running away, and moving
+    # frequently, are good strategies.*
+    restrike_s: float = 1.0
     # How far a small idle step moves. Deliberately much shorter than
     # `retreat_subtiles`: this is drift, not a withdrawal.
     reposition_subtiles: int = 4
@@ -70,9 +76,17 @@ class CombatConfig:
     # panel outside town blocks every send until something closes it.
     object_clearance: int = 6
     # Revives as aggro tanks (R47.4).
-    wait_for_revives_s: float = 1.5  # let them get in front before dashing
+    wait_for_revives_s: float = 0.8  # let them get in front before dashing
     revive_engaged_range: int = 8  # a revive this close to a hostile is engaged
     revive_target: int = 3
+    # How many revives must be up before OFFENSE may advance — a different
+    # question from `revive_target`, which is how many upkeep maintains,
+    # and conflating the two is why the bot stood back so much (R163).
+    # Waiting for the full wall meant waiting through two desecrates and
+    # three revive casts before the first dash; one tank in front is
+    # enough to stop being the closest target, and upkeep keeps building
+    # the rest while the fight is on.
+    approach_with_revives: int = 1
     revive_search_radius: int = 15  # corpses this close are revive fuel
     desecrate_rounds: int = 2  # bounded: stop if it makes no corpses
     desecrate_settle_s: float = 1.0  # wait for corpses before casting again
@@ -334,7 +348,9 @@ class NecroCombat:
             # after `desecrate_rounds` fruitless casts, and a gate that did
             # not know that would hold offense back forever on ground where
             # no corpse can be raised.
-            if len(snap.revives) < self.config.revive_target and self._building_wall(
+            if len(
+                snap.revives
+            ) < self.config.approach_with_revives and self._building_wall(
                 snap, origin
             ):
                 return self._reposition(origin, hostiles)

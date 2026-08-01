@@ -214,6 +214,7 @@ _COMBAT_NUMBERS: dict[str, type] = {
     "wait_for_revives_s": float,
     "revive_engaged_range": int,
     "revive_target": int,
+    "approach_with_revives": int,
     "revive_search_radius": int,
     "desecrate_rounds": int,
     "desecrate_settle_s": float,

@@ -132,11 +132,13 @@ dash_step = 8
 retreat_subtiles = 12
 # Poison does the killing, so a struck monster is already dying: prefer
 # fresh targets and only re-hit a survivor after this long.
-# Lowered from 6.0 after the user watched a live run: the necro spent
-# whole seconds standing still because every nearby hostile was inside
-# its restrike window. Their judgement, and it overrides the original
-# let-poison-work theory: standing still is the riskier option.
-restrike_s = 2.0
+# Lowered from 6.0, then again to 1.0, both times after the user watched
+# a live run: the necro spent whole seconds standing still because every
+# nearby hostile was inside its restrike window. Their judgement, and it
+# overrides the original let-poison-work theory: standing still is the
+# riskier option, and "duck in for a click, run away, move often" is the
+# pattern this number was throttling (R163).
+restrike_s = 1.0
 # A small step taken instead of standing still when there is nothing
 # fresh to hit, or while waiting for the revive wall. It is taken
 # sideways rather than backwards when backing off would leave the fight
@@ -154,11 +156,19 @@ object_clearance = 6
 # them to get in front — the wait ends early once one of them is within
 # revive_engaged_range of a hostile, since it is waiting for them to
 # TANK, not waiting out a timer.
-wait_for_revives_s = 1.5
+wait_for_revives_s = 0.8
 revive_engaged_range = 8
 # Keep this many revives up (R47.4). They last ~300 s; the count is
 # re-checked every tick, so expiry heals itself.
 revive_target = 3
+# How many revives must be up before OFFENSE may advance. A different
+# question from revive_target above — that one is how many upkeep keeps
+# standing — and holding offense back for the FULL wall meant waiting
+# through two desecrates and three revive casts before the first dash,
+# which is most of why the bot looked so passive (R163). One tank in
+# front is enough to stop being the closest target; upkeep builds the
+# rest while the fight is already on.
+approach_with_revives = 1
 # Corpses this close count as revive fuel.
 revive_search_radius = 15
 # Desecrate makes corpses. Bounded: if it produces none (nothing died
