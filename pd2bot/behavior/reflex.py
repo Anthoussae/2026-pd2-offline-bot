@@ -193,22 +193,39 @@ def retreat_point(
 
 
 def read_armor_ratio(session: GameSession) -> float | None:
-    """Bone armor absorb remaining, 0.0-1.0, or None when unreadable.
+    """Bone armor absorb remaining: 0.0-1.0, or None when nothing was read.
 
-    Stats 132/133, live-verified fixed-point in P1 drill B (decoded by
-    `read_stats`). None routes the ladder to the R47-approved fallback
-    (recast after being hit), so an unreadable stat degrades rather than
-    disables the upkeep.
+    Stats 132/133, fully live-verified by T46 — and the distinction between
+    "the armor is down" and "I cannot tell" is the entire point of this
+    function, because collapsing them meant the bot never cast bone armor
+    at all.
+
+    T46's three readings, on the live character:
+
+        armor down   132 ABSENT, 133 ABSENT   (70 stats read)
+        armor up     132 = 866, 133 = 866     (77 stats read)
+        after a hit  132 = 807, 133 = 866     (78 stats read)
+
+    So a healthy stat list simply omits both entries while the armor is
+    down. The old code returned None for that, the ladder read None as
+    "unreadable" and fell back to R47's recast-after-being-hit — and in
+    town, where nothing hits us, that meant the armor was never cast. The
+    strongest possible reason to cast was arriving as the value that means
+    ignorance. (Same conflation as `units.read_socket_count`, same fix.)
+
+    An EMPTY stat list still returns None, and that guard is what makes the
+    change safe: absence only means "down" when the read plainly worked.
     """
     unit = player_unit(session)
     if unit is None:
         return None
     stats = read_stats(session, unit)
-    current = stats.get(offsets.STAT_BONE_ARMOR)
+    if not stats:
+        return None  # nothing read at all — genuinely unknown, use the fallback
     maximum = stats.get(offsets.STAT_BONE_ARMOR_MAX)
-    if current is None or not maximum:
-        return None
-    return current / maximum
+    if not maximum:
+        return 0.0  # the list read fine and has no armor in it: it is DOWN
+    return stats.get(offsets.STAT_BONE_ARMOR, 0) / maximum
 
 
 class ReflexLadder:

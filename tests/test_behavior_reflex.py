@@ -486,3 +486,56 @@ def test_every_number_is_config():
 @pytest.mark.parametrize("area,expected", [(TOWN, True), (FIELD, False)])
 def test_snapshot_in_town_drives_suppression(area, expected):
     assert snap(area=area).in_town is expected
+
+
+# -- armor down is a trigger, not an unknown (T46 / user report) -------------------
+
+
+def test_armor_down_casts_immediately_without_waiting_to_be_hit():
+    """The user's report from watching stage B: the bot never cast bone
+    armor at all.
+
+    With no armor up, stats 132/133 are ABSENT — T46 read 70 other stats
+    alongside them, so the list was plainly healthy. That used to return
+    None, the ladder read None as "unreadable" and fell back to R47's
+    recast-after-being-hit, and in town nothing hits us. Armor down is the
+    strongest reason to cast, and it was arriving as ignorance.
+    """
+    ladder, _ = make_ladder(armor=0.0)
+    decision = ladder.evaluate(snap(player(hp=1000), area=TOWN))
+    assert decision is not None, "armor down must fire the upkeep rung"
+    assert decision.rung == "upkeep"
+    assert decision.action == CastSelf(offsets.SKILL_BONE_ARMOR)
+
+
+def test_armor_down_fires_on_the_very_first_tick_of_a_game():
+    """The user's requirement: armor up as the first action on entering a
+    game, and after a waypoint. Nothing special is needed to arrange that —
+    the ladder is evaluated before any run step, so a down reading fires
+    ahead of the town preamble and ahead of any travel."""
+    ladder, _ = make_ladder(armor=0.0)
+    assert ladder.evaluate(snap(player(hp=1000), area=TOWN)).rung == "upkeep"
+
+
+def test_a_genuinely_unreadable_stat_still_uses_the_hit_fallback():
+    """The guard that makes the change safe. Absence means "down" only
+    because T46 saw a healthy list omit the entries; an EMPTY read means we
+    learned nothing, and must not be treated as an empty armor pool."""
+    ladder, clock = make_ladder(armor=lambda: None)
+    assert ladder.evaluate(snap(player(hp=1000), area=TOWN)) is None
+    clock.advance(0.5)
+    assert ladder.evaluate(snap(player(hp=950), area=TOWN)).rung == "upkeep"
+
+
+def test_full_armor_is_left_alone():
+    """The other half: a healthy pool must not be recast every tick, or a
+    firing rung would consume every tick and the bot would never attack."""
+    ladder, _ = make_ladder(armor=1.0)
+    assert ladder.evaluate(snap(player(hp=1000), area=TOWN)) is None
+
+
+def test_armor_above_the_threshold_is_left_alone():
+    # 80% > the 75% recast threshold, and comfortably above the user's
+    # stated "keep it above 50%" floor.
+    ladder, _ = make_ladder(armor=0.8)
+    assert ladder.evaluate(snap(player(hp=1000), area=TOWN)) is None
