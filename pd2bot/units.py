@@ -408,16 +408,31 @@ def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitSca
     items: list[GroundItem] = []
     objects: list[GameObject] = []
     skipped = 0
-    seen_ids: set[int] = set()
+    # Keyed by (TYPE, id), not by id alone. **D2 unit ids are only unique
+    # within a unit type** — a monster and an object can both be id 11, and
+    # in the live Rogue Encampment they both were. With one shared set, the
+    # first pass to claim an id silently deleted the other unit from the
+    # snapshot, and since objects are enumerated last they lost every time.
+    #
+    # That is what killed stage B's second attempt: the Act 1 waypoint (id
+    # 11) sat 24 subtiles away, plainly inside the 80-subtile radius and
+    # present in the unit table, while `snap.objects` reported objects at
+    # d=31, 35, 46 and 57 and simply omitted it. `_approach_object` then
+    # walked to its configured position and correctly reported that it could
+    # not see what it had been told to click.
+    #
+    # The dedup itself is still needed and still per type: the hash table
+    # can list one unit more than once.
+    seen: set[tuple[int, int]] = set()
 
     for unit in iter_units_of_type(session, offsets.UNIT_TYPE_MONSTER):
         try:
-            unit_id = session.u32(unit + offsets.UNIT_ID)
-            if unit_id in seen_ids:
+            key = (offsets.UNIT_TYPE_MONSTER, session.u32(unit + offsets.UNIT_ID))
+            if key in seen:
                 continue
             monster = _read_monster(session, unit)
             if monster is not None and near(monster.position):
-                seen_ids.add(unit_id)
+                seen.add(key)
                 if monster.is_corpse:
                     corpses.append(monster)
                 else:
@@ -429,24 +444,24 @@ def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitSca
 
     for unit in iter_units_of_type(session, offsets.UNIT_TYPE_ITEM):
         try:
-            unit_id = session.u32(unit + offsets.UNIT_ID)
-            if unit_id in seen_ids:
+            key = (offsets.UNIT_TYPE_ITEM, session.u32(unit + offsets.UNIT_ID))
+            if key in seen:
                 continue
             item = _read_ground_item(session, unit)
             if item is not None and near(item.position):
-                seen_ids.add(unit_id)
+                seen.add(key)
                 items.append(item)
         except Exception:
             skipped += 1
 
     for unit in iter_units_of_type(session, offsets.UNIT_TYPE_OBJECT):
         try:
-            unit_id = session.u32(unit + offsets.UNIT_ID)
-            if unit_id in seen_ids:
+            key = (offsets.UNIT_TYPE_OBJECT, session.u32(unit + offsets.UNIT_ID))
+            if key in seen:
                 continue
             obj = _read_object(session, unit)
             if obj is not None and near(obj.position):
-                seen_ids.add(unit_id)
+                seen.add(key)
                 objects.append(obj)
         except Exception:
             skipped += 1

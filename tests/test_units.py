@@ -469,3 +469,59 @@ def test_socket_count_is_unknown_when_no_stats_read_at_all():
     mem = FakeMemory()
     unreadable = _item_with_stats(mem, 0x0B092000, None)
     assert read_socket_count(FakeSession(mem), unreadable) is None
+
+
+# -- cross-type unit id collisions (stage B, run 2) --------------------------------
+
+
+def test_a_monster_and_an_object_may_share_a_unit_id():
+    """D2 unit ids are unique only WITHIN a type, and the snapshot must not
+    assume otherwise.
+
+    Found live and expensively. In the Rogue Encampment the Act 1 waypoint
+    was object id 11 and a monster was also id 11; `scan_units` deduped
+    through one shared set of ids, monsters were enumerated first, and the
+    waypoint was silently dropped from the snapshot — 24 subtiles away,
+    inside an 80-subtile radius, while objects at d=31, 35, 46 and 57 were
+    reported. `_approach_object` then walked to the waypoint and truthfully
+    said it could not see it, which ended stage B's second attempt.
+
+    Objects lose every such collision because they are enumerated last.
+    """
+    mem = FakeMemory()
+    mem.write(CLIENT_BASE + offsets.PLAYER_UNIT_PTR, u32(PLAYER))
+    mem.write_fields(PLAYER, {offsets.UNIT_PATH: u32(PLAYER_PATH)})
+    mem.write_fields(
+        PLAYER_PATH, {offsets.PATH_X: u32(100)[:2], offsets.PATH_Y: u32(200)[:2]}
+    )
+    monster = add_monster(mem, 0x0B0A0000, 11, 150, (105, 205), 100, 100)
+    waypoint = add_object(mem, 0x0B0A1000, 11, offsets.OBJ_WAYPOINT_A1, (110, 210))
+    hash_table(
+        mem,
+        {
+            offsets.UNIT_TYPE_MONSTER: [monster],
+            offsets.UNIT_TYPE_OBJECT: [waypoint],
+        },
+    )
+
+    scan = scan_units(FakeSession(mem))
+    assert [m.unit_id for m in scan.monsters] == [11]
+    assert [o.kind for o in scan.objects] == [offsets.OBJ_WAYPOINT_A1], (
+        "the waypoint was dropped because a monster claimed id 11 first"
+    )
+
+
+def test_the_same_unit_listed_twice_is_still_deduped():
+    """The dedup is still needed — the hash table can list one unit more
+    than once — it just has to be per type."""
+    mem = FakeMemory()
+    mem.write(CLIENT_BASE + offsets.PLAYER_UNIT_PTR, u32(PLAYER))
+    mem.write_fields(PLAYER, {offsets.UNIT_PATH: u32(PLAYER_PATH)})
+    mem.write_fields(
+        PLAYER_PATH, {offsets.PATH_X: u32(100)[:2], offsets.PATH_Y: u32(200)[:2]}
+    )
+    stash = add_object(mem, 0x0B0B0000, 42, offsets.OBJ_STASH, (110, 210))
+    hash_table(mem, {offsets.UNIT_TYPE_OBJECT: [stash, stash]})
+
+    scan = scan_units(FakeSession(mem))
+    assert len(scan.objects) == 1

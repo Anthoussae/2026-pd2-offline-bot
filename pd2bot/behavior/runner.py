@@ -38,8 +38,13 @@ class IdleLoopHalt(CycleError):
     """Idle-bailed too many times: an idle loop is a bug. Loop-halting."""
 
 
-class PreambleFailed(ChickenExit):
-    """The town preamble failed; leave and try a fresh game.
+class TownStepFailed(ChickenExit):
+    """A town-layer step failed; leave and try a fresh game.
+
+    Named for the LAYER, not the preamble, because stage B's second attempt
+    proved the difference matters: the failure was the waypoint step, and a
+    class called `PreambleFailed` reported it as a preamble problem. The
+    handling was right and the label was not.
 
     A `ChickenExit` subclass for the same reason `IdleBail` is one: the
     cycle's existing handler already does the right immediate thing (leave
@@ -48,8 +53,8 @@ class PreambleFailed(ChickenExit):
     """
 
 
-class PreambleHalt(CycleError):
-    """The preamble failed twice running. Structural, not luck. Halting."""
+class TownStepHalt(CycleError):
+    """A town step failed twice running. Structural, not luck. Halting."""
 
 
 class StashFullHalt(CycleError):
@@ -112,17 +117,17 @@ class BehaviorRunner:
         engine_factory: Callable[[GameSession], BehaviorEngine],
         *,
         idle_bail_max: int = 2,  # consecutive; an idle loop is a bug (R47.9)
-        preamble_fail_max: int = 2,  # consecutive; twice is not bad luck
+        town_fail_max: int = 2,  # consecutive; twice is not bad luck
         alert: Callable[[str], None] = _default_alert,
         stash_alert: Callable[[str], None] = _default_stash_alert,
     ) -> None:
         self._engine_factory = engine_factory
         self._idle_bail_max = idle_bail_max
-        self._preamble_fail_max = preamble_fail_max
+        self._town_fail_max = town_fail_max
         self._alert = alert
         self._stash_alert = stash_alert
         self.idle_bails = 0  # consecutive, not lifetime
-        self.preamble_failures = 0  # consecutive, not lifetime
+        self.town_failures = 0  # consecutive, not lifetime
 
     def __call__(self, session: GameSession) -> None:
         """The callback `cycle.run_games` invokes once per created game."""
@@ -151,15 +156,15 @@ class BehaviorRunner:
             # failures (a mis-click, an NPC dialog that opened late) which a
             # fresh game fixes by itself, and a structural one repeats. So
             # leave, retry once, and halt loudly when it happens again.
-            self.preamble_failures += 1
-            if self.preamble_failures >= self._preamble_fail_max:
+            self.town_failures += 1
+            if self.town_failures >= self._town_fail_max:
                 reason = (
-                    f"the town preamble failed {self.preamble_failures} "
-                    f"games in a row — this is not bad luck (last: {exc})"
+                    f"a town step failed {self.town_failures} games in a "
+                    f"row — this is not bad luck (last: {exc})"
                 )
                 self._alert(reason)
-                raise PreambleHalt(reason) from exc
-            raise PreambleFailed(str(exc)) from exc
+                raise TownStepHalt(reason) from exc
+            raise TownStepFailed(str(exc)) from exc
         except IdleBail as exc:
             self.idle_bails += 1
             if self.idle_bails >= self._idle_bail_max:
@@ -172,4 +177,4 @@ class BehaviorRunner:
             raise  # the cycle's ChickenExit path leaves the game, routinely
         else:
             self.idle_bails = 0
-            self.preamble_failures = 0
+            self.town_failures = 0
