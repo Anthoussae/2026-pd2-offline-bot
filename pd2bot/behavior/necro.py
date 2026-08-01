@@ -52,7 +52,16 @@ class CombatConfig:
     melee_range: int = 3  # close enough to strike
     dash_step: int = 8  # max subtiles per approach hop (ladder responsiveness)
     retreat_subtiles: int = 12  # how far back out after a strike
-    restrike_s: float = 6.0  # re-hit a survivor only after this long
+    # How long to leave a poisoned survivor before hitting it again.
+    # Was 6.0, on the theory that poison does the killing and a re-hit
+    # is wasted. Watching it play, the user disagreed: whole seconds
+    # standing still, and 'the best defense is a good offense'. The
+    # number is the passivity — with a small pack, everything is on
+    # cooldown almost all the time.
+    restrike_s: float = 2.0
+    # How far a small idle step moves. Deliberately much shorter than
+    # `retreat_subtiles`: this is drift, not a withdrawal.
+    reposition_subtiles: int = 4
     # Revives as aggro tanks (R47.4).
     wait_for_revives_s: float = 1.5  # let them get in front before dashing
     revive_engaged_range: int = 8  # a revive this close to a hostile is engaged
@@ -116,6 +125,42 @@ class NecroCombat:
                 ):
                     return True
         return False
+
+    def _building_wall(self, snap: GameSnapshot, origin: tuple[int, int]) -> bool:
+        """Can the revive wall still grow? Corpses to raise, or budget to
+        make some. False means `upkeep` has run out of ways to help, and
+        holding offense back any longer would be waiting for nothing."""
+        if any(
+            _chebyshev(c.position, origin) <= self.config.revive_search_radius
+            for c in snap.corpses
+        ):
+            return True
+        return self._desecrate_rounds < self.config.desecrate_rounds
+
+    def _reposition(
+        self, origin: tuple[int, int], hostiles: list[Monster]
+    ) -> Action | None:
+        """A small step instead of standing still.
+
+        Called wherever the module used to return None with hostiles alive:
+        waiting out restrike timers, and holding back until the revive wall
+        is up. Both are deliberate waits, and both used to be spent standing
+        perfectly still in Hell — which the user judged riskier than moving,
+        and which is the same thing the never-idle invariant says about a
+        character that stops acting.
+
+        The step is SMALL and away from the pack, so it never becomes an
+        accidental charge and never crosses the ground the skirmish pattern
+        is about to use. Nowhere to go is not a failure: None still means
+        "nothing to do", and the ladder gets its look either way.
+        """
+        spot = retreat_point(
+            origin,
+            [h.position for h in hostiles],
+            self.config.reposition_subtiles,
+            self.is_walkable,
+        )
+        return MoveTo(spot) if spot is not None else None
 
     def _select_target(
         self, origin: tuple[int, int], hostiles: list[Monster], now: float
@@ -197,10 +242,30 @@ class NecroCombat:
 
         target = self._select_target(origin, hostiles, now)
         if target is None:
-            return None  # everything nearby is freshly poisoned; let it work
+            # Everything nearby is freshly poisoned. The original design
+            # stood still here and let the poison work; the user watched it
+            # and judged the stillness itself the bigger risk — "better to
+            # move often, even small movements". An idle character is what
+            # R47.9 already says gets killed, so drift rather than freeze.
+            return self._reposition(origin, hostiles)
 
         distance = _chebyshev(target.position, origin)
         if distance > self.config.melee_range:
+            # Do not walk into a pack without the wall up (user protocol):
+            # three revives BEFORE approaching, and desecrate makes its own
+            # corpses so there is never a reason to go in short-handed. The
+            # ladder's upkeep rung is already building them; this only stops
+            # offense from advancing through the gaps between its casts.
+            #
+            # It releases once the wall CANNOT be built, which is the
+            # difference between a protocol and a deadlock: `upkeep` gives up
+            # after `desecrate_rounds` fruitless casts, and a gate that did
+            # not know that would hold offense back forever on ground where
+            # no corpse can be raised.
+            if len(snap.revives) < self.config.revive_target and self._building_wall(
+                snap, origin
+            ):
+                return self._reposition(origin, hostiles)
             return MoveTo(self._dash_target(origin, target.position))  # phase 3
 
         self._last_strike[target.unit_id] = now  # phase 4

@@ -184,6 +184,7 @@ _COMBAT_NUMBERS: dict[str, type] = {
     "melee_range": int,
     "dash_step": int,
     "retreat_subtiles": int,
+    "reposition_subtiles": int,
     "restrike_s": float,
     "wait_for_revives_s": float,
     "revive_engaged_range": int,

@@ -54,6 +54,31 @@ def ally(uid, pos):
     return monster(uid, pos, alignment=offsets.ALIGNMENT_FRIENDLY)
 
 
+def wall(count=3, pos=(1004, 1000)):
+    """A standing revive wall.
+
+    The skirmish tests need one because approaching is GATED on it (the
+    user's protocol: three revives before walking into a pack, and
+    desecrate makes its own corpses so there is never a reason to go in
+    short-handed). A test that dashed without a wall would be asserting
+    behaviour the bot is no longer allowed to have.
+    Placed CLOSE to where the tests put hostiles, so the wall reads as
+    already engaged and phase 2's wait-for-the-tanks ends immediately.
+    """
+    return [ally(900 + i, pos) for i in range(count)]
+
+
+def skirmishing(**kw):
+    """A config with the wait-for-the-tanks phase switched off.
+
+    Phases 3-5 (dash, strike, retreat) are a different subject from
+    phase 2, and leaving the wait in forces every skirmish test to also
+    arrange revives that are already engaged with whichever hostile it
+    happens to use. Saying so here beats staging it in each test.
+    """
+    return CombatConfig(wait_for_revives_s=0.0, **kw)
+
+
 def snap(pos=HOME, monsters=(), allies=(), corpses=(), area=FIELD):
     return GameSnapshot(
         in_game=True, taken_at=0.0, player=player(pos),
@@ -92,68 +117,77 @@ def test_never_engages_in_town():
 def test_distant_hostiles_are_not_contact():
     necro, _ = make()
     far = monster(1, (1000 + 60, 1000))  # beyond engage_radius 40
-    assert necro.engage(snap(monsters=[far])) is None
+    assert necro.engage(snap(allies=wall(), monsters=[far])) is None
 
 
 def test_dash_then_strike_then_retreat():
-    necro, clock = make()
+    necro, clock = make(skirmishing())
     target = monster(1, (1020, 1000))  # inside engage radius, out of melee
 
     # Phase 3 — dash, in a short hop rather than one long walk.
-    first = necro.engage(snap(monsters=[target]))
+    first = necro.engage(snap(allies=wall(), monsters=[target]))
     assert isinstance(first, MoveTo)
     assert first.target == (1008, 1000)  # dash_step 8, not the full 20
 
     # Arrive in melee range: phase 4 — strike.
     clock.advance(1.0)
     close = monster(1, (1002, 1000))
-    strike = necro.engage(snap(monsters=[close]))
+    strike = necro.engage(snap(allies=wall(), monsters=[close]))
     assert strike == AttackUnit(1, (1002, 1000))
 
     # Phase 5 — back out of the pack immediately afterwards.
     clock.advance(0.2)
-    retreat = necro.engage(snap(monsters=[close]))
+    retreat = necro.engage(snap(allies=wall(), monsters=[close]))
     assert isinstance(retreat, MoveTo)
     assert retreat.target != (1002, 1000)
 
 
 def test_dash_goes_straight_there_when_already_close():
-    necro, _ = make()
+    necro, _ = make(skirmishing())
     target = monster(1, (1006, 1000))  # 6 away, under dash_step 8
-    assert necro.engage(snap(monsters=[target])) == MoveTo((1006, 1000))
+    assert necro.engage(snap(allies=wall(), monsters=[target])) == MoveTo((1006, 1000))
 
 
 def test_a_struck_monster_is_not_restruck_immediately():
-    # Poison does the killing: re-stabbing a dying monster is wasted time.
-    necro, clock = make()
+    """Poison keeps working, so a freshly-struck monster is not re-stabbed.
+
+    What changed (user, after watching a live run) is what happens INSTEAD.
+    This used to return None and the character stood perfectly still until
+    the restrike timer expired; the user judged that the riskier option —
+    "better to move often, even small movements" — so the wait is now spent
+    drifting away from the pack.
+    """
+    necro, clock = make(skirmishing())
     target = monster(1, (1002, 1000))
-    assert isinstance(necro.engage(snap(monsters=[target])), AttackUnit)
+    assert isinstance(necro.engage(snap(allies=wall(), monsters=[target])), AttackUnit)
     clock.advance(0.2)
-    necro.engage(snap(monsters=[target]))  # the retreat
+    necro.engage(snap(allies=wall(), monsters=[target]))  # the retreat
     clock.advance(0.2)
-    assert necro.engage(snap(monsters=[target])) is None  # still poisoned
+    drift = necro.engage(snap(allies=wall(), monsters=[target]))
+    assert isinstance(drift, MoveTo), "waiting must not mean standing still"
+    assert drift.target != (1002, 1000)  # away from it, not into it
 
 
 def test_a_survivor_is_restruck_after_the_cooldown():
     necro, clock = make()
     target = monster(1, (1002, 1000))
-    necro.engage(snap(monsters=[target]))
+    necro.engage(snap(allies=wall(), monsters=[target]))
     clock.advance(0.2)
-    necro.engage(snap(monsters=[target]))  # retreat
+    necro.engage(snap(allies=wall(), monsters=[target]))  # retreat
     clock.advance(6.5)  # past restrike_s
-    assert necro.engage(snap(monsters=[target])) == AttackUnit(1, (1002, 1000))
+    assert necro.engage(snap(allies=wall(), monsters=[target])) == AttackUnit(1, (1002, 1000))
 
 
 def test_unstruck_targets_are_preferred_over_survivors():
     necro, clock = make()
     first = monster(1, (1002, 1000))
-    necro.engage(snap(monsters=[first]))  # strike #1
+    necro.engage(snap(allies=wall(), monsters=[first]))  # strike #1
     clock.advance(0.2)
-    necro.engage(snap(monsters=[first]))  # retreat
+    necro.engage(snap(allies=wall(), monsters=[first]))  # retreat
     clock.advance(0.2)
     # A fresh monster arrives, further away than the poisoned one.
     fresh = monster(2, (1005, 1002))
-    action = necro.engage(snap(monsters=[first, fresh]))
+    action = necro.engage(snap(allies=wall(), monsters=[first, fresh]))
     assert isinstance(action, MoveTo | AttackUnit)
     if isinstance(action, AttackUnit):
         assert action.unit_id == 2
@@ -167,14 +201,14 @@ def test_adjacent_monsters_come_first():
     necro, _ = make()
     adjacent = monster(1, (1001, 1000))
     distant = monster(2, (1030, 1000))
-    assert necro.engage(snap(monsters=[adjacent, distant])) == AttackUnit(
+    assert necro.engage(snap(allies=wall(), monsters=[adjacent, distant])) == AttackUnit(
         1, (1001, 1000)
     )
 
 
 def test_corpses_are_never_targets():
     necro, _ = make()
-    world = snap(monsters=[monster(1, (1002, 1000), hp=0,
+    world = snap(allies=wall(), monsters=[monster(1, (1002, 1000), hp=0,
                                    mode=offsets.MONSTER_MODE_DEAD)])
     assert necro.engage(world) is None
 
@@ -183,9 +217,9 @@ def test_retreat_falls_through_to_fighting_when_cornered():
     # Nowhere walkable to retreat to: keep fighting rather than stand still.
     necro, clock = make(walkable=lambda p: p == HOME)
     target = monster(1, (1002, 1000))
-    assert isinstance(necro.engage(snap(monsters=[target])), AttackUnit)
+    assert isinstance(necro.engage(snap(allies=wall(), monsters=[target])), AttackUnit)
     clock.advance(6.5)
-    assert isinstance(necro.engage(snap(monsters=[target])), AttackUnit)
+    assert isinstance(necro.engage(snap(allies=wall(), monsters=[target])), AttackUnit)
 
 
 # -- waiting for the revives ---------------------------------------------------
@@ -210,9 +244,28 @@ def test_the_wait_ends_early_once_a_revive_is_in_contact():
     assert isinstance(action, MoveTo)
 
 
-def test_no_revives_means_no_wait():
+def test_no_wall_means_no_approach():
+    """The user's protocol: three revives BEFORE walking into a pack.
+
+    Desecrate makes its own corpses, so there is never a reason to go in
+    short-handed. This test used to assert the opposite — that no revives
+    meant no wait, so dash straight in — which is exactly the behaviour
+    being removed.
+    """
     necro, _ = make()
-    assert isinstance(necro.engage(snap(monsters=[monster(1, (1020, 1000))])), MoveTo)
+    far = monster(1, (1020, 1000))
+    action = necro.engage(snap(monsters=[far]))  # no allies: no wall
+    assert isinstance(action, MoveTo)
+    assert action.target != (1008, 1000), "that is the dash; it must not happen"
+
+
+def test_the_wall_gate_releases_when_the_wall_cannot_be_built():
+    """A protocol, not a deadlock. `upkeep` gives up after
+    `desecrate_rounds` fruitless casts, and offense must not hold back
+    forever on ground where no corpse can be raised."""
+    necro, _ = make(CombatConfig(wait_for_revives_s=0.0, desecrate_rounds=0))
+    far = monster(1, (1020, 1000))
+    assert necro.engage(snap(monsters=[far])) == MoveTo((1008, 1000))
 
 
 def test_a_new_pack_restarts_the_wait():
@@ -325,8 +378,12 @@ def test_distant_corpses_are_not_revive_fuel():
 
 
 def test_every_number_is_config():
-    necro, _ = make(CombatConfig(engage_radius=5, melee_range=1, dash_step=2))
-    assert necro.engage(snap(monsters=[monster(1, (1010, 1000))])) is None
-    assert necro.engage(snap(monsters=[monster(1, (1004, 1000))])) == MoveTo(
-        (1002, 1000)
+    necro, _ = make(
+        skirmishing(engage_radius=5, melee_range=1, dash_step=2)
     )
+    # Outside engage_radius: not our business at all, so nothing happens —
+    # not even the drift, which only applies when there IS a fight on.
+    assert necro.engage(snap(allies=wall(), monsters=[monster(1, (1010, 1000))])) is None
+    assert necro.engage(
+        snap(allies=wall(), monsters=[monster(1, (1004, 1000))])
+    ) == MoveTo((1002, 1000))

@@ -132,7 +132,14 @@ dash_step = 8
 retreat_subtiles = 12
 # Poison does the killing, so a struck monster is already dying: prefer
 # fresh targets and only re-hit a survivor after this long.
-restrike_s = 6.0
+# Lowered from 6.0 after the user watched a live run: the necro spent
+# whole seconds standing still because every nearby hostile was inside
+# its restrike window. Their judgement, and it overrides the original
+# let-poison-work theory: standing still is the riskier option.
+restrike_s = 2.0
+# A small step taken instead of standing still when there is nothing
+# fresh to hit, or while waiting for the revive wall.
+reposition_subtiles = 4
 
 # Revives as aggro tanks. On contact, hold up to wait_for_revives_s for
 # them to get in front — the wait ends early once one of them is within
