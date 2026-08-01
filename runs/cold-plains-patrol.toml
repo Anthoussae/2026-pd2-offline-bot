@@ -1,0 +1,52 @@
+# P6: the Cold Plains clearance with the circle actually walked.
+#
+# Stage B (radius 50) was a look at the FIGHT, deliberately small so the
+# character stayed near the waypoint where the user could recover it. It
+# did its job, and then it did something else: two clean runs on
+# 2026-08-01 completed without a single attack, because nothing happened
+# to be inside 50 subtiles. A trial run that can pass without doing the
+# thing it exists to test is not testing it.
+#
+# So this file is the same run with a wider circle, and — the part that
+# matters — with the character walking it. `clear_radius` decides an area
+# is clear from what perception can see, which is 80 subtiles
+# (units.PERCEPTION_RADIUS); above that, standing at the arrival point
+# and declaring victory is a claim about ground nobody looked at.
+# `patrol = true` visits a ring of sample points so the whole circle
+# passes within perception at least once.
+#
+# The radius is the one number here meant to be tuned. Change it and the
+# patrol ring moves with it (the ring is a fraction of the radius, not a
+# fixed distance), or override it for one run without editing anything:
+#
+#   python -m pd2bot.wiring --games 1 --chicken 50 --radius 120 \
+#       --run runs/cold-plains-patrol.toml
+#
+# Watch for (P6 review gate): how many patrol points were reached versus
+# skipped as unreachable, whether the bot FOUGHT, and any IdleBail — the
+# bail now prints the full state it gave up in.
+#
+# Abort paths, both standing and neither needing the bot's cooperation:
+# take the mouse (the focus guard yields immediately) or press ESC
+# (offline SP pauses). Any death stops the milestone for a conversation.
+
+name = "cold-plains-patrol"
+
+[[step]] # heal -> repair -> R75 inventory loop -> merc; town layer, P3
+name = "town_preamble"
+
+[[step]] # town waypoint -> Cold Plains (area 3), arrival verified by area id
+name = "waypoint"
+dest = 3
+
+[[step]]
+name = "clear_radius"
+center = "arrival" # recorded by the waypoint step on the shared blackboard
+radius = 96        # ~4 screens (a screen is ~24 subtiles) — tune freely
+patrol = true      # walk the circle; above ~80 the reading needs it
+
+[[step]] # collect what the pickit rules want from the cleared ground
+name = "pickup"
+
+[[step]] # run complete; the cycle takes it from here (leave, next game)
+name = "done"

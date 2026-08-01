@@ -65,6 +65,39 @@ class RunDefinition:
     name: str
     steps: tuple[RunStep, ...]
 
+    def with_radius(self, radius: int) -> RunDefinition:
+        """A copy whose `clear_radius` steps use `radius` instead.
+
+        For the `--radius` override (user request: *make the radius value
+        easy to alter*). The staged-acceptance numbers are the ones that
+        get tuned most, and editing a data file to try 120 instead of 96
+        is friction the operator pays while standing at the machine.
+
+        Raises when the run has no `clear_radius` step at all: a flag
+        that appears to work and silently does nothing is exactly the
+        class of failure this project keeps paying for.
+        """
+        steps = tuple(
+            RunStep(s.name, {**s.params, "radius": radius})
+            if s.name == "clear_radius"
+            else s
+            for s in self.steps
+        )
+        if steps == self.steps:
+            raise RunError(
+                f"--radius {radius} has nothing to apply to: run "
+                f"{self.name!r} has no clear_radius step"
+            )
+        return RunDefinition(name=self.name, steps=steps)
+
+    @property
+    def radius(self) -> int | None:
+        """The clearance radius this run will use, for the pre-flight print."""
+        return next(
+            (s.params.get("radius") for s in self.steps if s.name == "clear_radius"),
+            None,
+        )
+
 
 class StepRegistry:
     """The known steps. Runs are validated against this at load."""
@@ -104,6 +137,11 @@ def default_registry() -> StepRegistry:
             params=(
                 ParamSpec("center", str, required=False, default="arrival"),
                 ParamSpec("radius", int),
+                # Must stay in step with build_registry's copy: this is the
+                # schema the run linter and the drills validate against, and
+                # two vocabularies that disagree would pass a run file here
+                # that the bot then refuses in Hell.
+                ParamSpec("patrol", bool, required=False, default=False),
             ),
         )
     )

@@ -21,6 +21,13 @@ dest = 3
 name = "clear_radius"
 center = "arrival" # recorded by the waypoint step on the shared blackboard
 radius = 150       # R46 Q2
+# `patrol` is what makes that 150 honest, so do not "simplify" it away.
+# The step decides an area is clear from what perception can see, and
+# perception is 80 subtiles (units.PERCEPTION_RADIUS) — so from the
+# arrival point this file was declaring clear a circle it could see
+# about half of, and had been since it was written. Walking the circle
+# is what turns the number into a statement about the ground.
+patrol = true
 
 [[step]] # collect what the pickit rules want from the cleared ground
 name = "pickup"

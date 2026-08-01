@@ -57,6 +57,24 @@ AVOID_MARGIN = 2  # how far beyond the radius the nudged click lands
 MAX_NUDGES = 8
 MAX_FAILURES = 5  # consecutive no-progress plan cycles before giving up
 PROGRESS_RESET = 3.0  # subtiles closer to the goal that make a cycle "progress"
+# Shake loose before re-planning from a spot that did not work.
+#
+# A re-plan from the SAME position over the SAME grid returns the same
+# path and clicks the same cell, so a character caught on geometry
+# re-derives its way into the identical corner until the budget runs out.
+# Live, 2026-08-01: five cycles at (5226, 5658) trying to reach
+# (5219, 5658) — seven subtiles — and the run ended there.
+#
+# The user's remedy, and it is the same principle that fixed the object
+# click and the patrol point the same day: *finding another open space or
+# clicking beyond the obstacle often solves the problem, provided that the
+# ultimate destination objective isn't lost.* So: step aside, then
+# re-plan. The destination never changes; only where we plan FROM.
+#
+# Sideways first and never straight back toward the goal — the goal
+# direction is the one already proven not to work.
+SHAKE_DISTANCE = 6
+SHAKE_ANGLES = (90, -90, 135, -135, 45, -45, 180)
 
 
 class NavigationError(RuntimeError):
@@ -328,6 +346,42 @@ class Navigator:
                 )
             result.replans += 1
             result.log.append(f"re-planning from {position} ({failures} no-progress cycles)")
+            # Move BEFORE re-planning, or the next plan is this plan.
+            self._shake_loose(position, goal, result)
+
+    def _shake_loose(self, position: Point, goal: Point, result: WalkResult) -> bool:
+        """Step aside so the next plan can differ from the one that failed.
+
+        Caught on a wall, the loop re-planned from where it stood, got the
+        same path back, and clicked the same cell until it ran out of
+        cycles. The destination is not the problem and is left alone — the
+        only thing changed is where we plan from.
+
+        Best effort by design: it reports whether it moved, and a failure
+        here just means the next re-plan is no worse off than before.
+        """
+        try:
+            grid = self._grid_provider()
+        except Exception:  # noqa: BLE001 - unstick must not raise
+            return False
+        base = math.atan2(goal[1] - position[1], goal[0] - position[0])
+        for degrees in SHAKE_ANGLES:
+            angle = base + math.radians(degrees)
+            spot = (
+                round(position[0] + SHAKE_DISTANCE * math.cos(angle)),
+                round(position[1] + SHAKE_DISTANCE * math.sin(angle)),
+            )
+            try:
+                if not (grid.is_known(*spot) and grid.is_walkable(*spot)):
+                    continue
+            except Exception:  # noqa: BLE001 - a torn grid read is not fatal
+                continue
+            result.log.append(f"shaking loose to {spot}")
+            self._click(self._safe_click_point(spot, result), result)
+            self._sleep(STUCK_SECONDS)
+            return True
+        result.log.append(f"nowhere to shake loose to from {position}")
+        return False
 
 
 # --- CLI: the acceptance-walk tool -------------------------------------------

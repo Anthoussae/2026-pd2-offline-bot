@@ -166,3 +166,36 @@ honest about its radius; `--radius` works and fails loudly when it cannot
 apply; the pre-flight print shows the effective radius; suite green, ruff
 clean; and the supervised live run has been requested with the four
 questions above.
+
+## Implementation Result
+
+Status: done, awaiting the review gate
+Completed: 2026-08-01
+Commit: pending
+
+- Changed: `runs/cold-plains-patrol.toml` (new, radius 96),
+  `runs/cold-plains.toml` (patrol on, with a comment saying why the 150
+  needs it), `run.py` (`RunDefinition.with_radius` / `.radius`),
+  `wiring.py` (`--radius`, `radius_override`, effective radius in
+  `describe`, loud refusal in `main`), `simworld.py` (`run_file`
+  parameter, `patrol_scenario`), 6 new tests.
+- Validated: 713 tests pass, ruff clean. Live dry run through the bridge
+  shows `clearance  radius 120 (--radius override)`, and the no-op case
+  refuses: *"--radius 120 has nothing to apply to: run 'no-clearance'
+  has no clear_radius step"*.
+- Deviations: `test_a_stalled_run_idle_bails` now builds on the stage-B
+  run file. With a patrol the bot always has somewhere to be and keeps
+  making progress, so the old contrivance stopped stalling — the patrol
+  working, not the watchdog failing. The test is about the watchdog, so
+  it needs a run that genuinely runs out of things to do.
+
+**The finding this phase exists to have caught.** The sim passed every
+assertion while the patrol abandoned SEVEN OF ITS EIGHT points, each
+9-23 subtiles short. `patrol_attempts` counted legs, and consecutive
+ring points are ~48 subtiles apart, so three 12-subtile legs always fell
+one leg short of arriving. Only reading the trace showed it. It now
+counts legs that got no closer — progress rather than effort — which is
+what the budget was always meant to detect and is independent of the
+ring geometry. A test asserting the outcome (no point abandoned, all
+eight reached) was added, since the green suite is exactly what failed
+to notice.

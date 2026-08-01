@@ -31,7 +31,11 @@ def test_the_shipped_cold_plains_run_validates():
         "town_preamble", "waypoint", "clear_radius", "pickup", "done",
     ]
     assert run.steps[1].params == {"dest": 3}  # Cold Plains, live-verified id
-    assert run.steps[2].params == {"center": "arrival", "radius": 150}
+    # patrol on: 150 is more than perception's 80, so the circle has to be
+    # walked for the number to mean anything (2026-08-01).
+    assert run.steps[2].params == {
+        "center": "arrival", "radius": 150, "patrol": True
+    }
 
 
 def test_unknown_step_name_fails_at_load(tmp_path):
@@ -78,7 +82,37 @@ def test_optional_parameter_gets_its_declared_default(tmp_path):
         'name = "x"\n[[step]]\nname = "clear_radius"\nradius = 99\n',
     )
     run = load_run(path, default_registry())
-    assert run.steps[0].params == {"center": "arrival", "radius": 99}
+    # `patrol` joined them on 2026-08-01 and defaults off, so every run
+    # written before it behaves exactly as it did.
+    assert run.steps[0].params == {
+        "center": "arrival", "radius": 99, "patrol": False
+    }
+
+
+def test_the_radius_override_applies_to_the_clearance(tmp_path):
+    # `--radius`, so the number the operator tunes most can be changed
+    # without editing a data file while standing at the machine.
+    path = write_run(
+        tmp_path,
+        'name = "x"\n[[step]]\nname = "clear_radius"\nradius = 96\n',
+    )
+    run = load_run(path, default_registry()).with_radius(150)
+    assert run.radius == 150
+    assert run.steps[0].params["patrol"] is False  # nothing else disturbed
+
+
+def test_the_radius_override_refuses_when_it_has_nothing_to_apply_to(tmp_path):
+    # A flag that appears to work and silently does nothing is the class
+    # of failure this project keeps paying for.
+    path = write_run(tmp_path, 'name = "x"\n[[step]]\nname = "done"\n')
+    run = load_run(path, default_registry())
+    with pytest.raises(RunError, match="no clear_radius step"):
+        run.with_radius(150)
+
+
+def test_a_run_without_a_clearance_reports_no_radius(tmp_path):
+    path = write_run(tmp_path, 'name = "x"\n[[step]]\nname = "done"\n')
+    assert load_run(path, default_registry()).radius is None
 
 
 def test_run_needs_a_name_and_steps(tmp_path):

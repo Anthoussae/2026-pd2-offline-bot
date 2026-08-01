@@ -193,3 +193,27 @@ None. Continue to P2 when the tests pass.
 Patrol behaviour implemented and unit-tested, both registries agree on
 the `clear_radius` schema, the full suite passes, ruff is clean, and
 non-patrolling runs are provably unchanged.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-08-01
+Commit: pending
+
+- Changed: `steps.py` (`_hop`, five `RunServices` patrol fields,
+  `ClearRadiusStep.patrol` + ring/visited state + `walk_the_circle`, the
+  settle gated on `patrol_complete`), `run.py` (`patrol` ParamSpec in
+  `default_registry`), 7 new tests.
+- Validated: 707 tests pass, ruff clean.
+- Deviations: two, both small.
+  - `tests/test_behavior_steps.py`'s `make_step` helper was building
+    steps from a bare dict, so the factory never saw the validated
+    parameters production hands it. It broke the moment `clear_radius`
+    gained an optional parameter, which is how it was found; it now
+    applies the spec's declared defaults, as `build_states` does.
+  - `test_the_shipped_cold_plains_run_validates` asserts `patrol: False`
+    for `cold-plains.toml`. P2 switches that file and the assertion.
+- Bug caught by the tests rather than by review: `patrol_complete`
+  read True before the ring was computed (`len(None or [])` is 0), so
+  the patrol was skipped entirely on the first tick and the step behaved
+  exactly as before. All four patrol tests failed on it.

@@ -144,8 +144,18 @@ class BehaviorRunner:
         run_fail_max: int = 2,  # consecutive unexpected errors
         alert: Callable[[str], None] = _default_alert,
         stash_alert: Callable[[str], None] = _default_stash_alert,
+        announce: Callable[[str], None] | None = None,
     ) -> None:
         self._engine_factory = engine_factory
+        # Say the result IN THE GAME before the cycle leaves it (R164).
+        #
+        # The operator is watching the game, not the console — the same
+        # reasoning that made drills announce themselves in chat (R95) —
+        # and a run that simply stops leaves them guessing whether it is
+        # thinking, stuck, or finished. This is the only moment it can be
+        # said: the cycle leaves the game the instant this callback
+        # returns, and chat needs a game to be typed into.
+        self._announce = announce
         self._idle_bail_max = idle_bail_max
         self._town_fail_max = town_fail_max
         self._run_fail_max = run_fail_max
@@ -155,12 +165,29 @@ class BehaviorRunner:
         self.town_failures = 0  # consecutive, not lifetime
         self.run_failures = 0  # consecutive, not lifetime
 
+    def _say(self, outcome: str, detail: str = "") -> None:
+        """Announce the run's result in chat. Never fatal — a message that
+        cannot be delivered must not cost the run it is reporting on."""
+        if self._announce is None:
+            return
+        try:
+            self._announce(
+                f"RUN OVER — {outcome}" + (f": {detail[:120]}" if detail else "")
+                + " — back to the terminal"
+            )
+        except Exception:  # noqa: BLE001 - reporting must not raise
+            pass
+
     def __call__(self, session: GameSession) -> None:
         """The callback `cycle.run_games` invokes once per created game."""
         engine = self._engine_factory(session)
+        outcome, detail, announce = "COMPLETE", "", True
         try:
             engine.run()
+            report = getattr(engine, "report", None)
+            detail = report.summary() if report is not None else ""
         except StashFull as exc:
+            outcome, detail = "STASH FULL", str(exc)
             # Not a crash and not a cycle-and-retry: a wall. Convert the
             # town layer's exception into the loop-halting kind BEFORE it
             # reaches `run_games`, which would otherwise let a plain
@@ -182,6 +209,7 @@ class BehaviorRunner:
             # failures (a mis-click, an NPC dialog that opened late) which a
             # fresh game fixes by itself, and a structural one repeats. So
             # leave, retry once, and halt loudly when it happens again.
+            outcome, detail = "TOWN STEP FAILED", str(exc)
             self.town_failures += 1
             if self.town_failures >= self._town_fail_max:
                 reason = (
@@ -191,11 +219,18 @@ class BehaviorRunner:
                 self._alert(reason)
                 raise TownStepHalt(reason) from exc
             raise TownStepFailed(str(exc)) from exc
-        except (DeathHalt, CycleError):
-            # The two that MUST reach the cycle untouched: the death latch is
-            # permanent, and a CycleError is already the loop-halting kind.
+        except DeathHalt:
+            # Permanent, and it MUST reach the cycle untouched. No
+            # announcement either: after a detected death the bot sends no
+            # input of any kind, ever, and chat is input. The one place
+            # where saying nothing is the whole point.
+            announce = False
+            raise
+        except CycleError:
+            outcome = "HALTED"
             raise
         except IdleBail as exc:
+            outcome, detail = "IDLE BAIL", str(exc).splitlines()[0]
             self.idle_bails += 1
             if self.idle_bails >= self._idle_bail_max:
                 reason = (
@@ -205,7 +240,8 @@ class BehaviorRunner:
                 self._alert(reason)
                 raise IdleLoopHalt(reason) from exc
             raise  # the cycle's ChickenExit path leaves the game, routinely
-        except ChickenExit:
+        except ChickenExit as exc:
+            outcome, detail = "CHICKEN", str(exc)
             raise  # a real vitals chicken: the cycle books it, not us
         except Exception as exc:
             # ANYTHING else the run raised. This clause exists because the
@@ -220,6 +256,7 @@ class BehaviorRunner:
             # explicitly not (the two above). An unexpected error costs the
             # game, not the session — and if it repeats it is structural, so
             # the second one halts loudly rather than cycling forever.
+            outcome, detail = "FAILED", f"{type(exc).__name__}: {exc}"
             self.run_failures += 1
             if self.run_failures >= self._run_fail_max:
                 reason = (
@@ -233,3 +270,9 @@ class BehaviorRunner:
             self.idle_bails = 0
             self.town_failures = 0
             self.run_failures = 0
+        finally:
+            # In the `finally` so it happens on every path, and BEFORE the
+            # exception finishes propagating — the cycle leaves the game
+            # the moment this callback returns, and chat needs a game.
+            if announce:
+                self._say(outcome, detail)

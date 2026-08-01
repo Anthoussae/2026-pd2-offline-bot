@@ -61,6 +61,40 @@ def test_idle_loop_halt_is_loop_halting_not_a_chicken():
     assert not issubclass(IdleLoopHalt, ChickenExit)
 
 
+def test_the_run_announces_its_result_in_the_game():
+    """R164: the operator watches the GAME, not the console.
+
+    A run that simply stops leaves them guessing whether it is thinking,
+    stuck or finished — the same reason drills have announced themselves
+    in chat since R95. This is the only moment it can be said: the cycle
+    leaves the game the instant the callback returns.
+    """
+    said: list[str] = []
+    BehaviorRunner(
+        lambda session: ScriptedEngine(None), announce=said.append
+    )(None)
+    assert said and "RUN OVER" in said[0] and "COMPLETE" in said[0]
+
+
+def test_a_death_is_announced_to_nobody():
+    # The death latch: after a detected death the bot sends NO input of
+    # any kind, ever. Chat is input. This is the one place where saying
+    # nothing is the entire point.
+    said: list[str] = []
+    with pytest.raises(DeathHalt):
+        BehaviorRunner(
+            lambda session: ScriptedEngine(DeathHalt("dead")), announce=said.append
+        )(None)
+    assert said == []
+
+
+def test_an_announcement_that_fails_never_costs_the_run():
+    def explode(_text):
+        raise RuntimeError("chat console would not open")
+
+    BehaviorRunner(lambda session: ScriptedEngine(None), announce=explode)(None)
+
+
 def test_a_completed_run_resets_the_count():
     r = runner([IdleBail("one"), None, IdleBail("two"), IdleBail("three")])
     with pytest.raises(IdleBail):

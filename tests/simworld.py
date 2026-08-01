@@ -445,6 +445,7 @@ def build_sim(
     idle_bail_quiet_s: float | None = None,
     tick_s: float = 0.5,
     alert=None,
+    run_file: str = "cold-plains.toml",
 ) -> SimRun:
     """Assemble the real stack over `world`.
 
@@ -530,7 +531,7 @@ def build_sim(
         **({"alert": alert} if alert is not None else {}),
     )
     registry = build_registry(services)
-    run = load_run(REPO / "runs" / "cold-plains.toml", registry)
+    run = load_run(REPO / "runs" / run_file, registry)
     engine = BehaviorEngine(
         snapshot=world.snapshot,
         monitor=monitor,
@@ -592,6 +593,33 @@ def cold_plains_scenario() -> ColdPlains:
     # the end of the run.
     world.accident_at = {10: 700}
     world.junk_kinds = {700}
+    return world
+
+
+def patrol_scenario() -> ColdPlains:
+    """A pack that only a patrol will ever meet.
+
+    `cold_plains_scenario` puts everything within a few subtiles of the
+    arrival point, which is why a standstill clearance always passed it —
+    and why both 2026-08-01 live runs completed without a single attack.
+    Here the monsters sit ~70 subtiles out: inside the patrol circle, far
+    outside anything the character can reach by standing still.
+
+    Caveat worth stating, because a green test would otherwise imply more
+    than it shows: this sim does NOT model perception's 80-subtile cutoff
+    — its snapshot lists every monster in the world. So it proves the
+    patrol WALKS, FINDS and FINISHES; it cannot prove the coverage
+    argument, which is geometry and lives in the step's comments.
+    """
+    world = ColdPlains()
+    world.belt = [
+        (MANA_KIND, 0), (REJUV_KIND, 1),
+        (HEAL_KIND, 2), (HEAL_KIND, 2), (HEAL_KIND, 3),
+    ]
+    world.monsters = [
+        SimMonster(1, (ARRIVAL[0] + 70, ARRIVAL[1]), drops=((HEAL_KIND, 2),)),
+        SimMonster(2, (ARRIVAL[0], ARRIVAL[1] + 68)),
+    ]
     return world
 
 

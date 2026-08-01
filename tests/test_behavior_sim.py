@@ -28,6 +28,7 @@ from tests.simworld import (
     SimMonster,
     build_sim,
     cold_plains_scenario,
+    patrol_scenario,
 )
 
 MAX_TICKS = 400
@@ -45,6 +46,65 @@ def run_to_completion(sim, world, *, max_ticks=MAX_TICKS):
 def sim(monkeypatch):
     world = cold_plains_scenario()
     return build_sim(world, monkeypatch=monkeypatch), world
+
+
+# -- the patrol (2026-08-01) ----------------------------------------------------
+
+
+@pytest.fixture
+def patrol_sim(monkeypatch):
+    world = patrol_scenario()
+    return (
+        build_sim(
+            world, monkeypatch=monkeypatch, run_file="cold-plains-patrol.toml"
+        ),
+        world,
+    )
+
+
+def test_the_patrol_finds_a_pack_a_standstill_would_have_missed(patrol_sim):
+    """The change's whole purpose, in one test.
+
+    Both live runs on 2026-08-01 completed `[CVRL]` without a single
+    `AttackUnit`, because nothing happened to be near the arrival point.
+    Here the monsters are ~70 subtiles out — inside the patrol circle,
+    outside anything a standing character reaches.
+    """
+    run, world = patrol_sim
+    assert run_to_completion(run, world), "the run never finished"
+    assert not world.monsters, "the pack survived the clearance"
+    assert any(
+        isinstance(entry.action, AttackUnit) for entry in run.trace
+    ), "it never actually fought"
+
+
+def test_the_patrol_actually_walked(patrol_sim):
+    # A scenario that passes without walking would be the same blind spot
+    # in a new costume.
+    run, world = patrol_sim
+    run_to_completion(run, world)
+    moved = [e for e in run.trace if type(e.action).__name__ == "MoveTo"]
+    assert len(moved) > 5, f"barely moved: {[e.action for e in moved]}"
+    assert world.position != ARRIVAL
+
+
+def test_the_patrol_reaches_its_points_rather_than_abandoning_them(patrol_sim):
+    """The failure the first cut hid behind a green suite.
+
+    `patrol_attempts` counted LEGS, and consecutive ring points are ~48
+    subtiles apart, so three 12-subtile legs always fell one short: the
+    sim abandoned seven of its eight points while every assertion
+    passed. Counting legs that got no closer, instead of legs, fixed it.
+    Assert the outcome, since that is what the green suite failed to.
+    """
+    run, world = patrol_sim
+    run_to_completion(run, world)
+    log = run.engine.report.log
+    assert not [line for line in log if "giving up" in line], (
+        "points were abandoned: "
+        + "; ".join(line for line in log if "giving up" in line)
+    )
+    assert len([line for line in log if "patrol reached" in line]) == 8
 
 
 # -- the full run ---------------------------------------------------------------
@@ -247,7 +307,16 @@ def test_a_stalled_run_idle_bails(monkeypatch):
     world.area = offsets.AREA_COLD_PLAINS
     world.position = ARRIVAL
     world.belt = []
-    run = build_sim(world, monkeypatch=monkeypatch, idle_bail_s=5.0)
+    # The NON-patrol run on purpose: with a patrol the bot has somewhere
+    # to be and keeps making progress, which is the patrol working rather
+    # than the watchdog failing. This test is about the watchdog, so it
+    # needs a run that genuinely runs out of things to do.
+    run = build_sim(
+        world,
+        monkeypatch=monkeypatch,
+        idle_bail_s=5.0,
+        run_file="cold-plains-stage-b.toml",
+    )
     # Skip the town/waypoint steps so the stall happens in the field.
     run.engine._index = 2
     world.monsters = [SimMonster(99, (1200, 1200))]  # outside engage radius

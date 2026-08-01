@@ -126,6 +126,9 @@ class Town:
         self.charsi_present = True
         self.heal_on_interact = True
         self.deposit_works = True
+        # A world click on an object that does NOT open its panel — the
+        # live 2026-08-01 failure, which the fake could not express.
+        self.object_click_works = True
         self.refill_works = True
         self.resurrect_works = True
         self.world_clicks = []
@@ -235,7 +238,15 @@ class Town:
             self._open_dialog(offsets.NPC_KASHYA)
         elif (x, y) == CHARSI_POS:
             self._open_dialog(offsets.NPC_CHARSI)
-        elif (x, y) == STASH_POS:
+        elif (
+            # Within a subtile or two of the tile, not exactly on it: an
+            # object's sprite is drawn around its tile, which is the whole
+            # premise of the aim ladder a retry walks (R161). An exact
+            # match made the fake reject the very offsets the real game
+            # accepts.
+            max(abs(x - STASH_POS[0]), abs(y - STASH_POS[1])) <= 2
+            and self.object_click_works
+        ):
             self.panels.add(offsets.UI_STASH)
         return (0, 0)
 
@@ -367,10 +378,15 @@ class Town:
         # ESC closes one panel per press, whichever it is — the fake must
         # not be choosier than the game, or a panel the layer fails to
         # close would look closed here (R85).
-        for panel_id in uistate.blocking_panels():
-            if panel_id in self.panels:
-                self.panels.discard(panel_id)
-                return
+        #
+        # "Whichever it is" INCLUDES slots nobody has named: a dialog box
+        # is smaller than a panel and need not be on the blocking list at
+        # all (R161, live — Warriv's travel prompt). Walking only
+        # `blocking_panels()` here was the fake being choosier than the
+        # game in exactly the way the comment above forbids.
+        for panel_id in sorted(self.panels):
+            self.panels.discard(panel_id)
+            return
 
 
 class FakeClock:
@@ -500,6 +516,48 @@ def test_deposit_that_never_takes_halts_loudly(town):
     assert len(town.alerts) == 1
     attempts = [c for c in town.panel_clicks if c[0] == offsets.UI_STASH]
     assert len(attempts) == CALIBRATED.transfer_attempts  # bounded, no spam
+
+
+def test_a_step_back_that_did_not_happen_is_tried_again(town):
+    """2026-08-01: the run that died standing on the waypoint.
+
+    `min_interact_range` exists because a click on the tile you are
+    standing on does nothing in D2 — and the deliberate click that
+    follows lands on a DISTANT object, which makes the character walk
+    onto it. So the step-back was being issued and then quietly undone,
+    and every retry re-clicked from the same hopeless spot: player at
+    (5886, 5711), waypoint at (5884, 5709), three times, distance 2
+    against a minimum of 4.
+
+    A walk is a request. Asking once and assuming is the bug.
+    """
+    target = (5884, 5709)
+    town.pos = (5886, 5711)  # distance 2: inside the minimum
+    layer(town)._walk_near(target, minimum=4)
+    assert len(town.walked) > 1, "it asked once and assumed the walk worked"
+
+
+def test_a_step_back_that_worked_is_not_repeated(town):
+    # The other half: verification must not turn one walk into three.
+    target = (5884, 5709)
+    town.pos = (5886, 5711)
+
+    def walk(pos):
+        town.walked.append(pos)
+        town.pos = pos  # this fake actually moves, as the game would
+
+    town_layer = layer(town)
+    town_layer.walk_to = walk
+    town_layer._walk_near(target, minimum=4)
+    assert len(town.walked) == 1
+    assert max(abs(town.pos[0] - target[0]), abs(town.pos[1] - target[1])) >= 4
+
+
+def test_already_at_a_good_distance_still_walks_nowhere(town):
+    # The shortest walk is none, and that has to survive the retry loop.
+    town.pos = (5890, 5715)  # 6 away: inside the band, outside the minimum
+    layer(town)._walk_near((5884, 5709), minimum=4)
+    assert town.walked == []
 
 
 def test_verification_polls_the_cheap_reader_and_decides_with_the_other(town):
@@ -1750,6 +1808,85 @@ def test_opening_the_stash_retries_and_allows_for_the_walk(town):
     report = PreambleReport()
     layer(town).deposit_to_stash(lambda i: True, report)
     assert len(attempts) == 2 and report.deposited == 1
+
+
+def test_a_misclick_dialog_is_closed_and_the_retry_differs(town):
+    """R161, the user's rule after watching a run lock itself out.
+
+    Warriv stood between the character and the stash, so the deliberate
+    click hit HIM. His dialog opened — not the stash — the wait reported
+    "no panel", and the character never moved because the NPC ate the
+    click. The next attempt closed the dialog, re-approached the same
+    side, and clicked the same pixel. Three times.
+
+    *Check for unexpected dialogs/screens, close them immediately if they
+    are not the current expected target, move the mouse pointer a little,
+    and click elsewhere.* So: the stray dialog is closed, and the retry
+    must stand somewhere else and aim somewhere else — a retry that
+    cannot differ from the attempt it retries is not a retry.
+    """
+    aimed: list[tuple[int, int]] = []
+    original = town.click_world
+
+    def click_world(x, y, **kwargs):
+        aimed.append((x, y))
+        if len(aimed) == 1:
+            # The misclick: a bystander's dialog opens instead.
+            town.panels.add(offsets.UI_NPCMENU)
+            return (0, 0)
+        return original(x, y, **kwargs)
+
+    town.click_world = click_world
+    layer(town).open_object_panel(offsets.OBJ_STASH, "the stash", offsets.UI_STASH)
+
+    assert offsets.UI_NPCMENU not in town.panels, "the stray dialog was left open"
+    assert offsets.UI_STASH in town.panels
+    assert len(aimed) >= 2 and aimed[0] != aimed[1], "the retry repeated itself"
+
+
+def test_stray_ui_is_cleared_even_when_it_is_not_a_blocking_panel(town):
+    # "not just panel — dialog boxes too (smaller than panels)". A dialog
+    # need not be in the BLOCKING list to be in the way, and `close_panels`
+    # only walks that list, so anything open that is not our target counts.
+    town.panels.add(0x21)  # an unmodelled slot: a dialog nobody has named
+    found = layer(town)._clear_stray_ui(keep=offsets.UI_STASH)
+    assert "ui_0x21" in found
+    assert town.panels == set()
+
+
+def test_the_automap_is_not_treated_as_an_obstacle(town):
+    # It takes no clicks and the human may well have left it on. "Close
+    # everything that is open" would fight them for it on every retry.
+    town.panels.add(offsets.UI_AUTOMAP)
+    assert layer(town)._clear_stray_ui(keep=offsets.UI_STASH) == ""
+    assert offsets.UI_AUTOMAP in town.panels
+
+
+def test_clearing_stray_ui_keeps_the_panel_we_asked_for(town):
+    town.panels.add(offsets.UI_STASH)
+    assert layer(town)._clear_stray_ui(keep=offsets.UI_STASH) == ""
+    assert offsets.UI_STASH in town.panels
+
+
+def test_a_failed_object_panel_reports_every_attempt(town):
+    """2026-08-01: two identical live failures the message could not explain.
+
+    All it could say was where the character finished, and that fitted
+    three different stories — the standoff never achieved, the click never
+    sent, or the click sent and ignored. Two of the three were wrong, and
+    each cost a supervised run to find out. T49 then opened the same panel
+    first try in isolation, so whatever this is only happens in context,
+    and the context is the thing that has to be recorded.
+    """
+    town.object_click_works = False
+    with pytest.raises(TownError) as failure:
+        layer(town).open_object_panel(
+            offsets.OBJ_STASH, "the stash", offsets.UI_STASH
+        )
+    message = str(failure.value)
+    assert message.count("#") == CALIBRATED.interact_retries + 1, message
+    for expected in ("d=", "want ", "panels ", "clicked ", "ended "):
+        assert expected in message, f"{expected!r} missing from: {message}"
 
 
 def test_open_object_panel_short_circuits_when_already_open(town):

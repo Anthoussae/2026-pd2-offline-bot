@@ -166,6 +166,40 @@ def test_invisible_wall_gives_up_with_typed_error():
     assert len(fake.clicks) >= MAX_FAILURES
 
 
+def test_a_stuck_walk_steps_aside_before_replanning():
+    """R163, the user watching it catch on a wall.
+
+    A re-plan from the same position over the same grid returns the same
+    path and clicks the same cell, so a character caught on geometry
+    re-derives its way into the identical corner until the budget runs
+    out — live, five cycles at (5226, 5658) seven subtiles from its
+    target, and the run ended there.
+
+    *Finding another open space or clicking beyond the obstacle often
+    solves the problem, provided that the ultimate destination objective
+    isn't lost.* So the sidestep must be sideways, and the destination
+    must survive it.
+    """
+    world = World(wall_x=5)
+    sim = Sim(world)
+    fake = FakeInput(world)
+    with pytest.raises(NavigationError):
+        navigator(world, sim, fake).walk_to((30, 0))
+    # It did not spend every cycle clicking the same unreachable place.
+    assert len({click for click in fake.clicks}) > 1, fake.clicks
+    sideways = [click for click in fake.clicks if click[1] != 0]
+    assert sideways, f"never tried another line: {fake.clicks}"
+
+
+def test_shaking_loose_keeps_the_destination():
+    # The sidestep changes where we plan FROM, never where we are going.
+    world = World(wall_x=5)
+    sim = Sim(world)
+    fake = FakeInput(world)
+    with pytest.raises(NavigationError, match=r"target \(30, 0\)"):
+        navigator(world, sim, fake).walk_to((30, 0))
+
+
 def test_obstacle_clearing_leads_to_replan_then_success():
     world = World(wall_x=5)
     sim = Sim(world)

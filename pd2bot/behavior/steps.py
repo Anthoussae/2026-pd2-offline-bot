@@ -24,6 +24,7 @@ loop rather than a script.
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ from pd2bot.behavior.actions import MoveTo, PickUpItem
 from pd2bot.behavior.engine import EngineContext, StepOutcome
 from pd2bot.behavior.run import ParamSpec, StepRegistry, StepSpec
 from pd2bot.items import CarriedItems
+from pd2bot.navigate import NavigationError
 from pd2bot.pickit import Pickit, potion_type_of
 from pd2bot.snapshot import GameSnapshot
 from pd2bot.units import GroundItem
@@ -40,6 +42,25 @@ from pd2bot.units import GroundItem
 
 def _chebyshev(a: tuple[int, int], b: tuple[int, int]) -> int:
     return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+
+
+def _hop(
+    origin: tuple[int, int], destination: tuple[int, int], step: int
+) -> tuple[int, int]:
+    """One short leg toward `destination`, capped at `step` subtiles.
+
+    `walk_to` BLOCKS until arrival (navigate.py), so a leg is time the
+    reflex ladder is not being consulted — the same discipline, and the
+    same reason, as `NecroCombat._dash_target`. A patrol built out of one
+    `walk_to` per point would cross a Hell field with survival switched
+    off for the whole crossing.
+    """
+    dx, dy = destination[0] - origin[0], destination[1] - origin[1]
+    span = max(abs(dx), abs(dy))
+    if span <= step:
+        return destination
+    scale = step / span
+    return (round(origin[0] + dx * scale), round(origin[1] + dy * scale))
 
 
 def _default_alert(reason: str) -> None:  # pragma: no cover - exercised live
@@ -107,6 +128,41 @@ class RunServices:
     # area untouched. The town layer has closed stray panels since R85; the
     # field simply had no way to ask.
     clear_panels: Callable[[], None] | None = None
+    # -- the patrol (2026-08-01) ------------------------------------------
+    #
+    # `clear_radius` decides the area is clear when no live monster is
+    # within `radius` of the centre — and it can decide that from a
+    # STANDSTILL only while the radius fits inside perception, which is
+    # 80 subtiles (`units.PERCEPTION_RADIUS`, and `scan_units` drops
+    # everything past it). `runs/cold-plains.toml` asks for 150, so it has
+    # always been declaring clear a circle it can see about half of.
+    #
+    # The patrol walks the circle instead. Numbers live here rather than
+    # in the run file because they are judgement calls nobody should have
+    # to restate per run; the run file carries the one number the user
+    # actually tunes, which is the radius.
+    patrol_points: int = 8  # sample points evenly spaced around the ring
+    # The ring's radius as a FRACTION of the clearance radius. A fraction
+    # on purpose (user request: "make the radius value easy to alter"):
+    # an absolute ring would stay put while the circle grew around it, so
+    # changing the one number would silently stop covering the edge.
+    patrol_ring: float = 0.66
+    # Subtiles per leg. `walk_to` BLOCKS until arrival (navigate.py), so a
+    # leg is time the reflex ladder is not being consulted — the same
+    # reason `NecroCombat._dash_target` caps a dash at 8. A little longer
+    # than a dash because nothing is being fought yet.
+    patrol_step: int = 12
+    patrol_reach: int = 6  # close enough to call a point visited
+    # Legs WITHOUT GETTING CLOSER before giving up on a point, so a point
+    # we can walk toward but never reach cannot hold the run open forever.
+    #
+    # Counted as lack of progress rather than as a number of legs, which
+    # was the first cut and was wrong: consecutive ring points are ~48
+    # subtiles apart, so three 12-subtile legs always fell one short and
+    # the sim abandoned SEVEN OF EIGHT points while reporting green.
+    # A budget that has to be re-derived whenever the ring or the leg
+    # length changes is not a budget, it is a coincidence.
+    patrol_attempts: int = 3
     # How far to step off a waypoint after arriving on one (user request).
     # The character lands ON the waypoint with the cursor still over it,
     # which makes the next few clicks — and any ground-targeted cast — a
@@ -356,7 +412,10 @@ class _PickupMixin:
         if player is None:
             return False
         if _chebyshev(item.position, player.position) > self.services.pickup_reach:
-            ctx.executor.execute(MoveTo(item.position))
+            if not self.send(ctx, MoveTo(item.position)):
+                # Unreachable ground: give up on this item rather than the
+                # game, the same way the patrol gives up on a point.
+                self.services.stuck.add(item.unit_id)
             return True
         if (
             now - self.services.last_try.get(item.unit_id, -1e9)
@@ -412,6 +471,33 @@ class _PickupMixin:
         self.services.attempts[item.unit_id] = attempts + 1
         self.services.last_try[item.unit_id] = now
         ctx.executor.execute(PickUpItem(item.unit_id, item.position))
+        return True
+
+    def send(self, ctx: EngineContext, action) -> bool:
+        """Execute one action, absorbing a walk that could not be made.
+
+        `NavigationError` means the navigator tried and failed — unknown
+        ground, a corner it cannot round, a target it cannot reach. That
+        is information about ONE target, not a reason to end the game,
+        and it ends the game today: it is not in the engine's
+        `SEND_DID_NOT_LAND` pair (rightly — something DID happen), so it
+        escapes the step and the runner books a failed run.
+
+        Live, 2026-08-01: the first run that fought since the review
+        fixes — four kills, a full revive wall, the circle walked —
+        ended on *"gave up after 5 plan cycles without progress; last
+        position (5226, 5658), target (5219, 5658)"*. Seven subtiles.
+        The patrol already treats an unreachable point this way and
+        picks another; the fight and the sweep had no equivalent.
+
+        Deliberately narrow: `InputRefused` and `SkillSwitchFailed` still
+        propagate to the engine, which absorbs them and re-decides.
+        """
+        try:
+            ctx.executor.execute(action)
+        except NavigationError as exc:
+            self.services.log(f"could not walk: {exc}")
+            return False
         return True
 
     def recover_panels(self, snap: GameSnapshot) -> bool:
@@ -498,13 +584,128 @@ class ClearRadiusStep(_PickupMixin):
     read EMPTY continuously for `clear_settle_s` before it calls the job
     done — the same "wait for it to stay true" discipline the town layer's
     verifications use.
+
+    **With `patrol` on, it walks the circle before believing it.** The
+    standstill version is only sound while the radius fits inside
+    perception (80 subtiles): past that, "no monster within `radius`"
+    means "no monster within 80", and the rest of the circle is being
+    declared clear unobserved. `runs/cold-plains.toml` has asked for 150
+    since it was written. Both 2026-08-01 runs also completed without
+    ever fighting, because nothing happened to be inside stage B's 50 —
+    a trial run that can pass without doing the thing it tests.
+
+    The patrol is deliberately unclever (user: *we don't need this to
+    become enormously onerous*): a fixed ring of sample points, a visited
+    set, one short leg per tick. Fighting always wins the tick; the
+    patrol is only what happens when there is nothing to clear.
     """
 
     radius: int = 150
     centre_note: str = "arrival"
+    patrol: bool = False
     name: str = "clear_radius"
     _empty_since: float | None = None
     _centre: tuple[int, int] | None = None
+    _points: list[tuple[int, int]] | None = None
+    _visited: set[int] = field(default_factory=set)
+    _index: int = 0
+    _attempts: int = 0  # legs since we last got closer to the current point
+    _closest: int | None = None
+
+    def patrol_points(self, centre: tuple[int, int]) -> list[tuple[int, int]]:
+        """The ring, computed once from the centre and the radius.
+
+        Sized as a fraction of `radius` so that changing the radius —
+        the one number the user tunes — moves the whole pattern with it.
+        At radius 96 the ring sits at ~63: adjacent points are ~49 apart
+        (well inside perception of each other) and the furthest edge of
+        the circle is ~33 from the nearest point.
+        """
+        if self._points is None:
+            ring = max(1, round(self.radius * self.services.patrol_ring))
+            count = max(1, self.services.patrol_points)
+            self._points = [
+                (
+                    centre[0] + round(ring * math.cos(2 * math.pi * i / count)),
+                    centre[1] + round(ring * math.sin(2 * math.pi * i / count)),
+                )
+                for i in range(count)
+            ]
+        return self._points
+
+    @property
+    def patrol_complete(self) -> bool:
+        if not self.patrol:
+            return True
+        if self._points is None:
+            return False  # not even planned yet, let alone walked
+        return len(self._visited) >= len(self._points)
+
+    def _advance(self) -> None:
+        """Done with the current point, for whatever reason. Next."""
+        self._visited.add(self._index)
+        self._attempts = 0
+        self._closest = None
+        points = self._points or []
+        for _ in range(len(points)):
+            self._index = (self._index + 1) % max(1, len(points))
+            if self._index not in self._visited:
+                return
+
+    def walk_the_circle(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
+        """One leg of the patrol. Only called with the radius reading clear.
+
+        Every exit from here reports `acted`, because every one of them
+        either sent a walk or made a decision that moved the patrol on —
+        which is what keeps both watchdogs fed without either of them
+        needing to know a patrol exists.
+        """
+        points = self.patrol_points(self._centre)  # type: ignore[arg-type]
+        target = points[self._index]
+        here = snap.player.position  # type: ignore[union-attr]
+
+        distance = _chebyshev(here, target)
+        if distance <= self.services.patrol_reach:
+            self.services.log(f"patrol: reached {target}")
+            self._advance()
+            return StepOutcome(done=False, acted=True, note=f"patrol reached {target}")
+
+        # Progress, not effort: a leg that closed the gap earns another,
+        # however many it takes. Only legs that achieve nothing count
+        # against the point.
+        if self._closest is None or distance < self._closest:
+            self._closest = distance
+            self._attempts = 0
+        else:
+            self._attempts += 1
+
+        if self._attempts >= self.services.patrol_attempts:
+            # Walkable in principle, unreachable in practice. Visited
+            # means "dealt with", not "stood on" — otherwise one awkward
+            # corner holds the whole clearance open.
+            self.services.log(
+                f"patrol: giving up on {target} after {self._attempts} legs "
+                f"that got no closer (still {distance} away)"
+            )
+            self._advance()
+            return StepOutcome(done=False, acted=True, note=f"patrol gave up on {target}")
+
+        leg = _hop(here, target, self.services.patrol_step)
+        try:
+            ctx.executor.execute(MoveTo(leg))
+        except NavigationError as exc:
+            # Unknown ground is impassable BY DESIGN (navigate.py: "that
+            # ground has never been seen — survey it first"), and a ring
+            # several screens out will often name ground nobody has read.
+            # Left uncaught this fails the whole cycle. Deliberately NOT
+            # `except Exception`: InputRefused and SkillSwitchFailed must
+            # keep reaching the engine, which absorbs them and re-decides
+            # — swallowing those would mark a point visited that we never
+            # actually tried to walk to.
+            self.services.log(f"patrol: skipping {target} ({exc})")
+            self._advance()
+            return StepOutcome(done=False, acted=True, note=f"patrol skipped {target}")
+        return StepOutcome(done=False, acted=True, note=f"patrol leg to {leg}")
 
     def centre(self, snap: GameSnapshot, ctx: EngineContext) -> tuple[int, int] | None:
         if self._centre is None:
@@ -531,9 +732,19 @@ class ClearRadiusStep(_PickupMixin):
         ]
         if in_radius:
             self._empty_since = None
+            # A fight is not a failed patrol leg. The character walks
+            # TOWARD the monster, which is away from wherever the patrol
+            # was heading, so a `_closest` recorded before the fight makes
+            # every leg after it look like no progress — and three such
+            # ticks abandon a point that was never unreachable. Live,
+            # 2026-08-01: two points given up on from 20 subtiles, which
+            # is walking distance, not a wall. The budget measures one
+            # attempt, so an interruption ends the attempt.
+            self._closest = None
+            self._attempts = 0
             action = self.services.combat.engage(snap, ctx)
             if action is not None:
-                ctx.executor.execute(action)
+                self.send(ctx, action)
                 return StepOutcome(done=False, acted=True)
             # Nothing to do offensively this tick (everything freshly
             # poisoned, or waiting for the revives): pick up loot instead of
@@ -558,7 +769,7 @@ class ClearRadiusStep(_PickupMixin):
             )
             closing = self.services.combat.approach(snap, nearest.position)
             if closing is not None:
-                ctx.executor.execute(closing)
+                self.send(ctx, closing)
                 return StepOutcome(
                     done=False, acted=True,
                     note=f"closing on monster {nearest.unit_id} at {nearest.position}",
@@ -572,6 +783,15 @@ class ClearRadiusStep(_PickupMixin):
             # (review 003); the worst realistic case is a 6 s restrike
             # against a 10 s limit, which was margin nobody had declared.
             return StepOutcome(done=False, waiting=True)
+
+        # The radius reads clear — but "clear" is only a claim about what
+        # we can SEE, and the settle timer must not start while there is
+        # still circle we have never looked at. Starting it here was the
+        # whole bug: the step would finish on an 80-subtile look at a
+        # 150-subtile promise.
+        if not self.patrol_complete:
+            self._empty_since = None
+            return self.walk_the_circle(snap, ctx)
 
         if self._empty_since is None:
             self._empty_since = now
@@ -655,9 +875,15 @@ def build_registry(services: RunServices) -> StepRegistry:
             params=(
                 ParamSpec("center", str, required=False, default="arrival"),
                 ParamSpec("radius", int),
+                # Off by default so every run written before the patrol
+                # existed keeps behaving exactly as it did.
+                ParamSpec("patrol", bool, required=False, default=False),
             ),
             factory=lambda p: ClearRadiusStep(
-                services, radius=p["radius"], centre_note=p["center"]
+                services,
+                radius=p["radius"],
+                centre_note=p["center"],
+                patrol=p["patrol"],
             ),
         )
     )

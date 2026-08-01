@@ -2,11 +2,17 @@
 kind: plan
 size: md
 depth: implementation
-status: active
+status: done
 repo: 2026-pd2-offline-bot
 created: 2026-08-01
+completed: 2026-08-01
+commit: none
 adr: possible
 ---
+
+> **Implemented, and NOT archived on purpose.** P2's review gate is open:
+> a supervised live run is what decides whether the wider radius is
+> trusted, and nothing here has executed against the game. See `_DONE.md`.
 
 # Patrol clearance: make the circle real
 

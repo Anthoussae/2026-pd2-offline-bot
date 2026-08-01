@@ -191,6 +191,25 @@ class TownConfig:
     # never open it (stage B, live). Objects only: an NPC is a unit you
     # cannot stand inside.
     min_interact_range: int = 4
+    # Where to aim, per attempt, relative to the object's own tile.
+    #
+    # A D2 object's POSITION is its tile; its sprite is drawn around and
+    # behind that, so the tile centre is not reliably inside the clickable
+    # body — and whether it is depends on the angle you approach from.
+    # 2026-08-01, live: the stash at (5856, 5734) clicked from 7 subtiles
+    # east, three times, at the same pixel each time. The character did
+    # not move and the panel never opened — a click that hit neither the
+    # sprite nor walkable ground. Aiming a subtile behind the tile (away
+    # from the camera, which is up-left) puts the point further into the
+    # sprite body.
+    #
+    # Exists because a retry that cannot differ from the attempt it
+    # retries is not a retry. The first entry MUST be (0, 0): the tile
+    # itself is right far more often than not, and this is a fallback
+    # ladder, not a correction.
+    object_aim_offsets: tuple[tuple[int, int], ...] = (
+        (0, 0), (-1, -1), (1, 1), (-2, -2),
+    )
     interact_timeout_s: float = 6.0
     # Clicking an NPC from across the screen makes the character walk over
     # before the dialog opens, so this wait covers a journey. Six seconds
@@ -580,7 +599,58 @@ class TownLayer:
             if self._any_panel_open():
                 self.close_panels()
 
-    def _walk_near(self, target: tuple[int, int], minimum: int = 0) -> None:
+    def _clear_stray_ui(self, keep: int | None = None) -> str:
+        """ESC anything open that we did not ask for. Returns what it found.
+
+        The user's rule, from watching two runs lock themselves out
+        (2026-08-01): *check for unexpected dialogs/screens, close them
+        immediately if they are not the current expected target, move the
+        mouse pointer a little, and click elsewhere.*
+
+        Deliberately wider than `close_panels`, which walks the known
+        BLOCKING list. Two reasons. A dialog box is smaller than a panel
+        and need not be in that list at all — Warriv's travel prompt is
+        the one that cost a run — and `blocks_input` is a claim about
+        clicks landing on the panel, which is not the same question as
+        "is something in the way of what I meant to do". Anything open
+        that is not our target is in the way by definition.
+
+        Best effort on purpose: it reports rather than raises, because it
+        runs on the recovery path and a recovery that can fail loudly is
+        just a second way to lose the run.
+        """
+        found: list[str] = []
+        for _ in range(1 + self.config.panel_click_retries):
+            state = uistate.read_ui_state(self.session, self.panel._ui_array)
+            stray = {
+                panel
+                for panel in state.open_panels
+                # The automap is open scenery, not an obstacle: it takes no
+                # clicks and the human may well have left it on. Closing
+                # everything that is merely OPEN would fight them for it
+                # every retry.
+                if panel != keep and panel != offsets.UI_AUTOMAP
+            }
+            if not stray:
+                break
+            found.append(
+                ", ".join(
+                    sorted(
+                        offsets.UI_NAMES.get(panel, f"ui_{panel:#x}")
+                        for panel in stray
+                    )
+                )
+            )
+            try:
+                self.menu.press_escape()
+            except Exception:  # noqa: BLE001 - recovery must not raise
+                break
+            self._sleep(self.config.panel_settle_s)
+        return "; ".join(found)
+
+    def _walk_near(
+        self, target: tuple[int, int], minimum: int = 0, turn: int = 0
+    ) -> None:
         """Get within clicking distance of `target` WITHOUT walking onto it.
 
         A travel click that lands on an NPC opens their dialog instead of
@@ -597,22 +667,44 @@ class TownLayer:
         character WALK ONTO it, and every retry then found itself
         already 'close enough' and re-clicked from the same hopeless
         spot. A one-sided range cannot express 'step back'.
+
+        **The walk is a request; the position is the proof.** This used to
+        ask for a step-back and assume it happened, and assuming is what
+        cost the run on 2026-08-01: the deliberate click that follows lands
+        on a DISTANT object, which makes the character walk onto it, so
+        every retry begins standing on the thing it means to click. The
+        step-back was being issued and then quietly undone, three times,
+        from a position `minimum` was written to prevent. So each attempt
+        is verified, and a walk that did not achieve the standoff is tried
+        again from wherever it actually ended up — the same trust-nothing
+        discipline as the skill switch and the deposit.
         """
-        player = self._read_player(self.session)
-        if player is None:
-            self._walk_guarded(target)
-            return
-        px, py = player.position
-        dx, dy = px - target[0], py - target[1]
-        distance = max(abs(dx), abs(dy))
-        if minimum <= distance <= self.config.interact_range:
-            return
-        if distance == 0:
-            dx, dy, distance = 1, 1, 1  # standing dead centre: any way out
-        scale = self.config.npc_standoff / distance
-        self._walk_guarded(
-            (round(target[0] + dx * scale), round(target[1] + dy * scale))
-        )
+        for _ in range(1 + self.config.interact_retries):
+            player = self._read_player(self.session)
+            if player is None:
+                self._walk_guarded(target)
+                return
+            px, py = player.position
+            dx, dy = px - target[0], py - target[1]
+            distance = max(abs(dx), abs(dy))
+            if turn == 0 and minimum <= distance <= self.config.interact_range:
+                return
+            if distance == 0:
+                dx, dy, distance = 1, 1, 1  # standing dead centre: any way out
+            scale = self.config.npc_standoff / distance
+            for _ in range(turn % 4):
+                # A quarter turn around the target. `turn` is for a retry
+                # that must not repeat itself: if the last click hit a
+                # BYSTANDER standing between us and the thing we meant to
+                # click, then re-approaching the same side puts them right
+                # back in the way. Changing where we stand changes what is
+                # in front of us, which is the only thing that can help.
+                dx, dy = -dy, dx
+            self._walk_guarded(
+                (round(target[0] + dx * scale), round(target[1] + dy * scale))
+            )
+            if turn or minimum <= 0:
+                return  # a deliberate reposition is one walk, by definition
 
     def _approach_ally(self, kind: int, name: str) -> tuple[int, int]:
         """Get within clicking range of an NPC, walking blind if we must.
@@ -643,7 +735,9 @@ class TownLayer:
         # are now, not where they were when we set off.
         return self._find_ally(kind) or position
 
-    def _approach_object(self, kind: int, name: str) -> tuple[int, int]:
+    def _approach_object(
+        self, kind: int, name: str, turn: int = 0
+    ) -> tuple[int, int]:
         """Same walk-then-look as NPCs, for scenery we must click.
 
         Objects do not pace, but they do vanish: the client only keeps
@@ -665,7 +759,9 @@ class TownLayer:
                     f"{name} still not visible after walking to {known} — the "
                     "configured position may be wrong for this map"
                 )
-        self._walk_near(position, minimum=self.config.min_interact_range)
+        self._walk_near(
+            position, minimum=self.config.min_interact_range, turn=turn
+        )
         return position
 
     def _find_object(self, kind: int) -> tuple[int, int] | None:
@@ -966,27 +1062,73 @@ class TownLayer:
         this shape; the object path never did. Clear the way each attempt.
         """
         clicked = None
-        for _ in range(1 + self.config.interact_retries):
+        # Per-attempt trail, for the failure message. Two live runs on
+        # 2026-08-01 died here identically and the message could only say
+        # where the character finished — which fitted three different
+        # explanations, two of which were wrong before this was written.
+        # T49 then proved the same clicks work in isolation (approach from
+        # 24, standoff 11, panel open first try), so whatever this is only
+        # happens in context, and the context is what has to be recorded.
+        trail: list[str] = []
+        aims = self.config.object_aim_offsets or ((0, 0),)
+        for attempt in range(1 + self.config.interact_retries):
             self._check_stop()
             if self._panel_open(panel_id):
                 return clicked if clicked is not None else self._find_object(kind)
-            if self._any_panel_open():
-                self.close_panels()
-            clicked = self._approach_object(kind, name)
+            self._clear_stray_ui(keep=panel_id)
+            # `turn` rotates where we stand, `aim` moves where we point.
+            # Both are zero on the first attempt — the plain approach is
+            # right almost always — and both change on every retry after
+            # it, because the failure this exists for repeats forever
+            # otherwise (2026-08-01: the same pixel, three times).
+            clicked = self._approach_object(kind, name, turn=attempt)
             if self._any_panel_open():
                 # The approach itself opened something; a world click now
                 # would be refused rather than land.
                 self.close_panels()
-            self.gated.click_world(*clicked)
-            if self._await(
+            before = self._read_player(self.session)
+            distance = (
+                max(
+                    abs(before.position[0] - clicked[0]),
+                    abs(before.position[1] - clicked[1]),
+                )
+                if before is not None
+                else None
+            )
+            state = uistate.read_ui_state(self.session, self.panel._ui_array)
+            offset = aims[attempt % len(aims)]
+            aim = (clicked[0] + offset[0], clicked[1] + offset[1])
+            screen = self.gated.click_world(*aim)
+            landed = self._await(
                 lambda: self._panel_open(panel_id), self.config.npc_walk_timeout_s
-            ):
+            )
+            after = self._read_player(self.session)
+            # What did we open, if not what we asked for? A panel that is
+            # not our target means the click hit SOMETHING ELSE — a
+            # bystander's dialog, a waypoint menu — and the user's rule
+            # applies: close it immediately, move, and click elsewhere.
+            # Naming it here is what turns "no panel" into a diagnosis.
+            stray = ""
+            if not landed:
+                intruder = self._clear_stray_ui(keep=panel_id)
+                if intruder:
+                    stray = f", MISCLICK opened {intruder} (closed)"
+            trail.append(
+                f"#{attempt + 1} from "
+                f"{before.position if before else '?'} d={distance} "
+                f"(want {self.config.min_interact_range}-"
+                f"{self.config.interact_range}), "
+                f"panels {', '.join(state.names) or 'none'}, "
+                f"turn {attempt} aim {offset} -> clicked {aim}->{screen}, "
+                f"{'OPENED' if landed else 'no panel'}{stray}, "
+                f"ended {after.position if after else '?'}"
+            )
+            if landed:
                 return clicked
-        player = self._read_player(self.session)
         raise TownError(
             f"{name} never opened its panel after "
-            f"{1 + self.config.interact_retries} attempts — last click at "
-            f"{clicked}, player at {player.position if player else 'unreadable'}"
+            f"{1 + self.config.interact_retries} attempts — "
+            + " | ".join(trail)
         )
 
     def open_npc_dialog(self, kind: int, name: str) -> tuple[int, int]:

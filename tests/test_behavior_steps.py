@@ -10,6 +10,7 @@ from pd2bot.behavior.necro import CombatConfig, NecroCombat
 from pd2bot.behavior.run import build_states, load_run
 from pd2bot.behavior.steps import RunServices, _chebyshev, build_registry
 from pd2bot.items import CarriedItems
+from pd2bot.navigate import NavigationError
 from pd2bot.pickit import Pickit, Rule
 from pd2bot.player import Player
 from pd2bot.snapshot import GameSnapshot
@@ -136,8 +137,18 @@ def context(executor=None):
 
 
 def make_step(name, svc, params=None):
+    """Build a step the way `build_states` does — defaults included.
+
+    The factory's contract is that it receives VALIDATED parameters, so
+    a helper that hands it a bare dict is testing a path production
+    never takes. It also breaks the moment a step gains an optional
+    parameter, which is how this was found.
+    """
     registry = build_registry(svc)
-    return registry.spec(name).factory(params or {})
+    spec = registry.spec(name)
+    merged = {p.name: p.default for p in spec.params if not p.required}
+    merged.update(params or {})
+    return spec.factory(merged)
 
 
 # -- clear_radius ---------------------------------------------------------------
@@ -212,6 +223,202 @@ def test_clearance_uses_the_player_position_when_there_is_no_arrival_note():
     step = make_step("clear_radius", services(clock), {"radius": 150, "center": "arrival"})
     ctx = context()  # no note at all
     assert not step.step(snap(monsters=[monster(1, (1002, 1000))]), ctx).done
+
+
+# -- the patrol ------------------------------------------------------------------
+
+
+def patrolling(clock, radius=96, **kw):
+    """A patrolling clearance plus an executor that actually moves.
+
+    The patrol only means anything if walking changes where the character
+    is, so the executor reacts the way the game would.
+    """
+    svc = services(clock, **kw)
+    step = make_step(
+        "clear_radius", svc, {"radius": radius, "center": "arrival", "patrol": True}
+    )
+    here = {"pos": HOME}
+
+    def react(action):
+        if isinstance(action, MoveTo):
+            here["pos"] = action.target
+
+    executor = RecordingExecutor(clock=clock, on_execute=react)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    return step, svc, here, executor, ctx
+
+
+def drive(step, here, ctx, clock, ticks=400, monsters=()):
+    for _ in range(ticks):
+        outcome = step.step(snap(pos=here["pos"], monsters=monsters), ctx)
+        clock.advance(0.5)
+        if outcome.done:
+            return outcome
+    return None
+
+
+def test_the_patrol_visits_every_sample_point():
+    """The circle has to be walked before it can be believed.
+
+    Perception is 80 subtiles (`units.PERCEPTION_RADIUS`) and `scan_units`
+    drops everything past it, so a standstill clearance of radius 96 is a
+    claim about ground it never looked at.
+    """
+    clock = Clock()
+    step, svc, here, _, ctx = patrolling(clock)
+    assert drive(step, here, ctx, clock) is not None, "the patrol never finished"
+    assert len(step._visited) == svc.patrol_points
+    for point in step.patrol_points(HOME):
+        assert _chebyshev(point, HOME) <= 96
+
+
+def test_the_clearance_does_not_finish_while_circle_remains():
+    # The bug in one assertion: the radius reads clear from tick one, and
+    # that is not the same as the radius BEING clear.
+    clock = Clock()
+    step, _, here, _, ctx = patrolling(clock)
+    first = step.step(snap(pos=here["pos"]), ctx)
+    assert not first.done
+    clock.advance(60.0)  # far past clear_settle_s
+    assert not step.step(snap(pos=here["pos"]), ctx).done
+
+
+def test_a_point_on_unread_ground_is_skipped_not_fatal():
+    """Unknown ground is impassable by design (navigate.py), and a ring
+    several screens out will often name ground nobody has read. Uncaught,
+    `NavigationError` fails the whole cycle."""
+    clock = Clock()
+    svc = services(clock)
+    step = make_step(
+        "clear_radius", svc, {"radius": 96, "center": "arrival", "patrol": True}
+    )
+
+    def refuse(action):
+        raise NavigationError("that ground has never been seen")
+
+    executor = RecordingExecutor(clock=clock, on_execute=refuse)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    here = {"pos": HOME}
+    assert drive(step, here, ctx, clock) is not None, "a skip became fatal"
+    assert len(step._visited) == svc.patrol_points
+
+
+def test_an_unwalkable_fight_target_costs_the_target_not_the_game():
+    """2026-08-01, the first run that fought since the review fixes.
+
+    Four kills, a full revive wall, the circle walked — and it ended on
+    `NavigationError: gave up after 5 plan cycles without progress; last
+    position (5226, 5658), target (5219, 5658)`. Seven subtiles. The
+    patrol already gives up on a point it cannot reach and takes the
+    next one; the fight had no equivalent, so one unreachable monster
+    ended the game.
+    """
+    clock = Clock()
+    combat = StubCombat([MoveTo((1200, 1200))])
+    step = make_step("clear_radius", services(clock, combat=combat),
+                     {"radius": 150, "center": "arrival"})
+
+    def refuse(action):
+        raise NavigationError("gave up after 5 plan cycles without progress")
+
+    executor = RecordingExecutor(clock=clock, on_execute=refuse)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    outcome = step.step(snap(monsters=[monster(1, (1002, 1000))]), ctx)
+    assert not outcome.done  # survived; the engine gets another tick
+
+
+def test_an_unreachable_item_is_written_off_not_retried_forever():
+    clock = Clock()
+    svc = services(clock)
+    step = make_step("pickup", svc)
+
+    def refuse(action):
+        raise NavigationError("that ground has never been seen")
+
+    executor = RecordingExecutor(clock=clock, on_execute=refuse)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    potion = GroundItem(unit_id=50, kind=HEAL, position=(1100, 1000), quality=2)
+    step.step(snap(items=[potion]), ctx)
+    assert 50 in svc.stuck, "an unwalkable item must not be attempted forever"
+
+
+def test_a_point_that_cannot_be_reached_is_abandoned():
+    # Walkable in principle, unreachable in practice: the walk "succeeds"
+    # and the character never arrives. One awkward corner must not hold
+    # the whole clearance open.
+    clock = Clock()
+    svc = services(clock)
+    step = make_step(
+        "clear_radius", svc, {"radius": 96, "center": "arrival", "patrol": True}
+    )
+    executor = RecordingExecutor(clock=clock)  # nothing moves
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    here = {"pos": HOME}
+    assert drive(step, here, ctx, clock) is not None
+    legs = [a for a in executor.actions if isinstance(a, MoveTo)]
+    assert len(legs) == svc.patrol_points * svc.patrol_attempts
+
+
+def test_a_fight_does_not_count_against_the_patrol_point():
+    """Live, 2026-08-01: 5 of 8 points reached, and the misses were wrong.
+
+    Two were abandoned from 20 subtiles — walking distance, not a wall.
+    During a fight the character moves toward the monster, which is away
+    from wherever the patrol was heading, so every leg after the fight
+    measured worse than a `_closest` recorded before it and three ticks
+    threw the point away. The budget is for one attempt; an interruption
+    ends the attempt rather than counting against it.
+    """
+    clock = Clock()
+    step, svc, here, _, ctx = patrolling(clock)
+    step.step(snap(pos=here["pos"]), ctx)  # a leg, recording _closest
+    step._attempts = svc.patrol_attempts - 1  # one tick from giving up
+    step.step(snap(pos=here["pos"], monsters=[monster(1, (1002, 1000))]), ctx)
+    assert step._attempts == 0 and step._closest is None
+
+
+def test_patrol_legs_are_capped_so_the_ladder_keeps_its_look():
+    # `walk_to` blocks until arrival, so a leg is time the reflex ladder
+    # is not consulted — the same reason a combat dash is capped.
+    clock = Clock()
+    step, svc, here, executor, ctx = patrolling(clock)
+    drive(step, here, ctx, clock)
+    previous = HOME
+    for action in executor.actions:
+        if isinstance(action, MoveTo):
+            assert _chebyshev(action.target, previous) <= svc.patrol_step
+            previous = action.target
+
+
+def test_without_patrol_the_clearance_stands_exactly_as_before():
+    clock = Clock()
+    svc = services(clock)
+    step = make_step("clear_radius", svc, {"radius": 96, "center": "arrival"})
+    executor = RecordingExecutor(clock=clock)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    assert not step.step(snap(), ctx).done
+    clock.advance(6.0)
+    assert step.step(snap(), ctx).done
+    assert executor.actions == [], "a non-patrolling clearance must not walk"
+
+
+def test_fighting_suspends_the_patrol():
+    # Clearing is the job; walking is only what happens when there is
+    # nothing to clear.
+    clock = Clock()
+    combat = StubCombat([AttackUnit(1, (1002, 1000))])
+    step, _, here, executor, ctx = patrolling(clock, combat=combat)
+    outcome = step.step(snap(pos=here["pos"], monsters=[monster(1, (1002, 1000))]), ctx)
+    assert outcome.acted and not outcome.done
+    assert executor.actions == [AttackUnit(1, (1002, 1000))]
+    assert not step._visited, "it walked while something was alive in the radius"
 
 
 # -- the waypoint lock-out (stage B attempt 10) ---------------------------------

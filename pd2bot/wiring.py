@@ -41,9 +41,10 @@ from pd2bot.behavior.engine import BehaviorEngine, EngineConfig
 from pd2bot.behavior.execute import GameActionExecutor
 from pd2bot.behavior.necro import NecroCombat
 from pd2bot.behavior.reflex import ReflexLadder, read_armor_ratio
-from pd2bot.behavior.run import build_states, load_run
+from pd2bot.behavior.run import build_states, default_registry, load_run
 from pd2bot.behavior.runner import BehaviorRunner
 from pd2bot.behavior.steps import RunServices, build_registry
+from pd2bot.chat import Chat
 from pd2bot.cycle import GameCycle
 from pd2bot.input import GatedInput
 from pd2bot.items import read_carried_items
@@ -218,6 +219,9 @@ class LiveBot:
     engine_config: EngineConfig = field(default_factory=EngineConfig)
     clock: Callable[[], float] = time.monotonic
     should_stop: Callable[[], bool] | None = None
+    # `--radius`, applied to every clear_radius step at engine-build time.
+    # None means "whatever the run file says".
+    radius_override: int | None = None
     _engines: list[BehaviorEngine] = field(default_factory=list)
 
     @property
@@ -277,6 +281,8 @@ class LiveBot:
         )
         registry = build_registry(services)
         run = load_run(self.paths.run, registry)
+        if self.radius_override is not None:
+            run = run.with_radius(self.radius_override)
         return BehaviorEngine(
             snapshot=self.perception.snapshot,
             monitor=self.monitor,  # SESSION-scoped: the death latch is in it
@@ -305,7 +311,11 @@ class LiveBot:
             self._engines.append(engine)
             return engine
 
-        return BehaviorRunner(factory)
+        # The operator watches the GAME, not the console (R164). A run that
+        # simply stops leaves them guessing whether it is thinking, stuck,
+        # or done — the same reason drills have announced themselves in
+        # chat since R95.
+        return BehaviorRunner(factory, announce=Chat(self.session).say)
 
     def cycle(self) -> GameCycle:
         return GameCycle(self.session, MenuInput(self.session))
@@ -320,6 +330,7 @@ def build_bot(
     town_config: TownConfig | None = None,
     chicken_life_pct: float | None = None,
     should_stop: Callable[[], bool] | None = None,
+    radius_override: int | None = None,
 ) -> LiveBot:
     """Assemble the real bot against a live client.
 
@@ -392,6 +403,7 @@ def build_bot(
         paths=paths,
         engine_config=engine_config if engine_config is not None else EngineConfig(),
         should_stop=should_stop,
+        radius_override=radius_override,
     )
 
 
@@ -412,9 +424,22 @@ def describe(bot: LiveBot) -> list[str]:
     # out, the first thing to discover a missing step factory would be a
     # created Hell game, and by then the character is standing in it.
     steps = ", ".join(bot.engine_factory(bot.session).step_names)
+    # The EFFECTIVE radius, read back after any --radius override rather
+    # than echoed from the flag: the number printed here is the number the
+    # run will use, which is the only version worth checking pre-flight.
+    # `default_registry` carries the same parameter schemas as the wired
+    # one and needs no collaborators, which is the whole reason it exists.
+    run = load_run(bot.paths.run, default_registry())
+    if bot.radius_override is not None:
+        run = run.with_radius(bot.radius_override)
+    radius = run.radius
     return [
         f"class      {bot.class_config.name} ({bot.paths.class_config.name})",
         f"run        {bot.paths.run.name}: {steps}",
+        f"clearance  radius {radius}"
+        + (" (--radius override)" if bot.radius_override is not None else "")
+        if radius is not None
+        else "clearance  no clear_radius step in this run",
         f"pickit     {len(bot.pickit.rules)} rules, "
         f"{len(bot.pickit.pending_names)} pending name(s)",
         f"cleanse    {'ENABLED' if bot.cleanse_enabled else 'disabled (pending names)'}",
@@ -432,6 +457,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
     import argparse
     import sys
 
+    from pd2bot.behavior.run import RunError
     from pd2bot.memory import GameNotRunning, NeedsAdministrator
     from pd2bot.window import WindowNotFound
 
@@ -447,6 +473,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
         "--run", type=Path, default=None, help="run file (default: cold-plains)"
     )
     parser.add_argument(
+        "--radius", type=int, default=None,
+        help="override the run's clear_radius radius (P6 staged acceptance)",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="assemble and print the wiring, then exit without sending anything",
     )
@@ -454,12 +484,25 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
 
     try:
         paths = BotPaths() if args.run is None else replace(BotPaths(), run=args.run)
-        bot = build_bot(paths=paths, chicken_life_pct=args.chicken)
+        bot = build_bot(
+            paths=paths,
+            chicken_life_pct=args.chicken,
+            radius_override=args.radius,
+        )
     except (GameNotRunning, NeedsAdministrator, WindowNotFound) as exc:
         print(exc, file=sys.stderr)
         return 1
 
-    for line in describe(bot):
+    try:
+        lines = describe(bot)
+    except RunError as exc:
+        # Most likely `--radius` against a run with nothing to apply it
+        # to. Refusing beats running the unmodified file: a flag that
+        # appears to work and silently does not is the class of failure
+        # this project keeps paying for.
+        print(exc, file=sys.stderr)
+        return 1
+    for line in lines:
         print(line)
     if args.dry_run:
         return 0
