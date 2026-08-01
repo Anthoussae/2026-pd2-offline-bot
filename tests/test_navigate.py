@@ -265,3 +265,120 @@ def test_crawling_character_replans_but_never_gives_up():
     assert result.replans >= 1  # the ladder fired...
     assert any("stuck" in line for line in result.log)  # ...was logged...
     # ...and the counter kept resetting instead of exhausting MAX_FAILURES.
+
+
+def test_a_cluster_of_hazards_still_yields_a_clear_click():
+    """Stage B run 3, as a test.
+
+    The old nudge applied every hazard in one pass without re-checking, so
+    each push could land the click inside the next hazard and the last one
+    won. Against a Cold Plains scenery cluster it walked the click in a
+    circle and back onto the character, who then never moved and failed the
+    walk as "stuck". Nudging must CONVERGE, not just happen.
+    """
+    from pd2bot.navigate import AVOID_RADIUS
+
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    # Five hazards packed around the route, the shape that broke it.
+    cluster = ((10, 0), (12, 2), (8, 3), (13, -2), (9, -3))
+    result = navigator(world, sim, fake, avoid=lambda: cluster).walk_to((20, 0))
+    assert abs(result.arrived_at[0] - 20) <= 3, "the walk must still finish"
+    for click in fake.clicks:
+        for hazard in cluster:
+            span = max(abs(click[0] - hazard[0]), abs(click[1] - hazard[1]))
+            assert span >= AVOID_RADIUS, f"click {click} landed on {hazard}"
+
+
+def test_being_boxed_in_still_produces_a_click():
+    """A ring with no clear point inside it must not stop the walk.
+
+    One click that might interact is recoverable — the loop re-plans and
+    panels get closed. A walk that refuses to click is not: that is the
+    failure that ended stage B's third attempt, and it is worse.
+    """
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    ring = tuple(
+        (10 + dx, dy) for dx in (-2, 0, 2) for dy in (-2, 0, 2)
+    )
+    result = navigator(world, sim, fake, avoid=lambda: ring).walk_to((20, 0))
+    assert fake.clicks, "boxed in is not a reason to send nothing"
+    assert abs(result.arrived_at[0] - 20) <= 3
+
+
+# -- which units count as hazards at all (stage B run 3) --------------------------
+
+
+def _hazards_for(monkeypatch, *, objects, allies, in_town):
+    """Run `live_navigator`'s hazard provider over a scripted snapshot."""
+    from types import SimpleNamespace
+
+    from pd2bot.navigate import live_navigator
+
+    snap = SimpleNamespace(objects=objects, allies=allies, in_town=in_town)
+    monkeypatch.setattr(
+        "pd2bot.snapshot.Perception",
+        lambda session: SimpleNamespace(snapshot=lambda: snap),
+    )
+    monkeypatch.setattr("pd2bot.navigate.GatedInput", lambda session: object())
+    navigator = live_navigator(object(), store=None, difficulty=2)
+    return set(navigator._avoid())
+
+
+def _obj(kind, position):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(kind=kind, position=position)
+
+
+def _ally(position):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(position=position, is_alive=True)
+
+
+def test_decorative_scenery_is_not_a_hazard(monkeypatch):
+    """The Cold Plains cluster: 15 objects of kinds 160/161/162 packed into
+    ~12 subtiles, none of them clickable, which between them made the area
+    unnavigable. Avoiding what cannot punish a click costs mobility for
+    nothing — the same reasoning that already excludes monsters."""
+    hazards = _hazards_for(
+        monkeypatch,
+        objects=[_obj(160, (10, 10)), _obj(161, (11, 11)), _obj(162, (12, 12))],
+        allies=[],
+        in_town=False,
+    )
+    assert hazards == set()
+
+
+def test_the_waypoint_is_still_a_hazard(monkeypatch):
+    from pd2bot.offsets import OBJ_WAYPOINT_A1
+
+    """The narrowing must not lose the case it was built for: the character
+    arrives standing ON the waypoint, and clicking it opens the menu."""
+    hazards = _hazards_for(
+        monkeypatch,
+        objects=[_obj(OBJ_WAYPOINT_A1, (10, 10)), _obj(160, (11, 11))],
+        allies=[],
+        in_town=False,
+    )
+    assert hazards == {(10, 10)}
+
+
+def test_allies_are_hazards_in_town_only(monkeypatch):
+    """In town an ally is an NPC whose dialog blocks all input (R66/R78 —
+    T12 opened Kashya's chat with travel clicks and looped). Outside town
+    every ally is the merc or a summon, clicking one opens nothing, and a
+    working necro is surrounded by seven of them exactly when movement
+    matters most."""
+    in_town = _hazards_for(
+        monkeypatch, objects=[], allies=[_ally((5, 5))], in_town=True
+    )
+    in_field = _hazards_for(
+        monkeypatch, objects=[], allies=[_ally((5, 5))], in_town=False
+    )
+    assert in_town == {(5, 5)}
+    assert in_field == set()

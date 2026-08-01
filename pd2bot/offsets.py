@@ -609,6 +609,25 @@ NPC_KINDS = {
 # positioned correctly in the first town dump.
 OBJ_WAYPOINT_A1 = 119
 OBJ_STASH = 267
+
+# Objects a travel click must not land on, because clicking them INTERACTS
+# (a panel opens and blocks all further input — R68/R111).
+#
+# An allowlist, not a denylist, and that direction was chosen the hard way.
+# The navigator used to avoid EVERY object, which sounds safer and is not:
+# most objects are decorative scenery that cannot be clicked at all, and in
+# Cold Plains a cluster of 15 of them (kinds 160/161/162, packed into ~12
+# subtiles) made the area unnavigable — every nudge off one landed the click
+# on another until it came back to where the character already stood. That
+# ended stage B's third attempt. Over-avoiding is not the safe direction; it
+# is just a different failure, and the one we actually hit.
+#
+# The residual risk is an interactive object nobody has added here yet: the
+# click activates it. In the field that is mostly harmless (a chest opens, a
+# shrine fires) and the walk loop re-plans freely. The case worth watching is
+# a town PORTAL, which would teleport the character — the bot does not make
+# portals yet, and this list gets one before it does.
+INTERACTIVE_OBJECT_KINDS = frozenset({OBJ_WAYPOINT_A1, OBJ_STASH})
 OBJECT_KINDS = {
     OBJ_WAYPOINT_A1: "waypoint",
     OBJ_STASH: "stash",

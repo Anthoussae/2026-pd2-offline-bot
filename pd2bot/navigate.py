@@ -51,6 +51,10 @@ WAYPOINT_TIMEOUT = 20.0  # hard per-waypoint cap, whatever else happens
 # subtiles of a known interactive thing are nudged away before being sent.
 AVOID_RADIUS = 4
 AVOID_MARGIN = 2  # how far beyond the radius the nudged click lands
+# How many times a click may be pushed before we settle for the roomiest
+# spot found. Bounded because a ring of hazards has no clear point at
+# all, and an unbounded search there would spin instead of walking.
+MAX_NUDGES = 8
 MAX_FAILURES = 5  # consecutive no-progress plan cycles before giving up
 PROGRESS_RESET = 3.0  # subtiles closer to the goal that make a cycle "progress"
 
@@ -149,22 +153,55 @@ class Navigator:
         """
         if self._avoid is None:
             return waypoint
-        wx, wy = waypoint
-        for ax, ay in self._avoid():
-            dx, dy = wx - ax, wy - ay
+        hazards = self._avoid()
+        if not hazards:
+            return waypoint
+
+        def clearance(point: Point) -> int:
+            """Distance to the nearest hazard; bigger is safer."""
+            return min(
+                (max(abs(point[0] - ax), abs(point[1] - ay)) for ax, ay in hazards),
+                default=AVOID_RADIUS,
+            )
+
+        # Nudge, then LOOK AGAIN. The old version applied every hazard in one
+        # pass and never re-checked, so each push could land the click inside
+        # the next hazard and the last one silently won. In Cold Plains that
+        # walked the click in a circle — (5218,5664) -> (5217,5667) ->
+        # (5220,5670) -> (5216,5674) — and back onto the character, who then
+        # never moved and failed the walk as "stuck".
+        best = waypoint
+        current = waypoint
+        for _ in range(MAX_NUDGES):
+            offender = next(
+                (
+                    (ax, ay)
+                    for ax, ay in hazards
+                    if max(abs(current[0] - ax), abs(current[1] - ay)) < AVOID_RADIUS
+                ),
+                None,
+            )
+            if offender is None:
+                return current  # clear of everything
+            if clearance(current) > clearance(best):
+                best = current
+            ax, ay = offender
+            dx, dy = current[0] - ax, current[1] - ay
             span = max(abs(dx), abs(dy))
-            if span >= AVOID_RADIUS:
-                continue
             if span == 0:
                 dx, dy, span = 1, 1, 1  # dead centre: any direction will do
             push = AVOID_RADIUS + AVOID_MARGIN
-            wx = round(ax + dx / span * push)
-            wy = round(ay + dy / span * push)
+            current = (round(ax + dx / span * push), round(ay + dy / span * push))
             result.log.append(
                 f"click nudged off interactive unit at ({ax}, {ay}): "
-                f"{waypoint} -> ({wx}, {wy})"
+                f"{waypoint} -> {current}"
             )
-        return (wx, wy)
+        # Boxed in. Send the roomiest candidate rather than giving up: one
+        # click that might interact is recoverable (the loop re-plans, panels
+        # get closed), whereas refusing to click is a walk that cannot finish.
+        best = max((best, current), key=clearance)
+        result.log.append(f"no clear click near {waypoint}; using {best}")
+        return best
 
     def _walk_one_waypoint(self, waypoint: Point, result: WalkResult) -> bool:
         """Walk until inside the arrival radius. True on arrival, False when
@@ -350,12 +387,27 @@ def live_navigator(session, store, difficulty: int = 2) -> Navigator:
     def clickable_hazards() -> tuple[Point, ...]:
         """Everything a travel click must not land on, where it is NOW.
 
-        NPCs and world objects both interact on click (R68/R111): a dialog
-        or menu opens and blocks all further input, killing the walk. Read
-        fresh per click because NPCs pace. Corpses are excluded — nothing
-        opens — and monsters are deliberately NOT avoided: outside town a
-        click near a monster is at worst an attack, and dodging every
+        Read fresh per click because NPCs pace. Corpses are excluded —
+        nothing opens — and monsters are deliberately NOT avoided: outside
+        town a click near a monster is at worst an attack, and dodging every
         hostile would make Cold Plains unwalkable.
+
+        Two narrowings, both paid for live in stage B's third attempt:
+
+        **Objects** are filtered to `INTERACTIVE_OBJECT_KINDS`. Avoiding all
+        of them treated 15 pieces of decorative Cold Plains scenery as
+        hazards and made the area unwalkable. The same reasoning that
+        excludes monsters excludes scenery: avoiding what cannot punish a
+        click costs mobility for nothing.
+
+        **Allies are avoided in town only.** The hazard this rule was
+        written for is a town NPC's dialog (R66/R78 — T12 opened Kashya's
+        chat with its travel clicks and looped). Outside town every ally is
+        the merc or a summon, and clicking one opens nothing at all — while
+        a necro at work is permanently surrounded by seven of them, exactly
+        when movement matters most. (An ally NPC standing in the field would
+        need this revisited; none exists on the Cold Plains route. Worth a
+        look when M6 adds areas.)
         """
         from pd2bot.snapshot import Perception
 
@@ -363,8 +415,13 @@ def live_navigator(session, store, difficulty: int = 2) -> Navigator:
             snap = Perception(session).snapshot()
         except Exception:
             return ()  # unreadable mid-load: no avoidance beats no walk
-        points = [o.position for o in snap.objects]
-        points += [a.position for a in snap.allies if a.is_alive]
+        points = [
+            o.position
+            for o in snap.objects
+            if o.kind in offsets.INTERACTIVE_OBJECT_KINDS
+        ]
+        if snap.in_town:
+            points += [a.position for a in snap.allies if a.is_alive]
         return tuple(points)
 
     return Navigator(
