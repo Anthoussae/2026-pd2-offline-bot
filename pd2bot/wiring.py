@@ -462,6 +462,20 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
         print(f"\n--- game {index}: {engine.report.summary()} ---")
         for line in engine.report.log:
             print(f"  {line}")
+        # The engine's log records reflex fires and step completions; what
+        # it CANNOT show is whether the bot ever swung. Run 8 finished the
+        # whole Cold Plains pipeline and left no evidence either way, which
+        # is the one question stage B exists to answer.
+        trace = getattr(engine._executor, "trace", None)
+        if trace:
+            counts: dict[str, int] = {}
+            for entry in trace:
+                counts[type(entry.action).__name__] = (
+                    counts.get(type(entry.action).__name__, 0) + 1
+                )
+            print(f"  actions sent: {counts}")
+            for entry in trace:
+                print(f"    {type(entry.action).__name__}: {entry.detail}")
     return 0
 
 
