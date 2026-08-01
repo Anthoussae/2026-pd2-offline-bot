@@ -128,29 +128,91 @@ def _as_ids(value, where: str) -> tuple[int, ...]:
     return tuple(out)
 
 
+def load_item_codes(path: str | Path) -> dict[str, tuple[int, ...]]:
+    """code -> the kind id(s) carrying it, from the T42-generated table.
+
+    A code maps to a TUPLE for the same reason a name does: PD2 carries
+    parallel records for some items (R126's `r15`/`r15s`), and both must
+    bind or the one that actually drops is missed.
+    """
+    with open(Path(path), "rb") as fh:
+        data = tomllib.load(fh)
+    by_code: dict[str, list[int]] = {}
+    for kind, code in (data.get("codes") or {}).items():
+        by_code.setdefault(code, []).append(int(kind))
+    return {code: tuple(sorted(kinds)) for code, kinds in by_code.items()}
+
+
 def load_item_table(path: str | Path) -> ItemTable:
-    """Load the vocabulary, merging drill-learned ids over the pending list.
+    """Load the vocabulary, merging drill-learned entries over the pending list.
 
     The hand-written file (`item_ids.toml`) keeps its comments and its
     pending list; the T39 drill appends discoveries to a sidecar
-    (`item_ids.learned.toml`), and the merge happens here — a learned id
+    (`item_ids.learned.toml`), and the merge happens here — a learned entry
     moves its name from pending to verified. A learned name that is
     neither pending nor identically verified is a loud error: it means
     the two files disagree about reality, and one of them is wrong.
+
+    **Names are anchored to D2 ITEM CODES, not to numeric kinds** (R144).
+    A `[codes]` entry says `wire_fleece = "utu"` and the id is resolved
+    through `item_codes.toml`, which the T42 drill generates from the live
+    game. Numeric `[verified]` entries still load, for anything the code
+    table cannot name.
+
+    The reason is a defect this cost us. Kinds are renumbered every season
+    and nobody can check one without the game, so R128's review of 53
+    proposed ids — an eyeball pass over numbers — approved SIX wrong elite
+    armours. The bot then picked up a Wire Fleece believing it was a Kraken
+    Shell (its id, 445, was bound to the wrong name) and could never pick up
+    an actual one. A code is checkable against any D2 reference in seconds,
+    which makes the review a question a human can actually answer.
     """
     path = Path(path)
     with open(path, "rb") as fh:
         data = tomllib.load(fh)
     where = path.name
 
-    unknown = sorted(set(data) - {"verified", "pending", "groups"})
+    unknown = sorted(set(data) - {"verified", "codes", "pending", "groups"})
     if unknown:
         raise PickitError(
             f"{where}: unknown top-level key(s) {', '.join(map(repr, unknown))}"
         )
+
+    codes_path = path.with_name("item_codes.toml")
+    by_code = load_item_codes(codes_path) if codes_path.exists() else {}
+
+    def resolve_codes(table: dict, source: str) -> dict[str, tuple[int, ...]]:
+        out: dict[str, tuple[int, ...]] = {}
+        for name, value in table.items():
+            wanted = value if isinstance(value, list) else [value]
+            kinds: list[int] = []
+            for code in wanted:
+                if not isinstance(code, str):
+                    raise PickitError(
+                        f"{source}.codes.{name}: expected an item code string "
+                        f"(or a list of them), got {code!r}"
+                    )
+                if code not in by_code:
+                    raise PickitError(
+                        f"{source}.codes.{name}: no item in the live game "
+                        f"carries code {code!r}. Either it is a typo, or PD2 "
+                        "changed and item_codes.toml needs a T42 re-run — "
+                        "guessing an id here is what R144 exists to stop"
+                    )
+                kinds.extend(by_code[code])
+            out[name] = tuple(sorted(set(kinds)))
+        return out
+
     ids: dict[str, tuple[int, ...]] = {}
     for name, value in (data.get("verified") or {}).items():
         ids[name] = _as_ids(value, f"{where}.verified.{name}")
+    for name, kinds in resolve_codes(data.get("codes") or {}, where).items():
+        if name in ids and ids[name] != kinds:
+            raise PickitError(
+                f"{where}: {name} is given both as ids {list(ids[name])} and "
+                f"as a code resolving to {list(kinds)} — they disagree"
+            )
+        ids[name] = kinds
     pending_raw = (data.get("pending") or {}).get("names", [])
     if not isinstance(pending_raw, list):
         raise PickitError(f"{where}.pending.names: expected a list of names")
@@ -170,8 +232,14 @@ def load_item_table(path: str | Path) -> ItemTable:
     if learned_path.exists():
         with open(learned_path, "rb") as fh:
             learned_data = tomllib.load(fh)
-        for name, raw_value in (learned_data.get("verified") or {}).items():
-            value = _as_ids(raw_value, f"{learned_path.name}.verified.{name}")
+        learned_entries: dict[str, tuple[int, ...]] = {
+            name: _as_ids(raw, f"{learned_path.name}.verified.{name}")
+            for name, raw in (learned_data.get("verified") or {}).items()
+        }
+        learned_entries.update(
+            resolve_codes(learned_data.get("codes") or {}, learned_path.name)
+        )
+        for name, value in learned_entries.items():
             if name in ids:
                 if ids[name] != value:
                     raise PickitError(

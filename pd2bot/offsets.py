@@ -578,10 +578,12 @@ RIGHT_CLICK_HAZARD_KINDS = frozenset(POTION_KINDS) | {
     TOME_OF_IDENTIFY,
 }
 
-# Gold's kind: kolbot sdk/types/sdk.d.ts:3467 says 523, but after the potion
-# renumbering above no classic id is trusted untested. NOT yet verified live
-# — check against the first real gold drop (P5/P6 pickup drills).
-GOLD_KIND = 523
+# Gold's kind. kolbot's sdk said 523, and this carried that value with a
+# note that it was unverified. It was WRONG: the live code table (T42) says
+# kind 523 is `elx`, an elixir, and gold is 538 (`gld`). Settled from data
+# rather than by waiting for a gold drop to disagree with us — which is what
+# the P6 checklist had been waiting for (R144).
+GOLD_KIND = 538
 
 # The Horadric Cube. Right-clicking it OPENS it, so the shift+right-click
 # that transfers every other item does something else entirely here — T13

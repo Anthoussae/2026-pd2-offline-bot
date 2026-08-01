@@ -45,6 +45,10 @@ def _default_alert(reason: str) -> None:  # pragma: no cover - exercised live
     print(f"\n!!  {reason}\n", flush=True)
 
 
+def _default_log(line: str) -> None:  # pragma: no cover - exercised live
+    print(f"  {line}", flush=True)
+
+
 @dataclass
 class RunServices:
     """Everything the steps need, bound once when the registry is built."""
@@ -62,6 +66,9 @@ class RunServices:
     pickup_attempts: int = 3  # clicks per item before calling it stuck
     pickup_retry_s: float = 1.5  # between attempts on the same item
     alert: Callable[[str], None] = _default_alert
+    # Where per-decision detail goes. Separate from `alert`, which is for
+    # things a human must act on; this is the run's record.
+    log: Callable[[str], None] = _default_log
     # Pickup bookkeeping, shared by every step that collects loot.
     #
     # It lives HERE rather than on a step because it must outlast the step
@@ -245,6 +252,17 @@ class _PickupMixin:
             # up room (R117): ask for a cleanse at the next safe moment.
             self.services.cleanse_queued = True
             return False
+        if attempts == 0:
+            # Log the DECISION, not just the click (R144). "The bot picked up
+            # a wire fleece" took a lost item and an id audit to explain; the
+            # rule name plus what was actually read makes the next surprise
+            # answer itself, and means nothing has to be kept as evidence.
+            action, rule = self.services.pickit.decide(item, self.services.carried())
+            self.services.log(
+                f"pickup: kind {item.kind} quality {item.quality} "
+                f"sockets {item.sockets} at {item.position} -> {action} "
+                f"({rule})"
+            )
         self.services.attempts[item.unit_id] = attempts + 1
         self.services.last_try[item.unit_id] = now
         ctx.executor.execute(PickUpItem(item.unit_id, item.position))

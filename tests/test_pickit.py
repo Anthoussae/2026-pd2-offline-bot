@@ -499,3 +499,77 @@ def test_an_empty_id_list_is_refused(tmp_path):
     path.write_text('[verified]\nghost = []\n', encoding="utf-8")
     with pytest.raises(PickitError, match="matches nothing"):
         load_item_table(path)
+
+
+# -- the vocabulary is anchored to item CODES (R144) -----------------------------
+
+
+def test_names_resolve_through_item_codes(tmp_path):
+    """A name says the D2 code; the id comes from the live-generated table.
+
+    This is the whole redesign. Kinds are renumbered every PD2 season and
+    nobody can check one without the game, which is how R128's eyeball pass
+    over 53 proposed ids approved SIX wrong elite armours.
+    """
+    (tmp_path / "item_codes.toml").write_text(
+        '[codes]\n442 = "uui"\n445 = "utu"\n452 = "uld"\n', encoding="utf-8"
+    )
+    (tmp_path / "item_ids.toml").write_text(
+        '[codes]\nwire_fleece = "utu"\nkraken_shell = "uld"\n', encoding="utf-8"
+    )
+    table = load_item_table(tmp_path / "item_ids.toml")
+    assert table.ids["wire_fleece"] == (445,)
+    assert table.ids["kraken_shell"] == (452,)
+
+
+def test_a_code_the_game_does_not_have_is_a_loud_error(tmp_path):
+    """The failure mode that matters. A typo'd or season-changed code must
+    stop the load — silently binding nothing, or guessing, is exactly what
+    let a Wire Fleece be picked up as a Kraken Shell."""
+    (tmp_path / "item_codes.toml").write_text(
+        '[codes]\n442 = "uui"\n', encoding="utf-8"
+    )
+    (tmp_path / "item_ids.toml").write_text(
+        '[codes]\nmystery = "zzz"\n', encoding="utf-8"
+    )
+    with pytest.raises(PickitError, match="no item in the live game"):
+        load_item_table(tmp_path / "item_ids.toml")
+
+
+def test_a_code_may_bind_several_records(tmp_path):
+    """PD2 carries parallel records for some items (R126's r15/r15s), and
+    both must bind or the one that actually drops is missed."""
+    (tmp_path / "item_codes.toml").write_text(
+        '[codes]\n639 = "r15"\n713 = "r15s"\n', encoding="utf-8"
+    )
+    (tmp_path / "item_ids.toml").write_text(
+        '[codes]\nhel_rune = ["r15", "r15s"]\n', encoding="utf-8"
+    )
+    assert load_item_table(tmp_path / "item_ids.toml").ids["hel_rune"] == (639, 713)
+
+
+def test_the_shipped_elite_armours_are_the_right_items():
+    """The seven R128 got wrong, pinned against the live code table.
+
+    442-456 is a contiguous run of D2's 15 elite body armours in armor.txt
+    order, which is what makes these checkable at all.
+    """
+    from pd2bot.pickit import load_item_codes
+
+    table = load_item_table(SHIPPED_TABLE)
+    codes = load_item_codes(SHIPPED_TABLE.with_name("item_codes.toml"))
+    for name, code in (
+        ("dusk_shroud", "uui"), ("wire_fleece", "utu"), ("balrog_skin", "upl"),
+        ("kraken_shell", "uld"), ("shadow_plate", "uul"),
+        ("sacred_armor", "uar"), ("archon_plate", "utp"),
+    ):
+        assert table.ids[name] == codes[code], f"{name} is not {code}"
+
+
+def test_gold_is_538_not_the_inherited_523():
+    """523 is `elx`, an elixir. kolbot's inherited 523 was carried here with
+    an "unverified" note for a whole milestone; the code table settled it."""
+    from pd2bot.pickit import load_item_codes
+
+    codes = load_item_codes(SHIPPED_TABLE.with_name("item_codes.toml"))
+    assert offsets.GOLD_KIND in codes["gld"]
