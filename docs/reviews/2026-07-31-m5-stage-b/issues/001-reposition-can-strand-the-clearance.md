@@ -1,6 +1,6 @@
 # 001 — Repositioning can drift out of engagement and stall the run forever
 
-Severity: **P1**
+Severity: **P1** — **FIXED** 2026-08-01 (not yet run live)
 
 `pd2bot/behavior/necro.py` (`_reposition`, `_hostiles`),
 `pd2bot/behavior/steps.py` (`ClearRadiusStep.step`).
@@ -79,3 +79,46 @@ clearance radius and just outside `engage_radius`, and asserts the step
 either makes progress or eventually raises — not that it returns
 `waiting=True` indefinitely. Today that test would hang, which is the
 finding.
+
+## Resolution (2026-08-01)
+
+All three parts, and the finding's own validation test exists and
+discriminates: with `approach` stubbed back out to None it fails with
+`never reached the hostile: []` — twelve ticks, nothing sent at all.
+
+**The drift is bounded by the fight** (`necro._reposition`). A step that
+would leave every hostile outside `engage_radius` is not taken; the
+character stands for the last few subtiles instead. No new number to
+tune — the engagement was already the thing being drifted inside of, it
+just was not being checked. Worth noting which drift path actually
+dominates: not the restrike cooldown the finding names, but the
+revive-wall gate, which holds offense back for as long as `upkeep` is
+still building and repositions every one of those ticks.
+
+**The radii no longer have to agree** (`CombatModule.approach`, called by
+`ClearRadiusStep`). Rather than deriving one radius from the other, the
+clearance now asks the module to close on the nearest monster it wants
+dead, and the module refuses whenever a fight is genuinely in progress —
+so a restrike cooldown stays a pause and does not become a charge. The
+hop is capped at `dash_step` like every other approach here.
+
+**The wait is bounded** (`EngineConfig.wait_bail_s`, 30 s). The durable
+one, and the ADR is written:
+`docs/adr/2026-08-01-bounded-declared-waits.md`. An unbroken run of
+declared waits longer than every timer in the bot raises `IdleBail`
+naming the step; progress (a send that landed, a step that acted or
+finished) restarts it, movement deliberately does not.
+
+Tests: 11 new (677 total, ruff clean) — the validation scenario against
+the real `NecroCombat`, the drift bound in both directions, `approach`'s
+three refusals, the wiring through the step, and the engine's deadline
+plus its restart-on-progress.
+
+**Correcting the circumstantial evidence.** The finding cites
+`test_behavior_sim` going from negligible to ~4.4 s as consistent with
+drifting away and walking back. It is not: the scenario makes 11 casts
+and `SimExecutor` inherits the real `time.sleep`, so the runtime is
+11 x `cast_settle_s` (0.4) = 4.4 s, and every one of the 22 scenarios
+times within 0.01 s of that. Tick count is unchanged at 65 before and
+after this fix. The slowdown belongs to finding 002, and fixing it takes
+~90 s off the suite.

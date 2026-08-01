@@ -1,14 +1,55 @@
-# Resume point — M5, P6 stage B: two full runs, review findings open
+# Resume point — M5, P6 stage B: review findings closed, combat still untested
 
-Written 2026-07-31 after a long live session. Read this, then
+Updated 2026-08-01. Read this, then
 [the review](../../reviews/2026-07-31-m5-stage-b/summary.md), then
 [notes.md](notes.md). The architecture is in
-`docs/adr/2026-07-29-behavior-architecture.md`; the phase file is
-[06-staged-acceptance-closeout.md](06-staged-acceptance-closeout.md).
+`docs/adr/2026-07-29-behavior-architecture.md`; the wait policy added
+today is in `docs/adr/2026-08-01-bounded-declared-waits.md`; the phase
+file is [06-staged-acceptance-closeout.md](06-staged-acceptance-closeout.md).
 
-Everything is committed and pushed on `m5-trial-run` (`0eb4034`).
-**666 tests, ruff clean.** R115 is the only unanswered request; the
-instruction log continues from R149.
+**696 tests, ruff clean.** R115 is still the only unanswered request; the
+instruction log continues from R155.
+
+## What 2026-08-01 changed
+
+All three open P1/P2 findings are fixed, and **the eleventh stage-B
+attempt was a clean `[CVRL]`** — town preamble, waypoint, clearance,
+pickup, done, clean leave.
+
+Two live drills settled what three runs of guessing had not:
+
+- **T47** — every one of the six hotkeys selects exactly what
+  `config/necro.toml` says. Bindings are right and presses land, so both
+  standing `SkillSwitchFailed` theories are dead. Do not edit the config.
+- **T48** — a cast animation is **610-640 ms** (player mode 10), and a
+  hotkey press sent 110 ms INTO one still registers within 62 ms. So a
+  cast does not eat following input; only clicks are worth holding.
+
+The fixes: the drift is bounded by the fight and goes SIDEWAYS rather
+than standing still; `clear_radius` can ask the combat module to close on
+a monster it will not engage; a declared wait now expires
+(`wait_bail_s`); casts wait on the game's casting mode instead of a
+guessed sleep, with potions exempt; the town layer polls a cheap
+inventory read and pays for sockets only where it decides.
+
+**The tenth attempt died on a waypoint lock-out** and is worth knowing
+about: `_open_ground` avoided units but not OBJECTS, so a desecrate
+landed 4 subtiles from the waypoint just arrived on, opened its menu, and
+every send was refused until the run chickened out. Casts never went
+through the navigator, which has filtered `INTERACTIVE_OBJECT_KINDS`
+since R111. Now fixed three ways (avoid it, step off it on arrival, and
+close a stray panel from the field).
+
+## START HERE — the honest gap
+
+**The bot has not fought since the fixes landed.** Neither run today put a
+monster inside engage range, so `combat.engage`, the approach path that
+finding 001 was about, and the lateral drift have all executed only
+against fakes. The next supervised run should be judged on whether it
+FIGHTS, not on whether it completes.
+
+Two consecutive arrivals with nothing in radius 50 is also the second
+data point for the deferred patrol question below.
 
 ## Where the milestone is
 
@@ -32,49 +73,35 @@ the revive wall built before approaching; the town preamble end to end
 (heal, repair, belt, cleanse, stash, gold, merc); the waypoint trip; the
 decision trace.
 
-## START HERE — the P1 first
+## The review findings
 
-**Do not run unattended until review finding 001 is fixed.** The combat
-repositioning added at the very end of the session (after the last live
-run, so it has NEVER executed against the game) can drift the player out
-of `engage_radius` while `clear_radius` still wants those monsters dead.
-`combat.engage` then returns None forever, the step reports
-`waiting=True`, and `waiting` suppresses the idle watchdog — a permanent
-hang with the alarm for hangs switched off on that exact path.
+All in [docs/reviews/2026-07-31-m5-stage-b/](../../reviews/2026-07-31-m5-stage-b/summary.md),
+each with a Resolution section:
 
-The five findings are in
-[docs/reviews/2026-07-31-m5-stage-b/](../../reviews/2026-07-31-m5-stage-b/summary.md):
+1. **001 (P1)** repositioning could strand the clearance — **fixed**,
+   three ways, and the ADR the summary asked for is written. Not yet
+   exercised live.
+2. **002 (P2)** the cast settle blocked the ladder's tick — **fixed**
+   against T48's measurement. Live-verified twice (six `CastInFlight`
+   deferrals in the clean run).
+3. **003 (P2)** town polling re-read every socket — **fixed**. The live
+   re-measurement of the "dithering" is still owed.
+4. **004/005 (P3)** open, and genuinely minor.
 
-1. **001 (P1)** repositioning can strand the clearance — fix before any
-   unattended run.
-2. **002 (P2)** the 0.4 s cast settle blocks the tick the survival ladder
-   needs. Prefer waiting on the EFFECT (bone armor's stat is readable and
-   T46 characterised it) over a fixed sleep.
-3. **003 (P2)** town waits re-read every inventory socket at 10 Hz —
-   ~1200 stat reads per potion moved. Likely cause of the "dithering" the
-   `poll_s` change was meant to fix, and that change made it worse.
-4. **004/005 (P3)** runner catch-all can't tell a bug from a bad moment;
-   the trace printer reaches into `engine._executor`.
+## The skill-switch failure: still open, but no theories left
 
-An **ADR candidate** is recorded and worth writing when 001 is resolved:
-*when may a wait suppress the never-idle watchdog?* `waiting` was added
-for a good reason and became the reason a hang is invisible.
+`SkillSwitchFailed` recurred in three runs on three different skill pairs
+(95←83, 68←83, 68←95) — the slot stays on whatever was selected last. It
+did NOT recur in either of today's runs (nine verified casts).
 
-## Then: the unexplained skill-switch failure
+What has been eliminated: stale bindings and dropped presses (T47), the
+cast-eats-input theory (T48), and — by construction, since both raise
+`InputRefused` instead — a blocking panel and a lost foreground.
 
-`SkillSwitchFailed` recurred in **three** separate runs on three
-different skill pairs (95←83, 68←83, 68←95) — the right slot stays on
-whatever was last selected. It is survivable now (absorbed like a refused
-send) but every failed desecrate is a thinner revive wall.
-
-Two live theories, neither confirmed:
-
-- the hotkey bindings differ from `config/necro.toml` — **`drills/t47_hotkey_audit.py` is written and unrun**; it presses F1-F6 and
-  reads back what each selects, which settles it in ~30 seconds;
-- the user's own (from manual play): bone armor has a slow cast animation
-  and following commands interrupt it, so the cast is spent and the buff
-  never lands — which from the bot's side looks exactly like a recast
-  loop. This is what finding 002's settle was trying to address.
+Rather than invent a fifth theory, `ensure_right_skill` now attaches the
+state at the moment of failure (waited, player mode, open UI panels,
+left-skill read). The next occurrence is evidence, not another
+supervised run.
 
 ## Open user requests
 
@@ -86,7 +113,10 @@ Two live theories, neither confirmed:
   waits for the radius to read clear, and perception (80) exceeds the
   radius, so it can verify from a standstill. A real patrol (visit sample
   points so perception sweeps the area) is a **new feature** and P6's
-  phase file puts features out of scope — needs a decision.
+  phase file puts features out of scope — needs a decision. **Both
+  2026-08-01 runs arrived to an empty radius 50 and never fought**, which
+  is the strongest argument yet that the answer matters: without a patrol,
+  whether the bot fights at all is down to where the pack happens to be.
 - The user is willing to **keep wrongly-picked items** for examination.
   Probably unnecessary now: pickup logs its decision (kind, quality,
   sockets, matching rule), so a surprise explains itself.

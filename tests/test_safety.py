@@ -213,6 +213,57 @@ def test_consecutive_chickens_halt_the_loop(rig):
     assert not client.is_in_game()  # it still left the last game safely
 
 
+def test_a_non_vitals_exit_never_feeds_the_vitals_backstop(rig):
+    """R115. The backstop exists for ONE cause and says so in its message.
+
+    PD2 carries HP and mana between games, so a character below the
+    threshold chickens out of every game forever — hence a counter and a
+    halt that tells the operator to heal. But `IdleBail`, `TownStepFailed`
+    and `RunFailed` are all `ChickenExit` subclasses (they want the
+    cycle's leave-and-continue handling) and every one of them was
+    feeding that counter. A hang could halt the loop with "heal the
+    character", which is a wrong answer delivered confidently.
+    """
+
+    class NotVitals(ChickenExit):
+        is_vitals = False
+
+    cycle, client = rig()
+
+    def never_a_vitals_problem(session):
+        raise NotVitals("the bot stood still for 30s")
+
+    report = cycle.run_games(never_a_vitals_problem, max_games=4)
+
+    assert len(report.outcomes) == 4, "the vitals backstop halted a non-vitals loop"
+    assert all(o.chickened and o.left for o in report.outcomes)
+    assert all(o.error is None for o in report.outcomes)
+    assert all(not o.vitals for o in report.outcomes)
+    # And the report says which kind it was, rather than calling it all
+    # CHICKEN — three of the four were unreadable that way.
+    assert "LEFT EARLY" in report.summary() and "CHICKEN" not in report.summary()
+
+
+def test_the_mixed_sequence_that_used_to_misattribute(rig):
+    # One real chicken, then a non-vitals exit. With both counted, this
+    # tripped the vitals backstop and blamed the character's health for a
+    # bug. The vitals streak must not survive a non-vitals game.
+    class NotVitals(ChickenExit):
+        is_vitals = False
+
+    cycle, _ = rig()
+    calls = []
+
+    def one_then_the_other(session):
+        calls.append(True)
+        raise ChickenExit("life low") if len(calls) == 1 else NotVitals("stuck")
+
+    report = cycle.run_games(one_then_the_other, max_games=3)
+
+    assert len(report.outcomes) == 3, "halted on a mixed sequence"
+    assert [o.vitals for o in report.outcomes] == [True, False, False]
+
+
 def test_clean_run_resets_the_chicken_streak(rig):
     cycle, client = rig()
     calls = []

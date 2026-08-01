@@ -18,6 +18,7 @@ from pd2bot.behavior.actions import (
     PickUpItem,
 )
 from pd2bot.behavior.execute import (
+    CastInFlight,
     ExecutionError,
     GameActionExecutor,
     RecordingExecutor,
@@ -43,9 +44,9 @@ class FakeGated:
         return (0, 0)
 
 
-def player_at(pos=HOME):
+def player_at(pos=HOME, mode=1):
     return Player(
-        name="N", level=91, act=1, position=pos, mode=1,
+        name="N", level=91, act=1, position=pos, mode=mode,
         hp=1000, max_hp=1000, mana=200, max_mana=400,
         stamina=0, max_stamina=0, experience=0, gold=0, gold_stash=0,
         strength=0, dexterity=0, vitality=0, energy=0,
@@ -84,6 +85,106 @@ def make(monkeypatch, *, active_skill=None, player=None, walk=None):
         sleep=lambda seconds: None,
     )
     return executor, gated, walked, state
+
+
+# -- review 002: the cast settle waits on the EFFECT, and only clicks wait ------
+
+
+class Clock:
+    def __init__(self):
+        self.now = 100.0
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
+
+
+def casting(monkeypatch):
+    """An executor over a game whose player mode the test drives.
+
+    `reads` counts how often the player was read, which is the other half
+    of the fix: the mode is asked for only after one of our own casts, not
+    once per action forever (the cost review 003 is about).
+    """
+    world = {"mode": 1, "reads": 0}
+
+    def fake_press(session, gated, skill_id, *, hotkeys=None, **kw):
+        gated.press_key(hotkeys[skill_id])
+
+    def fake_read(session):
+        world["reads"] += 1
+        return player_at(mode=world["mode"])
+
+    monkeypatch.setattr("pd2bot.behavior.execute.ensure_right_skill", fake_press)
+    monkeypatch.setattr("pd2bot.behavior.execute.read_player", fake_read)
+    clock = Clock()
+    gated = FakeGated()
+    executor = GameActionExecutor(
+        session=None,
+        gated=gated,
+        walk_to=lambda target: None,
+        hotkeys={offsets.SKILL_BONE_ARMOR: VK_F1, offsets.SKILL_DESECRATE: VK_F5},
+        clock=clock,
+    )
+    return executor, gated, clock, world
+
+
+def test_a_click_waits_out_the_cast_animation(monkeypatch):
+    """T48: a cast holds `PLAYER_MODE_CASTING` for 610-640 ms.
+
+    A command sent inside that window spends the cast without landing the
+    buff, which from the bot's side looks like a recast loop (stage B run
+    9). The next click has to wait — asked of the game, not slept for.
+    """
+    executor, gated, _, world = casting(monkeypatch)
+    executor.execute(CastSelf(offsets.SKILL_BONE_ARMOR))
+    world["mode"] = offsets.PLAYER_MODE_CASTING
+    with pytest.raises(CastInFlight):
+        executor.execute(CastAtPoint(offsets.SKILL_DESECRATE, (1010, 1002)))
+    assert gated.world_clicks == [(HOME, "right", False)]  # only the first cast
+
+
+def test_a_potion_never_waits_for_a_cast(monkeypatch):
+    """The point of not sleeping: survival keeps its fastest response.
+
+    T48 pressed a hotkey 110 ms INTO an animation and it registered within
+    62 ms, so a drink — which is a keypress — has no reason to queue. The
+    0.4 s sleep this replaces stopped every rung for the whole animation.
+    """
+    executor, gated, _, world = casting(monkeypatch)
+    executor.execute(CastSelf(offsets.SKILL_BONE_ARMOR))
+    world["mode"] = offsets.PLAYER_MODE_CASTING
+    executor.execute(DrinkPotion(0, "mana"))
+    assert VK_1 in gated.pressed
+
+
+def test_the_click_lands_once_the_animation_is_over(monkeypatch):
+    executor, gated, _, world = casting(monkeypatch)
+    executor.execute(CastSelf(offsets.SKILL_BONE_ARMOR))
+    world["mode"] = 1  # back to idle: the cast resolved
+    executor.execute(CastAtPoint(offsets.SKILL_DESECRATE, (1010, 1002)))
+    assert gated.world_clicks[-1] == ((1010, 1002), "right", False)
+
+
+def test_a_mode_that_never_clears_costs_one_action_not_the_run(monkeypatch):
+    # The cap is why the read is safe to trust: a client state nobody
+    # anticipated must not be able to hold every click forever.
+    executor, gated, clock, world = casting(monkeypatch)
+    executor.execute(CastSelf(offsets.SKILL_BONE_ARMOR))
+    world["mode"] = offsets.PLAYER_MODE_CASTING
+    clock.advance(2.0)  # past cast_wait_cap_s 1.5
+    executor.execute(CastAtPoint(offsets.SKILL_DESECRATE, (1010, 1002)))
+    assert gated.world_clicks[-1] == ((1010, 1002), "right", False)
+
+
+def test_nothing_is_read_until_we_have_actually_cast(monkeypatch):
+    # An attack before any cast must not pay a stat read to ask about an
+    # animation that cannot be playing.
+    executor, _, _, world = casting(monkeypatch)
+    executor.execute(AttackUnit(1, (1002, 1000)))
+    assert world["reads"] == 0
 
 
 def test_drink_presses_the_column_key(monkeypatch):

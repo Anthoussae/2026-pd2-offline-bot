@@ -37,6 +37,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from pd2bot import offsets
 from pd2bot.behavior.actions import Action, AttackUnit, CastAtPoint, MoveTo
 from pd2bot.behavior.reflex import retreat_point
 from pd2bot.snapshot import GameSnapshot
@@ -62,6 +63,12 @@ class CombatConfig:
     # How far a small idle step moves. Deliberately much shorter than
     # `retreat_subtiles`: this is drift, not a withdrawal.
     reposition_subtiles: int = 4
+    # How far a ground-targeted cast stays away from a clickable OBJECT.
+    # Larger than the 2 used for units because an object's sprite is
+    # larger than a monster's, and because the cost is asymmetric: a cast
+    # placed 2 subtiles from a waypoint opens the waypoint menu, and a
+    # panel outside town blocks every send until something closes it.
+    object_clearance: int = 6
     # Revives as aggro tanks (R47.4).
     wait_for_revives_s: float = 1.5  # let them get in front before dashing
     revive_engaged_range: int = 8  # a revive this close to a hostile is engaged
@@ -135,7 +142,16 @@ class NecroCombat:
             for c in snap.corpses
         ):
             return True
-        return self._desecrate_rounds < self.config.desecrate_rounds
+        if self._desecrate_rounds >= self.config.desecrate_rounds:
+            return False
+        # Nowhere legal to put a desecrate is the same answer as no budget
+        # left, and saying so matters more now that clickable objects are
+        # avoided: standing beside a waypoint can rule out every candidate
+        # spot. `upkeep` returns None in that case WITHOUT spending a round,
+        # so a gate that only counted rounds would hold offense back forever
+        # on that ground — the deadlock this method's own docstring exists
+        # to prevent, reached by a different road.
+        return self._open_ground(snap, origin) is not None
 
     def _reposition(
         self, origin: tuple[int, int], hostiles: list[Monster]
@@ -153,14 +169,70 @@ class NecroCombat:
         accidental charge and never crosses the ground the skirmish pattern
         is about to use. Nowhere to go is not a failure: None still means
         "nothing to do", and the ladder gets its look either way.
+
+        **It never steps out of the fight** (review 001). Nothing bounded
+        the drift when this was written: 4 subtiles per idle tick, every
+        idle tick, accumulating until the pack fell outside `engage_radius`
+        — after which `engage` had nothing to say while `clear_radius`,
+        which measures from the ARRIVAL POINT rather than from the player,
+        still wanted those monsters dead. The step then reported a
+        deliberate wait forever, and a declared wait suppresses the
+        never-idle watchdog: a permanent hang with the alarm switched off.
+        The engagement itself is the bound — drift is only drift while we
+        are still in the fight we are drifting inside.
+
+        The bound is expressed as a condition on `retreat_point`'s rotation
+        ladder rather than as a veto on its answer, and that is deliberate:
+        a straight-back step that would leave the fight becomes a SIDEWAYS
+        one, so the character keeps moving. Standing still is what the user
+        has now twice called the dangerous option, and a bound that bought
+        safety with stillness would be trading one danger for the other.
         """
+        in_reach = lambda spot: any(  # noqa: E731 - reads better inline
+            _chebyshev(spot, h.position) <= self.config.engage_radius
+            for h in hostiles
+        )
         spot = retreat_point(
             origin,
             [h.position for h in hostiles],
             self.config.reposition_subtiles,
             self.is_walkable,
+            accept=in_reach,
         )
         return MoveTo(spot) if spot is not None else None
+
+    def approach(
+        self, snap: GameSnapshot, position: tuple[int, int]
+    ) -> Action | None:
+        """One hop toward something the RUN wants dead that we are not fighting.
+
+        The two radii are measured from different points and never had to
+        agree: `clear_radius` counts monsters from the arrival point,
+        `_hostiles` counts them from the player. So a monster can sit inside
+        the clearance and outside the fight, and then nobody moves — the
+        module has nothing to say, and the step waits for a kill nobody is
+        going to make (review 001). This is the clearance's way of asking
+        for that gap to be closed, and it is the reason `engage_radius` no
+        longer has to be a promise about what the run can want.
+
+        Refused while there IS a fight. `engage` owns those ticks, and its
+        deliberate pauses — a restrike cooldown, waiting for the revives to
+        take the front — must not be overridden by a walk into the pack.
+        Refused too when the target is already in reach, because then the
+        answer is `engage`'s to give.
+
+        A HOP, capped at `dash_step` like every other approach here, for
+        the same reason: a blocking walk is time the reflex ladder is not
+        being consulted.
+        """
+        if snap.player is None or snap.in_town:
+            return None
+        origin = snap.player.position
+        if self._hostiles(snap):
+            return None
+        if _chebyshev(position, origin) <= self.config.engage_radius:
+            return None
+        return MoveTo(self._dash_target(origin, position))
 
     def _select_target(
         self, origin: tuple[int, int], hostiles: list[Monster], now: float
@@ -281,10 +353,32 @@ class NecroCombat:
         a click on that unit — the same hazard that made travel clicks open
         NPC dialogs all through P3 (R111), and in combat it would target
         rather than cast.
+
+        **Objects are the expensive version of that hazard**, and they were
+        missing here until a live run paid for it. Stage B's tenth attempt
+        arrived at the Cold Plains waypoint at (5268, 5713) and put its
+        first desecrate at (5272, 5713) — four subtiles away, still on the
+        waypoint's sprite. The right-click opened the waypoint menu, which
+        blocks input, so every send afterwards was refused until the
+        navigator gave up 10 s later and the run chickened out with the
+        area untouched.
+
+        The navigator has avoided exactly this since R111, filtered to
+        `INTERACTIVE_OBJECT_KINDS` because avoiding all 15 pieces of Cold
+        Plains scenery made the area unwalkable. Casts never went through
+        the navigator, so they never got the filter. They do now, with a
+        wider berth than units get: an object's sprite is bigger, and the
+        two mistakes do not cost the same — clicking a monster is an
+        attack, clicking a waypoint ends the run.
         """
         occupied = [
             u.position
             for u in (*snap.live_monsters, *snap.allies, *snap.corpses)
+        ]
+        clickable = [
+            o.position
+            for o in snap.objects
+            if o.kind in offsets.INTERACTIVE_OBJECT_KINDS
         ]
         for radius in (4, 6, 8):
             for dx, dy in ((1, 0), (0, 1), (-1, 0), (0, -1),
@@ -293,6 +387,11 @@ class NecroCombat:
                 if not self.is_walkable(spot):
                     continue
                 if any(_chebyshev(spot, o) <= 2 for o in occupied):
+                    continue
+                if any(
+                    _chebyshev(spot, o) <= self.config.object_clearance
+                    for o in clickable
+                ):
                     continue
                 return spot
         return None

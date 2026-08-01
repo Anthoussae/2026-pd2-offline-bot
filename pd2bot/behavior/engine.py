@@ -23,6 +23,11 @@ typed as a `ChickenExit` subclass so the existing cycle leaves the game
 exactly as it does for a vitals chicken, with no change to cycle.py (whose
 internals are out of P4's scope). The separate not-a-vitals-problem
 counting lives in runner.py at the callback boundary.
+
+A step may declare a wait (`StepOutcome.waiting`) and the watchdog believes
+it — but only up to `wait_bail_s`. That bound is the policy review 001
+asked for: a declared wait is a claim that something will EXPIRE, and one
+that outlives every timer in the bot is a hang with the alarm switched off.
 """
 
 from __future__ import annotations
@@ -77,7 +82,14 @@ class IdleBail(ChickenExit):
     response to standing around. It is NOT a vitals problem though — an
     idle loop is a bug — so runner.py counts these separately and halts
     loudly on repetition rather than letting them hide among chickens.
+
+    `is_vitals = False` completes that separation (R115): until it, the
+    cycle's vitals backstop counted these too, so one real chicken
+    followed by one idle bail halted with a message telling the operator
+    to heal a character whose actual problem was a hang.
     """
+
+    is_vitals = False
 
 
 class _Monitor(Protocol):
@@ -104,6 +116,10 @@ class StepOutcome:
     `wait_for_revives_s`) and the watchdog knew about none of them, so
     lengthening any one of them past `idle_bail_s` made runs abandon
     themselves with a message blaming an idle loop (review 003).
+
+    It is a claim with a deadline, not a blanket exemption: the engine
+    holds an unbroken run of declared waits to `wait_bail_s`, because the
+    one thing a wait must not be able to say is "forever" (review 001).
     """
 
     done: bool
@@ -145,12 +161,48 @@ class EngineContext:
 @dataclass(frozen=True)
 class EngineConfig:
     tick_interval_s: float = 0.2  # ~5 decisions/s against a 25 fps sim
-    idle_bail_s: float = 10.0  # R47.9 default
+    idle_bail_s: float = 10.0  # R47.9 default: with something hunting us
+    # The same watchdog, with nothing nearby to punish standing still.
+    #
+    # The invariant's stated reason is danger — "any enemy can kill an
+    # idle character" — and with no enemy in sight that reason does not
+    # apply. The user's own read (R115): *technically, idle bailing is
+    # only necessary if there are enemies nearby; however, there is
+    # something to be said for always idle bailing regardless, as we
+    # don't want the bot to get stuck for any reason.*
+    #
+    # Both, then, which is why this is a longer deadline and not an
+    # exemption. An idle character in an empty field is not in danger,
+    # but it is still a bot that has stopped working, and a stuck bot
+    # must always surface. The message says which case fired, so the
+    # difference reaches whoever reads the log.
+    idle_bail_quiet_s: float = 30.0
+    # What counts as "something nearby". Deliberately the same order as
+    # the necro's `engage_radius` (40): the engine cannot see a class
+    # config, and a monster further away than we would fight is not the
+    # danger this invariant is about. Perception caps it at 80 regardless.
+    idle_danger_radius: int = 40
     # Consecutive all-refused ticks before the engine gives up on the game.
     # ~5 ticks/s, so 50 is about 10 s of the game refusing everything —
     # deliberately the same order as `idle_bail_s`, because it is the same
     # danger wearing a different hat.
     refusal_limit: int = 50
+    # The longest a step may keep saying "I am waiting on purpose".
+    #
+    # `waiting` suppresses the idle watchdog, and it was right to add it
+    # (review 003: the watchdog fired during deliberate settles nobody had
+    # told it about). What it also did was remove the alarm from the one
+    # path that later grew a genuine hang — a clearance whose monsters had
+    # drifted out of the combat module's reach reported a wait FOREVER,
+    # and nothing was left to notice (review 001).
+    #
+    # So the policy, stated: a declared wait is a claim that something will
+    # expire. This is the deadline that claim is held to — 6x the longest
+    # wait configured anywhere (`clear_settle_s`, 5 s) and 3x `idle_bail_s`,
+    # so it can only be reached by a wait that is not a wait at all. Past
+    # it, the step is hung and gets treated as an idle loop, which is what
+    # it is.
+    wait_bail_s: float = 30.0
 
 
 @dataclass
@@ -202,6 +254,11 @@ class BehaviorEngine:
         self._last_activity = self._clock()
         self._last_position: tuple[int, int] | None = None
         self._refusal_streak = 0
+        # When the CURRENT unbroken run of declared waits began. Cleared by
+        # progress (a send that landed, a step that acted or finished), not
+        # by movement: a character being shoved around by monsters while a
+        # step waits forever is the hang, not the cure.
+        self._waiting_since: float | None = None
 
     @property
     def complete(self) -> bool:
@@ -217,6 +274,31 @@ class BehaviorEngine:
     def _mark_activity(self, now: float) -> None:
         self._last_activity = now
 
+    def _note_wait(self, snap: GameSnapshot, now: float, where: str) -> None:
+        """One tick of a step standing still on purpose — and the deadline.
+
+        The wait is believed (it keeps the idle watchdog quiet) right up to
+        `wait_bail_s`, and then it is not. Town is exempt for the same
+        reason the idle check exempts it: town steps block on walks, and
+        town is safe by definition.
+        """
+        if not snap.in_game or snap.in_town:
+            self._waiting_since = None
+            return
+        if self._waiting_since is None:
+            self._waiting_since = now
+            return
+        waited = now - self._waiting_since
+        if waited > self.config.wait_bail_s:
+            raise IdleBail(
+                f"step {where!r} has declared a deliberate wait for "
+                f"{waited:.1f}s (limit {self.config.wait_bail_s:.0f}s) — a "
+                "declared wait is supposed to be a timer that expires, so "
+                "one this long is a hang wearing a wait's clothes; leaving "
+                "the game rather than standing in Hell (R47.9, review 001)"
+                f"\n{self._context(snap)}"
+            )
+
     def _check_idle(self, snap: GameSnapshot, now: float) -> None:
         if not snap.in_game or snap.in_town:
             # The invariant is an out-of-town rule (town is safe by
@@ -225,12 +307,121 @@ class BehaviorEngine:
             self._last_activity = now
             return
         idle_for = now - self._last_activity
-        if idle_for > self.config.idle_bail_s:
+        hostiles = self._hostiles_near(snap)
+        limit = (
+            self.config.idle_bail_s if hostiles
+            else self.config.idle_bail_quiet_s
+        )
+        if idle_for > limit:
+            why = (
+                f"{len(hostiles)} hostile(s) within "
+                f"{self.config.idle_danger_radius} — this is the danger the "
+                "invariant is about (R47.9)"
+                if hostiles
+                else "nothing hostile nearby, so this is not danger — but a "
+                "bot that has stopped working is still stuck, and being "
+                "stuck must always surface (R115)"
+            )
             raise IdleBail(
                 f"no action sent and no progress for {idle_for:.1f}s outside "
-                f"town (limit {self.config.idle_bail_s:.0f}s) — leaving the "
-                "game rather than standing in Hell doing nothing (R47.9)"
+                f"town (limit {limit:.0f}s): {why}\n{self._context(snap)}"
             )
+
+    def _hostiles_near(self, snap: GameSnapshot) -> list:
+        if snap.player is None:
+            return []
+        here = snap.player.position
+        return [
+            m
+            for m in snap.live_monsters
+            if max(abs(m.position[0] - here[0]), abs(m.position[1] - here[1]))
+            <= self.config.idle_danger_radius
+        ]
+
+    def _context(self, snap: GameSnapshot) -> str:
+        """Everything worth knowing at the moment the engine gives up.
+
+        The user's request (R115): *take a careful log of everything
+        before idle bailing.* An idle bail is by definition a case nobody
+        predicted — if it had been predicted it would have been fixed —
+        so the one chance to understand it is the state it happened in.
+        The same discipline as `skills._failure_context`, and for the same
+        reason: three live runs were spent re-reaching a failure that
+        could have explained itself the first time.
+
+        Every read is defended. Explaining a failure must not raise one.
+        """
+        lines = []
+        try:
+            step = (
+                self._states[self._index].name
+                if self._index < len(self._states)
+                else "none (run complete)"
+            )
+            lines.append(
+                f"    step {step} ({self._index + 1} of {len(self._states)}), "
+                f"tick {self.report.ticks}"
+            )
+        except Exception as exc:  # noqa: BLE001 - diagnosis must not raise
+            lines.append(f"    step unreadable: {type(exc).__name__}")
+        try:
+            player = snap.player
+            lines.append(
+                f"    at {player.position}, hp {player.hp}/{player.max_hp}, "
+                f"mana {player.mana}/{player.max_mana}, mode {player.mode}"
+                if player is not None
+                else "    player UNREADABLE"
+            )
+            lines.append(
+                f"    area {snap.area.level_no if snap.area else '?'}, "
+                f"ui {', '.join(snap.ui.names) if snap.ui else '?'}"
+                + ("  (BLOCKING)" if snap.ui is not None and snap.ui.blocks_input else "")
+            )
+            near = self._hostiles_near(snap)
+            nearest = (
+                min(
+                    max(
+                        abs(m.position[0] - snap.player.position[0]),
+                        abs(m.position[1] - snap.player.position[1]),
+                    )
+                    for m in snap.live_monsters
+                )
+                if snap.live_monsters and snap.player is not None
+                else None
+            )
+            lines.append(
+                f"    {len(near)} hostile(s) within "
+                f"{self.config.idle_danger_radius}, "
+                f"{len(snap.live_monsters)} in perception"
+                + (f", nearest at {nearest}" if nearest is not None else "")
+                + f", {len(snap.allies)} ally/allies, {len(snap.corpses)} corpse(s)"
+                + f", {len(snap.ground_items)} item(s) on the ground"
+            )
+        except Exception as exc:  # noqa: BLE001
+            lines.append(f"    world unreadable: {type(exc).__name__}: {exc}")
+        try:
+            lines.append(
+                f"    {self.report.refusals} refused send(s) this run, "
+                f"streak {self._refusal_streak}"
+                + (
+                    f", declared wait running {self._clock() - self._waiting_since:.1f}s"
+                    if self._waiting_since is not None
+                    else ""
+                )
+            )
+            trace = getattr(self._executor, "trace", None)
+            if trace:
+                recent = ", ".join(
+                    type(entry.action).__name__ for entry in trace[-5:]
+                )
+                lines.append(f"    last sent: {recent}")
+            else:
+                lines.append("    last sent: NOTHING this run")
+            if self.report.log:
+                lines.append(f"    last log line: {self.report.log[-1]}")
+        except Exception as exc:  # noqa: BLE001
+            lines.append(f"    engine state unreadable: {type(exc).__name__}")
+        return "\n".join(lines)
 
     def tick(self) -> bool:
         """One decision. Returns True when the run is complete.
@@ -271,6 +462,7 @@ class BehaviorEngine:
             decision.commit_attempted()
             decision.commit_sent()
             self._refusal_streak = 0
+            self._waiting_since = None  # something happened: not a wait
             self._mark_activity(self._clock())
             return self.complete
 
@@ -288,12 +480,28 @@ class BehaviorEngine:
                 return self.complete
             if outcome.acted:
                 self._refusal_streak = 0
+                self._waiting_since = None
                 self._mark_activity(self._clock())
             if outcome.waiting:
-                # A declared wait is progress, not idleness (review 003).
+                # A declared wait is progress, not idleness (review 003) —
+                # but only for as long as it is still a wait (review 001).
+                self._note_wait(snap, now, state.name)
                 self._mark_activity(self._clock())
+            if outcome.note and not outcome.done:
+                # A step's note on a tick it did NOT finish is the only
+                # record of WHY it did something, and until now the log
+                # kept refusals and completions and threw these away. The
+                # second clean stage-B run finished with five MoveTos in
+                # its trace and nothing anywhere saying whether they were
+                # the clearance closing on a hostile, the skirmish drift,
+                # or a walk to an item — an unanswerable question about the
+                # one artifact stage B exists to produce. Steps set notes
+                # sparingly (closing on a monster, a cleanse, a stray panel
+                # closed), so this stays a record rather than a stream.
+                self.report.log.append(f"step {state.name}: {outcome.note}")
             if outcome.done:
                 self._index += 1
+                self._waiting_since = None
                 self.report.steps_completed.append(state.name)
                 self.report.log.append(
                     f"step {state.name} done"

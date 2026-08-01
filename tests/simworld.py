@@ -442,6 +442,7 @@ def build_sim(
     *,
     monkeypatch=None,
     idle_bail_s: float = 10.0,
+    idle_bail_quiet_s: float | None = None,
     tick_s: float = 0.5,
     alert=None,
 ) -> SimRun:
@@ -537,7 +538,17 @@ def build_sim(
         executor=executor,
         ladder=ladder,
         combat=combat,
-        config=EngineConfig(tick_interval_s=tick_s, idle_bail_s=idle_bail_s),
+        # Both idle deadlines default to the SAME number here (R115). The
+        # engine gives an empty field a longer leash than a hunted one,
+        # which is right in Hell and only noise in a scripted world — a
+        # caller that cares about the distinction passes both.
+        config=EngineConfig(
+            tick_interval_s=tick_s,
+            idle_bail_s=idle_bail_s,
+            idle_bail_quiet_s=(
+                idle_bail_s if idle_bail_quiet_s is None else idle_bail_quiet_s
+            ),
+        ),
         clock=world.clock,
         # The engine's inter-tick sleep IS the world's clock: one tick of
         # bot time is one tick of world time, so poison, damage and

@@ -394,7 +394,14 @@ def town(monkeypatch):
     return state
 
 
-def layer(town_state, config=CALIBRATED, keep_item=None, protected_ids=None):
+def layer(
+    town_state,
+    config=CALIBRATED,
+    keep_item=None,
+    protected_ids=None,
+    carried=None,
+    carried_with_sockets=None,
+):
     clock = FakeClock()
     gated = SimpleNamespace(
         click_world=town_state.click_world, press_key=town_state.press_key
@@ -414,7 +421,8 @@ def layer(town_state, config=CALIBRATED, keep_item=None, protected_ids=None):
         walk_to=lambda pos: town_state.walked.append(pos),
         snapshot=town_state.snapshot,
         config=config,
-        carried=town_state.carried,
+        carried=carried if carried is not None else town_state.carried,
+        carried_with_sockets=carried_with_sockets,
         read_player_fn=town_state.player,
         alert=town_state.alerts.append,
         notice=town_state.notices.append,
@@ -492,6 +500,68 @@ def test_deposit_that_never_takes_halts_loudly(town):
     assert len(town.alerts) == 1
     attempts = [c for c in town.panel_clicks if c[0] == offsets.UI_STASH]
     assert len(attempts) == CALIBRATED.transfer_attempts  # bounded, no spam
+
+
+def test_verification_polls_the_cheap_reader_and_decides_with_the_other(town):
+    """Review 003: deciding may be expensive, verifying may not.
+
+    `read_carried_items(with_sockets=True)` costs one stat read per
+    main-inventory item, up to 40 — and the layer's verifications run
+    inside `_await` at `poll_s`, so sharing one reader put ~1200 stat
+    reads behind every transferred item, to answer a question that never
+    needs sockets. Worse, the answer to the user's "the bot dithers"
+    report was to halve `poll_s`, doubling that cost.
+
+    The deposit shows both halves at once: one listing (a decision about
+    each item, socket-conditioned) and then polling until each item is
+    gone (existence only).
+    """
+    town.inventory = [loot(1, (2, 1)), loot(2, (4, 0))]
+    counts = {"cheap": 0, "sockets": 0}
+
+    def cheap(session):
+        counts["cheap"] += 1
+        return town.carried(session)
+
+    def with_sockets(session):
+        counts["sockets"] += 1
+        return town.carried(session)
+
+    town_layer = layer(town, carried=cheap, carried_with_sockets=with_sockets)
+    town_layer.deposit_to_stash(lambda i: True, PreambleReport())
+    assert counts["sockets"] == 1, "the expensive read is for the listing only"
+    assert counts["cheap"] >= 2, "the per-item verification polls the cheap one"
+
+
+def test_the_cleanse_still_gets_its_sockets(town):
+    # The other direction, and the one that matters more: an item read
+    # without sockets has `sockets=None`, which the permissive whitelist
+    # reads as "keep" — so a cleanse on the cheap reader is a silent no-op
+    # for exactly the socketed bases it exists to judge (R132).
+    town.inventory = [loot(1, (2, 1))]
+    seen = []
+
+    def with_sockets(session):
+        seen.append(1)
+        return town.carried(session)
+
+    town_layer = layer(
+        town,
+        keep_item=lambda i: False,  # everything is junk
+        carried=town.carried,
+        carried_with_sockets=with_sockets,
+    )
+    town_layer.cleanse_inventory(PreambleReport())
+    assert seen, "the cleanse must decide from the sockets reader"
+
+
+def test_one_injected_reader_serves_both(town):
+    # A fake has no cheap/expensive distinction, so a caller who supplies
+    # one reader must not have the real socket reader reached for behind
+    # its back — that would hit a live session from a test.
+    reader = town.carried
+    town_layer = layer(town, carried=reader)
+    assert town_layer._carried_sockets == reader
 
 
 def test_deposit_needs_grid_calibration(town):
@@ -1426,7 +1496,10 @@ def test_repair_skips_only_when_gear_is_pristine(town, monkeypatch):
     report = PreambleReport()
     layer(town, REPAIR_CFG).repair_at_charsi(report)
     assert report.repaired == 0 and town.walked == [] and town.world_clicks == []
-    assert any("nothing worn" in line for line in report.log)
+    # "nothing DAMAGED", not "nothing worn": this character has an item on,
+    # it just does not need Charsi. The old wording contradicted the count
+    # in its own parenthesis on a live run.
+    assert any("nothing damaged" in line for line in report.log)
 
 
 def test_repair_refuses_without_calibration(town, monkeypatch):

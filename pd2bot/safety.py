@@ -40,7 +40,27 @@ class DeathHalt(RuntimeError):
 
 
 class ChickenExit(RuntimeError):
-    """A vitals threshold tripped: leave the game now. Routine, not fatal."""
+    """Leave the game now, routinely and without drama.
+
+    Named for the vitals case because that is what it was built for, and
+    it became the type for everything that wants the cycle's leave-and-
+    keep-going handling: an idle loop, a failed town step, an unexpected
+    run error. That reuse is deliberate and worth keeping — the cycle's
+    handler is live-verified and none of those want their own copy of it.
+
+    `is_vitals` is what the reuse cost, paid back (R115). PD2 carries HP
+    and mana between games, so a character below the threshold chickens
+    out of every game forever; `cycle.run_games` counts consecutive
+    chickens and halts to break that loop, telling the operator to heal.
+    Three of the four subclasses are not vitals problems at all, and
+    every one of them was feeding that counter — so a hang or a failed
+    preamble could trip a backstop whose message says "heal the
+    character". Subclasses that are not about vitals set this False and
+    the cycle leaves them to their own counters, which are the ones that
+    can describe them honestly.
+    """
+
+    is_vitals = True
 
 
 @dataclass(frozen=True)

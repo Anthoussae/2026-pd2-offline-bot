@@ -28,6 +28,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from pd2bot import offsets
 from pd2bot.behavior.actions import MoveTo, PickUpItem
 from pd2bot.behavior.engine import EngineContext, StepOutcome
 from pd2bot.behavior.run import ParamSpec, StepRegistry, StepSpec
@@ -94,6 +95,24 @@ class RunServices:
     # panels open, which is precisely what must never happen in a fight.
     cleanse: Callable[[], int] | None = None
     cleanse_queued: bool = False
+    # Close whatever blocking panel is up (TownLayer.close_panels behind a
+    # closure at wiring time). None means unavailable, and the steps treat
+    # it as "nothing I can do" rather than as "nothing to do".
+    #
+    # The field needs this because a panel outside town is not recoverable
+    # by waiting: `GatedInput` refuses every send while one is open, so the
+    # bot decides correctly and reaches the game with none of it. Stage B's
+    # tenth attempt opened the waypoint menu with a mis-placed cast and
+    # spent its remaining 10 s being refused, then chickened out with the
+    # area untouched. The town layer has closed stray panels since R85; the
+    # field simply had no way to ask.
+    clear_panels: Callable[[], None] | None = None
+    # How far to step off a waypoint after arriving on one (user request).
+    # The character lands ON the waypoint with the cursor still over it,
+    # which makes the next few clicks — and any ground-targeted cast — a
+    # coin flip on opening its menu. Moving off first is cheaper than
+    # avoiding it from on top of it.
+    waypoint_step_off: int = 10
     # Potion types the belt has refused this game. Kept apart from
     # `inventory_full` because they are different facts with different
     # remedies: the cleanse can free inventory grid space, and nothing
@@ -142,6 +161,7 @@ class WaypointStep:
         # Read the position AFTER travelling: the snapshot handed to this
         # tick was taken in town, before the trip.
         arrival = None
+        fresh = None
         if ctx.snapshot is not None:
             fresh = ctx.snapshot()
             arrival = fresh.player.position if fresh.player is not None else None
@@ -149,10 +169,79 @@ class WaypointStep:
             arrival = snap.player.position
         if arrival is not None:
             ctx.notes["arrival"] = arrival
+        stepped = self.step_off(arrival, fresh if fresh is not None else snap, ctx)
         return StepOutcome(
             done=True, acted=True,
-            note=f"arrived at {arrival}" + ("" if settled else " (never settled)"),
+            note=f"arrived at {arrival}"
+            + ("" if settled else " (never settled)")
+            + (f", stepped off to {stepped}" if stepped else ""),
         )
+
+    def step_off(
+        self,
+        arrival: tuple[int, int] | None,
+        snap: GameSnapshot,
+        ctx: EngineContext,
+    ) -> tuple[int, int] | None:
+        """Walk a few subtiles off the waypoint we just arrived on.
+
+        The user's request, from watching the tenth stage-B attempt lock
+        itself out: *when travelling through a waypoint it will be right
+        under the mouse pointer*, so the arrival point is the one square of
+        ground where an ordinary click is likeliest to open a menu instead
+        of doing what it meant. Standing there while the combat module
+        starts placing casts is asking for it.
+
+        Conditioned on a clickable object ACTUALLY being within stepping
+        distance rather than done unconditionally after every trip. That is
+        the user's reasoning stated precisely — the hazard is the thing
+        under the cursor, not the travelling — and it means a run that
+        arrives somewhere harmless pays nothing and behaves exactly as
+        before.
+
+        The arrival note is recorded BEFORE this runs, so `clear_radius`
+        still centres on the waypoint — the run's landmark does not move
+        just because the character does.
+
+        Best effort, and deliberately so: a failed walk here is a nicety
+        not delivered, and turning it into a raise would let a cosmetic
+        step end a run that was otherwise fine. The panel clear runs first
+        for the case where the trip itself left something open.
+        """
+        if self.services.clear_panels is not None:
+            try:
+                self.services.clear_panels()
+            except Exception as exc:  # noqa: BLE001 - never fatal here
+                self.services.log(f"waypoint: could not clear panels ({exc})")
+        if arrival is None:
+            return None
+        offset = self.services.waypoint_step_off
+        underfoot = [
+            o.position
+            for o in snap.objects
+            if o.kind in offsets.INTERACTIVE_OBJECT_KINDS
+            and _chebyshev(o.position, arrival) <= offset
+        ]
+        if not underfoot:
+            return None
+        candidates = [
+            (arrival[0] + dx * offset, arrival[1] + dy * offset)
+            for dx, dy in ((1, 1), (-1, 1), (1, -1), (-1, -1), (1, 0), (0, 1))
+        ]
+        # Furthest from what we are standing on, first: the direction is the
+        # whole point, and a step that ended up beside the waypoint instead
+        # of on it would have solved nothing.
+        candidates.sort(
+            key=lambda t: min(_chebyshev(t, o) for o in underfoot), reverse=True
+        )
+        for target in candidates:
+            try:
+                ctx.executor.execute(MoveTo(target))
+            except Exception as exc:  # noqa: BLE001 - try the next direction
+                self.services.log(f"waypoint: step off to {target} failed ({exc})")
+                continue
+            return target
+        return None
 
     def settle(self, ctx: EngineContext) -> bool:
         """Wait for the new area to finish arriving before anything is sent.
@@ -325,6 +414,30 @@ class _PickupMixin:
         ctx.executor.execute(PickUpItem(item.unit_id, item.position))
         return True
 
+    def recover_panels(self, snap: GameSnapshot) -> bool:
+        """Close a blocking panel that opened outside town. Returns whether.
+
+        Nothing in the field opens a panel on purpose, so one being up means
+        a click went somewhere it did not mean to — a cast beside a waypoint
+        (stage B's tenth attempt), a stray travel click on the stash. It is
+        not a state that resolves by waiting: `GatedInput` refuses every send
+        while a blocking panel is open, so the bot keeps deciding correctly
+        and keeps reaching the game with none of it, until something else
+        gives up. That run spent its last 10 s that way and chickened out
+        with the area untouched.
+
+        Checked before anything else a step does, because until it is true
+        nothing else a step does can land.
+        """
+        if snap.ui is None or not snap.ui.blocks_input or snap.in_town:
+            return False
+        if self.services.clear_panels is None:
+            return False
+        names = ", ".join(snap.ui.names) or "an unnamed panel"
+        self.services.log(f"clearing {names}: nothing in the field opens one on purpose")
+        self.services.clear_panels()
+        return True
+
     def maybe_cleanse(self, snap: GameSnapshot, ctx: EngineContext) -> bool:
         """Run a queued inventory cleanse if this is a safe moment.
 
@@ -405,6 +518,8 @@ class ClearRadiusStep(_PickupMixin):
         return self._centre
 
     def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
+        if self.recover_panels(snap):
+            return StepOutcome(done=False, acted=True, note="closed a stray panel")
         centre = self.centre(snap, ctx)
         if centre is None or snap.player is None:
             return StepOutcome(done=False)
@@ -428,6 +543,26 @@ class ClearRadiusStep(_PickupMixin):
                 return StepOutcome(done=False, acted=True)
             if self.maybe_cleanse(snap, ctx):
                 return StepOutcome(done=False, acted=True, note="inventory cleansed")
+            # Before calling this patience, check it IS patience. This step
+            # measures from the arrival point and the combat module measures
+            # from the player, so a monster can be inside the clearance and
+            # outside the fight — and then the module has nothing to say
+            # while the step still wants that monster dead. Waiting there is
+            # waiting for a kill nobody is going to make (review 001), so
+            # ask the module to close the distance. It refuses whenever a
+            # fight is actually in progress, which is what keeps this from
+            # overriding a deliberate pause.
+            nearest = min(
+                in_radius,
+                key=lambda m: _chebyshev(m.position, snap.player.position),
+            )
+            closing = self.services.combat.approach(snap, nearest.position)
+            if closing is not None:
+                ctx.executor.execute(closing)
+                return StepOutcome(
+                    done=False, acted=True,
+                    note=f"closing on monster {nearest.unit_id} at {nearest.position}",
+                )
             # Nothing to send, nothing to pick up, hostiles still standing:
             # this is the skirmish pattern deliberately holding off —
             # `restrike_s` since the last dagger, or `wait_for_revives_s` for
@@ -470,6 +605,8 @@ class PickupStep(_PickupMixin):
     _centre: tuple[int, int] | None = None
 
     def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
+        if self.recover_panels(snap):
+            return StepOutcome(done=False, acted=True, note="closed a stray panel")
         if self._centre is None:
             noted = ctx.notes.get(self.centre_note)
             self._centre = (

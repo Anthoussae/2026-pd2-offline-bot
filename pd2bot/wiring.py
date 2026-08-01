@@ -269,6 +269,11 @@ class LiveBot:
                 if self.cleanse_enabled
                 else None
             ),
+            # The same retried ESC the town layer has used since R85, made
+            # available in the field — where a panel is worse, because
+            # nothing out there opens one deliberately and every send is
+            # refused until it closes.
+            clear_panels=self.town.close_panels,
         )
         registry = build_registry(services)
         run = load_run(self.paths.run, registry)
@@ -347,6 +352,13 @@ def build_bot(
         walk_to=navigator.walk_to,
         snapshot=perception.snapshot,
         config=town_config_for(class_config, town_config),
+        # Both readers, named here rather than defaulted, because the split
+        # is the whole point (review 003): every verification loop in the
+        # layer polls the cheap one at 10 Hz, and only the cleanse's
+        # socket-conditioned whitelist pays for the stat reads. Wired
+        # together so neither can be silently the other.
+        carried=lambda s: read_carried_items(s, with_sockets=False),
+        carried_with_sockets=read_carried_items,
         # The two halves of the cleanse, wired together or not at all.
         # `cleanse_keep` returns None while any keeper is unrecognised, and
         # a None whitelist disables dropping entirely — so a half-resolved
@@ -410,7 +422,8 @@ def describe(bot: LiveBot) -> list[str]:
         f"minimums   healing {bot.town.config.min_healing}, "
         f"mana {bot.town.config.min_mana}, rejuv {bot.town.config.min_rejuv}",
         f"chicken    {bot.monitor.config.life_chicken_pct:.0f}% life",
-        f"idle bail  {bot.engine_config.idle_bail_s:.0f}s, "
+        f"idle bail  {bot.engine_config.idle_bail_s:.0f}s "
+        f"(declared wait {bot.engine_config.wait_bail_s:.0f}s), "
         f"refusal limit {bot.engine_config.refusal_limit}",
     ]
 

@@ -8,10 +8,10 @@ target-selection rules that keep poison doing the killing.
 
 from pd2bot import offsets
 from pd2bot.behavior.actions import AttackUnit, CastAtPoint, MoveTo
-from pd2bot.behavior.necro import CombatConfig, NecroCombat
+from pd2bot.behavior.necro import CombatConfig, NecroCombat, _chebyshev
 from pd2bot.player import Player
 from pd2bot.snapshot import GameSnapshot
-from pd2bot.units import Monster
+from pd2bot.units import GameObject, Monster
 from pd2bot.world import Area
 
 TOWN, FIELD = 1, 3
@@ -79,11 +79,18 @@ def skirmishing(**kw):
     return CombatConfig(wait_for_revives_s=0.0, **kw)
 
 
-def snap(pos=HOME, monsters=(), allies=(), corpses=(), area=FIELD):
+def snap(pos=HOME, monsters=(), allies=(), corpses=(), area=FIELD, objects=()):
     return GameSnapshot(
         in_game=True, taken_at=0.0, player=player(pos),
         area=Area(level_no=area, position=(0, 0), size=(500, 500)),
         monsters=tuple(monsters), allies=tuple(allies), corpses=tuple(corpses),
+        objects=tuple(objects),
+    )
+
+
+def waypoint(pos):
+    return GameObject(
+        unit_id=11, kind=offsets.OBJ_WAYPOINT_A1, position=pos, mode=0
     )
 
 
@@ -166,6 +173,75 @@ def test_a_struck_monster_is_not_restruck_immediately():
     drift = necro.engage(snap(allies=wall(), monsters=[target]))
     assert isinstance(drift, MoveTo), "waiting must not mean standing still"
     assert drift.target != (1002, 1000)  # away from it, not into it
+
+
+def test_the_drift_goes_sideways_rather_than_out_of_the_fight():
+    """Review 001, plus the user's rule that stillness is the real danger.
+
+    4 subtiles per idle tick, every idle tick, was free to accumulate until
+    the pack fell outside `engage_radius`. `engage` then had nothing to say
+    — while `clear_radius`, which measures from the ARRIVAL POINT rather
+    than from the player, still wanted those monsters dead — and the step
+    declared a wait that suppressed the idle watchdog.
+
+    Bounding it must not turn into standing still, which the user has twice
+    called the more dangerous option. So a step that would leave the fight
+    becomes a lateral one: still moving, still engaged.
+    """
+    # No revive wall, so offense is held back (the user's protocol) and the
+    # tick is spent drifting — the commonest of the two drift paths.
+    necro, _ = make(skirmishing())
+    edge = monster(1, (1000 + 39, 1000))  # one drift step from leaving 40
+    action = necro.engage(snap(monsters=[edge]))
+    assert isinstance(action, MoveTo), "stillness is the danger being avoided"
+    assert _chebyshev(action.target, edge.position) <= 40, "and it stayed in the fight"
+    assert action.target != HOME, "it did move"
+
+
+def test_the_drift_stands_only_when_there_is_genuinely_nowhere():
+    # The one case left: every direction that keeps the fight is unwalkable.
+    # None still means "nothing to do this tick" and the ladder gets its look.
+    necro, _ = make(skirmishing(), walkable=lambda p: p == (996, 1000))
+    edge = monster(1, (1000 + 39, 1000))  # (996, 1000) is 43 away: too far
+    assert necro.engage(snap(monsters=[edge])) is None
+
+
+def test_the_drift_still_happens_inside_the_fight():
+    # The bound is the engagement, not the drift: with the pack well inside
+    # reach, waiting is still spent moving (the user's judgement — "better
+    # to move often, even small movements").
+    necro, _ = make(skirmishing())
+    close = monster(1, (1010, 1000))
+    drift = necro.engage(snap(monsters=[close]))
+    assert isinstance(drift, MoveTo) and drift.target == (996, 1000)
+
+
+# -- closing the gap the clearance cannot (review 001) --------------------------
+
+
+def test_approach_takes_a_hop_toward_what_the_run_wants_dead():
+    necro, _ = make()
+    # Beyond engage_radius 40: the module would never fight this by itself,
+    # but the clearance step's radius can still want it dead.
+    assert necro.approach(snap(), (1045, 1000)) == MoveTo((1008, 1000))
+
+
+def test_approach_is_refused_while_a_fight_is_in_progress():
+    # `engage` owns those ticks and its pauses are deliberate — a restrike
+    # cooldown must not become a charge into the pack.
+    necro, _ = make()
+    world = snap(monsters=[monster(1, (1010, 1000))])
+    assert necro.approach(world, (1045, 1000)) is None
+
+
+def test_approach_is_refused_when_the_target_is_already_in_reach():
+    necro, _ = make()
+    assert necro.approach(snap(), (1020, 1000)) is None
+
+
+def test_approach_never_moves_in_town():
+    necro, _ = make()
+    assert necro.approach(snap(area=TOWN), (1045, 1000)) is None
 
 
 def test_a_survivor_is_restruck_after_the_cooldown():
@@ -322,6 +398,45 @@ def test_desecrate_avoids_ground_occupied_by_units():
     for unit in crowd:
         assert max(abs(action.target[0] - unit.position[0]),
                    abs(action.target[1] - unit.position[1])) > 2
+
+
+def test_desecrate_never_lands_on_a_clickable_object():
+    """Stage B attempt 10, and the run it cost.
+
+    The bot arrived at the Cold Plains waypoint at (5268, 5713) and put its
+    first desecrate at (5272, 5713) — four subtiles away, still on the
+    waypoint's sprite. The right-click opened the waypoint menu, which
+    blocks input, so every send afterwards was refused until the navigator
+    gave up 10 s later and the run chickened out with the area untouched.
+    """
+    necro, _ = make()
+    action = necro.upkeep(snap(objects=[waypoint((1000, 1000))]))
+    if action is not None:
+        assert _chebyshev(action.target, (1000, 1000)) > CombatConfig().object_clearance
+
+
+def test_scenery_is_not_treated_as_a_hazard():
+    # The other half of R111's lesson: avoiding all 15 pieces of Cold Plains
+    # scenery once made the area unwalkable. Only INTERACTIVE kinds count.
+    necro, _ = make()
+    scenery = GameObject(unit_id=12, kind=9999, position=(1004, 1000), mode=0)
+    action = necro.upkeep(snap(objects=[scenery]))
+    assert action is not None, "decoration must not stop a cast"
+
+
+def test_offense_is_released_when_there_is_nowhere_to_desecrate():
+    """The deadlock the wider object clearance could otherwise create.
+
+    Approaching is gated on the revive wall, and the gate releases when
+    `upkeep` runs out of ways to build one. Nowhere legal to place a cast
+    is exactly that — and it spends no round, so a gate counting only
+    rounds would hold offense back forever on that ground.
+    """
+    necro, _ = make(walkable=lambda p: False)  # no legal cast spot anywhere
+    target = monster(1, (1020, 1000))
+    action = necro.engage(snap(monsters=[target]))
+    assert isinstance(action, MoveTo)
+    assert action.target == (1008, 1000), "it dashed rather than waiting forever"
 
 
 def test_desecrate_is_bounded_when_it_produces_nothing():

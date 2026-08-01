@@ -107,6 +107,18 @@ def _potion_type(item: CarriedItem) -> str | None:
     return None
 
 
+def _carried_for_polling(session: GameSession) -> CarriedItems:
+    """The cheap inventory read: no per-item socket stat reads.
+
+    The default for everything this layer does in a loop. `read_carried_items`
+    defaults to WITH sockets, and rightly so — a caller who forgets them gets
+    `sockets=None`, which a permissive whitelist reads as "keep" — but that
+    default belongs to the decision path, not to a 10 Hz verification. See
+    `TownLayer.__init__` for the split.
+    """
+    return read_carried_items(session, with_sockets=False)
+
+
 def _default_notice(reason: str) -> None:  # pragma: no cover - exercised live
     """Something a human should know, on a run that is still going.
 
@@ -325,7 +337,8 @@ class TownLayer:
         snapshot: Callable[[], GameSnapshot],
         config: TownConfig | None = None,
         *,
-        carried: Callable[[GameSession], CarriedItems] = read_carried_items,
+        carried: Callable[[GameSession], CarriedItems] | None = None,
+        carried_with_sockets: Callable[[GameSession], CarriedItems] | None = None,
         read_player_fn: Callable[[GameSession], Player | None] = read_player,
         alert: Callable[[str], None] = _default_alert,
         notice: Callable[[str], None] | None = None,
@@ -342,7 +355,27 @@ class TownLayer:
         self.walk_to = walk_to
         self.snapshot = snapshot
         self.config = config if config is not None else TownConfig()
-        self._carried = carried
+        # TWO readers, because this layer asks the inventory two different
+        # questions (review 003). Most of them are "has that item left yet?"
+        # — asked inside `_await`, at `poll_s`, up to `verify_timeout_s`
+        # long. Exactly one is "what IS this item?", which the cleanse's
+        # socket-conditioned whitelist needs and which costs a stat read per
+        # main-inventory item, up to 40.
+        #
+        # Sharing one reader meant every belt transfer paid ~1200 stat reads
+        # to answer a question about the BELT, which never needs sockets at
+        # all. And the response to the user's report that the bot "dithers"
+        # was to halve `poll_s` — doubling that cost rather than removing
+        # it. Deciding is allowed to be expensive; verifying is not.
+        self._carried = carried if carried is not None else _carried_for_polling
+        self._carried_sockets = (
+            carried_with_sockets
+            if carried_with_sockets is not None
+            # A caller who injected one reader gets it for both: a fake has
+            # no cheap/expensive distinction, and reaching for the real
+            # reader behind its back would be worse than useless.
+            else (carried if carried is not None else read_carried_items)
+        )
         self._read_player = read_player_fn
         self._alert = alert
         # A notice is not an alert: it reports something worth knowing on a
@@ -1060,7 +1093,13 @@ class TownLayer:
             if d.missing and d.fraction * 100 <= self.config.repair_below_pct
         ]
         if not damaged:
-            report.log.append(f"repair: nothing worn ({len(worn)} items checked)")
+            # "nothing worn" was the old wording and it contradicted its own
+            # parenthesis — the second clean stage-B run reported "nothing
+            # worn (8 items checked)" about a fully equipped character. The
+            # facts were right; the sentence was not.
+            report.log.append(
+                f"repair: nothing damaged ({len(worn)} worn item(s) checked)"
+            )
             return
         # Both points are looked up BEFORE the walk: an uncalibrated one
         # can only fail, and failing after crossing town is a worse way to
@@ -1115,7 +1154,13 @@ class TownLayer:
         # main_inventory, never `inventory`: PD2's charm space shares the
         # container and is untouchable (R60). Depositing from it would fail
         # every transfer and halt over a stash that was never full.
-        candidates = [i for i in self._carried(self.session).main_inventory if keep(i)]
+        # The sockets reader: `keep` is a caller's predicate and may be
+        # socket-conditioned, and this is a DECISION about each item. The
+        # `_gone` verification below stays on the cheap one — it asks only
+        # whether a unit id is still listed.
+        candidates = [
+            i for i in self._carried_sockets(self.session).main_inventory if keep(i)
+        ]
         # Unmovable items are filtered HERE rather than left to the caller's
         # predicate: the Horadric Cube opens on right-click instead of
         # transferring, so a pickit that says "keep" would otherwise halt
@@ -1638,7 +1683,12 @@ class TownLayer:
         protected = self._protected()
         junk = [
             i
-            for i in self._carried(self.session).main_inventory
+            # The one place sockets are needed: `_keep_item` is the pickit's
+            # whitelist and several of its rules are socket-conditioned, so
+            # an item read without them has `sockets=None` — which reads as
+            # "keep" and would silently turn the cleanse into a no-op for
+            # exactly the bases it exists to protect (R132).
+            for i in self._carried_sockets(self.session).main_inventory
             if i.is_movable
             and i.kind not in offsets.RIGHT_CLICK_HAZARD_KINDS
             and i.unit_id not in protected

@@ -22,6 +22,7 @@ from pd2bot.input import InputRefused
 from pd2bot.player import Player
 from pd2bot.safety import ChickenExit, DeathHalt
 from pd2bot.snapshot import GameSnapshot
+from pd2bot.units import Monster
 from pd2bot.world import Area
 
 TOWN, FIELD = 1, 3
@@ -47,10 +48,32 @@ def player(pos=(100, 100)):
     )
 
 
-def snap(area=FIELD, pos=(100, 100)):
+def snap(area=FIELD, pos=(100, 100), monsters=()):
     return GameSnapshot(
         in_game=True, taken_at=0.0, player=player(pos),
         area=Area(level_no=area, position=(0, 0), size=(500, 500)),
+        monsters=tuple(monsters),
+    )
+
+
+def hunted(area=FIELD, pos=(100, 100)):
+    """A snapshot with something hostile close enough to matter.
+
+    The idle watchdog now has two deadlines (R115): the short one is for
+    standing still while something can kill you, which is the danger
+    R47.9 is actually about, and the long one is for being stuck in an
+    empty field. Tests about the short deadline have to say which world
+    they are in, and until they did they were all quietly testing the
+    other one.
+    """
+    return snap(
+        area=area, pos=pos,
+        monsters=[
+            Monster(
+                unit_id=1, kind=50, position=(pos[0] + 10, pos[1]), hp=100,
+                max_hp=100, is_champion=False, is_boss=False, is_minion=False,
+            )
+        ],
     )
 
 
@@ -208,11 +231,55 @@ def test_step_completion_is_progress():
 
 def test_idle_bail_fires_out_of_town():
     step = FakeStep("stuck", ticks_to_done=99, acted=False)
-    eng, clock = engine(states=[step], config=EngineConfig(idle_bail_s=10.0))
+    eng, clock = engine(
+        states=[step], snaps=[hunted()], config=EngineConfig(idle_bail_s=10.0)
+    )
     eng.tick()
     clock.advance(11.0)
-    with pytest.raises(IdleBail):
+    with pytest.raises(IdleBail, match="hostile"):
         eng.tick()
+
+
+def test_an_empty_field_gets_longer_before_bailing_but_still_bails():
+    """R115, and the user's own reasoning on both halves.
+
+    *Technically, idle bailing is only necessary if there are enemies
+    nearby; however, there is something to be said for always idle
+    bailing regardless, as we don't want the bot to get stuck for any
+    reason.* So: a longer deadline, not an exemption. Standing still in
+    an empty field is not danger, but it is still a bot that stopped.
+    """
+    step = FakeStep("stuck", ticks_to_done=99, acted=False)
+    eng, clock = engine(
+        states=[step],  # the default snapshot has nothing hostile in it
+        config=EngineConfig(idle_bail_s=10.0, idle_bail_quiet_s=30.0),
+    )
+    eng.tick()
+    clock.advance(11.0)
+    eng.tick()  # past the danger deadline, and rightly still going
+    clock.advance(20.0)
+    with pytest.raises(IdleBail, match="stuck must always surface"):
+        eng.tick()
+
+
+def test_the_bail_reports_the_state_it_gave_up_in():
+    # "Take a careful log of everything before idlebailing" (R115). An
+    # idle bail is by definition a case nobody predicted, so the state it
+    # happened in is the only chance to understand it.
+    eng, clock = engine(
+        states=[FakeStep("clear_radius", ticks_to_done=99, acted=False)],
+        snaps=[hunted()],
+        config=EngineConfig(idle_bail_s=10.0),
+    )
+    eng.tick()
+    clock.advance(11.0)
+    with pytest.raises(IdleBail) as bail:
+        eng.tick()
+    message = str(bail.value)
+    assert "step clear_radius" in message
+    assert "hp 1000/1000" in message
+    assert "in perception" in message
+    assert "last sent" in message
 
 
 def test_idle_bail_is_a_chicken_exit():
@@ -266,7 +333,7 @@ def test_town_resets_the_idle_clock():
     step = FakeStep("stuck", ticks_to_done=99)
     eng, clock = engine(
         states=[step],
-        snaps=[snap(area=TOWN), snap(area=TOWN), snap(area=FIELD), snap(area=FIELD)],
+        snaps=[snap(area=TOWN), snap(area=TOWN), hunted(), hunted()],
         config=EngineConfig(idle_bail_s=10.0),
     )
     eng.tick()  # in town: the idle clock is pinned ...
@@ -393,6 +460,7 @@ def test_a_refused_send_is_not_committed_and_not_activity():
     eng, clock = engine(
         states=[FakeStep("s", ticks_to_done=99)],
         ladder=ladder, executor=executor,
+        snaps=[hunted()],
         config=EngineConfig(idle_bail_s=10.0),
     )
     eng.tick()
@@ -471,6 +539,20 @@ class WaitingStep:
         return StepOutcome(done=False, acted=False, waiting=self.waiting)
 
 
+class AlternatingStep:
+    """Waits, acts, waits, acts — the clearance settle looting between polls."""
+
+    name = "settling"
+
+    def __init__(self):
+        self.calls = 0
+
+    def step(self, snap, ctx):
+        self.calls += 1
+        waiting = self.calls % 2 == 1
+        return StepOutcome(done=False, acted=not waiting, waiting=waiting)
+
+
 def test_a_declared_wait_is_not_idleness():
     """Review 003's probe: a settle longer than `idle_bail_s` must survive.
 
@@ -480,11 +562,72 @@ def test_a_declared_wait_is_not_idleness():
     themselves and blame an idle loop.
     """
     eng, clock = engine(
-        states=[WaitingStep()], config=EngineConfig(idle_bail_s=10.0)
+        states=[WaitingStep()],
+        config=EngineConfig(idle_bail_s=10.0, wait_bail_s=60.0),
     )
     for _ in range(4):
         eng.tick()
         clock.advance(8.0)  # 32 s of deliberate waiting, no bail
+
+
+def test_a_declared_wait_that_never_ends_is_a_hang():
+    """Review 001: `waiting` may say "not yet", never "forever".
+
+    The finding was a clearance whose monsters had drifted out of the
+    combat module's reach: nothing to engage, nothing to pick up, so the
+    step reported a deliberate wait every tick — and a deliberate wait
+    switches the idle watchdog off. That path is fixed at its source, but
+    the exemption itself needed a deadline: any step that waits longer than
+    every timer in the bot is hung, whether or not anyone predicted how.
+    """
+    eng, clock = engine(
+        states=[WaitingStep()],
+        config=EngineConfig(idle_bail_s=10.0, wait_bail_s=30.0),
+    )
+    eng.tick()
+    clock.advance(31.0)
+    with pytest.raises(IdleBail, match="settling"):
+        eng.tick()
+
+
+def test_the_wait_deadline_restarts_when_the_step_acts():
+    # A step that alternates waiting and acting is working, not hung: the
+    # settle timer that loots between polls must not accumulate toward a
+    # bail across the whole clearance.
+    eng, clock = engine(
+        states=[AlternatingStep()],
+        config=EngineConfig(idle_bail_s=1000.0, wait_bail_s=30.0),
+    )
+    for _ in range(6):
+        eng.tick()
+        clock.advance(20.0)  # 120 s, never 30 s of unbroken waiting
+
+
+def test_a_step_note_is_recorded_even_when_the_step_is_not_done():
+    """The decision trace is stage B's whole deliverable.
+
+    The second clean run finished with five MoveTos in its trace and
+    nothing saying whether they were the clearance closing on a hostile,
+    the skirmish drift, or a walk to an item — because the log kept only
+    refusals and completions. A note is a step explaining itself; throwing
+    it away made the artifact unable to answer the question it exists for.
+    """
+
+    class Noting:
+        name = "clear_radius"
+
+        def __init__(self):
+            self.calls = 0
+
+        def step(self, snap, ctx):
+            self.calls += 1
+            return StepOutcome(
+                done=self.calls > 1, acted=True, note="closing on monster 7"
+            )
+
+    eng, _ = engine(states=[Noting()], config=EngineConfig(idle_bail_s=1000.0))
+    eng.tick()
+    assert any("closing on monster 7" in line for line in eng.report.log)
 
 
 def test_an_undeclared_wait_still_bails():
@@ -492,6 +635,7 @@ def test_an_undeclared_wait_still_bails():
     # which is what it was always for.
     eng, clock = engine(
         states=[WaitingStep(waiting=False)],
+        snaps=[hunted()],
         config=EngineConfig(idle_bail_s=10.0),
     )
     eng.tick()

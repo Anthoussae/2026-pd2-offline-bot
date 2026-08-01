@@ -56,6 +56,21 @@ class CombatModule(Protocol):
         configured count. Called by the ladder's rung 8, never in town."""
         ...
 
+    def approach(
+        self, snap: GameSnapshot, position: tuple[int, int]
+    ) -> Action | None:
+        """Close on somewhere the RUN wants fought that `engage` will not.
+
+        Every module gets to decide what "in a fight" means, and a run step
+        gets to want something dead that the module's own reach does not
+        cover — the clearance measures from its arrival point, the module
+        from the player. Without this seam those two disagree silently and
+        the step waits forever for a kill nobody is going to make (review
+        001). Return None to mean "not mine to do": the target is already
+        in reach, or a fight is in progress and its pauses are deliberate.
+        """
+        ...
+
 
 class FakeCombatModule:
     """A scripted stand-in for engine and ladder tests.
@@ -70,11 +85,14 @@ class FakeCombatModule:
         self,
         engage_script: Sequence[Action | None] = (),
         upkeep_script: Sequence[Action | None] = (),
+        approach_script: Sequence[Action | None] = (),
     ) -> None:
         self._engage = list(engage_script)
         self._upkeep = list(upkeep_script)
+        self._approach = list(approach_script)
         self.engage_calls = 0
         self.upkeep_calls = 0
+        self.approach_calls = 0
 
     def engage(self, snap: GameSnapshot, ctx: object = None) -> Action | None:
         self.engage_calls += 1
@@ -83,6 +101,12 @@ class FakeCombatModule:
     def upkeep(self, snap: GameSnapshot, ctx: object = None) -> Action | None:
         self.upkeep_calls += 1
         return self._upkeep.pop(0) if self._upkeep else None
+
+    def approach(
+        self, snap: GameSnapshot, position: tuple[int, int]
+    ) -> Action | None:
+        self.approach_calls += 1
+        return self._approach.pop(0) if self._approach else None
 
 
 # -- the class config ----------------------------------------------------------
@@ -185,6 +209,7 @@ _COMBAT_NUMBERS: dict[str, type] = {
     "dash_step": int,
     "retreat_subtiles": int,
     "reposition_subtiles": int,
+    "object_clearance": int,
     "restrike_s": float,
     "wait_for_revives_s": float,
     "revive_engaged_range": int,

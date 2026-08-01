@@ -6,13 +6,15 @@ from pd2bot import offsets
 from pd2bot.behavior.actions import AttackUnit, MoveTo, PickUpItem
 from pd2bot.behavior.engine import EngineContext
 from pd2bot.behavior.execute import RecordingExecutor
+from pd2bot.behavior.necro import CombatConfig, NecroCombat
 from pd2bot.behavior.run import build_states, load_run
-from pd2bot.behavior.steps import RunServices, build_registry
+from pd2bot.behavior.steps import RunServices, _chebyshev, build_registry
 from pd2bot.items import CarriedItems
 from pd2bot.pickit import Pickit, Rule
 from pd2bot.player import Player
 from pd2bot.snapshot import GameSnapshot
-from pd2bot.units import GroundItem, Monster
+from pd2bot.uistate import UIState
+from pd2bot.units import GameObject, GroundItem, Monster
 from pd2bot.world import Area
 
 REPO = Path(__file__).resolve().parent.parent
@@ -48,20 +50,41 @@ def monster(uid, pos):
     )
 
 
-def snap(pos=HOME, monsters=(), items=()):
+def snap(pos=HOME, monsters=(), items=(), allies=(), objects=(), ui=None, area=FIELD):
     return GameSnapshot(
         in_game=True, taken_at=0.0, player=player(pos),
-        area=Area(level_no=FIELD, position=(0, 0), size=(500, 500)),
+        area=Area(level_no=area, position=(0, 0), size=(500, 500)),
         monsters=tuple(monsters), ground_items=tuple(items),
+        allies=tuple(allies), objects=tuple(objects), ui=ui,
+    )
+
+
+def waypoint(pos):
+    return GameObject(
+        unit_id=11, kind=offsets.OBJ_WAYPOINT_A1, position=pos, mode=0
+    )
+
+
+def panels(*ids):
+    return UIState(open_panels=frozenset(ids))
+
+
+def revive(uid, pos):
+    return Monster(
+        unit_id=uid, kind=50, position=pos, hp=100, max_hp=100,
+        is_champion=False, is_boss=False, is_minion=False,
+        alignment=offsets.ALIGNMENT_FRIENDLY,
     )
 
 
 class StubCombat:
     """Returns a scripted action per engage call."""
 
-    def __init__(self, script=()):
+    def __init__(self, script=(), approach_script=()):
         self.script = list(script)
+        self.approach_script = list(approach_script)
         self.calls = 0
+        self.approach_calls = 0
 
     def engage(self, snap, ctx=None):
         self.calls += 1
@@ -69,6 +92,10 @@ class StubCombat:
 
     def upkeep(self, snap, ctx=None):
         return None
+
+    def approach(self, snap, position):
+        self.approach_calls += 1
+        return self.approach_script.pop(0) if self.approach_script else None
 
 
 # A fully-resolved pickit: the shipped file's ids await the T39 drill (its
@@ -185,6 +212,150 @@ def test_clearance_uses_the_player_position_when_there_is_no_arrival_note():
     step = make_step("clear_radius", services(clock), {"radius": 150, "center": "arrival"})
     ctx = context()  # no note at all
     assert not step.step(snap(monsters=[monster(1, (1002, 1000))]), ctx).done
+
+
+# -- the waypoint lock-out (stage B attempt 10) ---------------------------------
+
+
+def test_the_waypoint_step_walks_off_the_waypoint_it_landed_on():
+    """The user's request, from watching the run lock itself out.
+
+    Travelling puts the character ON the waypoint with the cursor still
+    over it, which makes the arrival square the one place an ordinary
+    click is likeliest to open a menu instead of doing what it meant.
+    """
+    clock = Clock()
+    svc = services(clock)
+    step = make_step("waypoint", svc, {"dest": 3})
+    executor = RecordingExecutor(clock=clock)
+    ctx = context(executor)
+    ctx.snapshot = lambda: snap(objects=[waypoint(HOME)])
+    outcome = step.step(snap(), ctx)
+    moves = [a for a in executor.actions if isinstance(a, MoveTo)]
+    assert moves, "it stayed standing on the waypoint"
+    assert _chebyshev(moves[0].target, HOME) >= svc.waypoint_step_off
+    # The arrival note is the WAYPOINT, not where we stepped to: the run's
+    # landmark does not move just because the character does.
+    assert ctx.notes["arrival"] == HOME
+    assert outcome.done
+
+
+def test_nothing_to_step_off_means_no_step():
+    # Conditioned on the hazard actually being there — an arrival with
+    # nothing clickable nearby behaves exactly as it always did.
+    clock = Clock()
+    step = make_step("waypoint", services(clock), {"dest": 3})
+    executor = RecordingExecutor(clock=clock)
+    ctx = context(executor)
+    ctx.snapshot = lambda: snap()  # no objects at all
+    step.step(snap(), ctx)
+    assert not [a for a in executor.actions if isinstance(a, MoveTo)]
+
+
+def test_a_stray_panel_outside_town_is_closed_not_waited_out():
+    """What actually ended attempt 10.
+
+    A mis-placed cast opened the waypoint menu. `GatedInput` refuses every
+    send while a blocking panel is open, so the bot kept deciding correctly
+    and kept reaching the game with none of it — for 10 s, until the
+    navigator gave up and the run chickened out with the area untouched.
+    """
+    clock = Clock()
+    closed = []
+    svc = services(clock, clear_panels=lambda: closed.append(1))
+    step = make_step("clear_radius", svc, {"radius": 50, "center": "arrival"})
+    ctx = context()
+    ctx.notes["arrival"] = HOME
+    outcome = step.step(snap(ui=panels(offsets.UI_WPMENU)), ctx)
+    assert closed, "the panel was left open"
+    assert outcome.acted and not outcome.done
+
+
+def test_panels_are_left_alone_in_town():
+    # Town opens panels on purpose all through the preamble; this recovery
+    # is for the field, where nothing does.
+    clock = Clock()
+    closed = []
+    svc = services(clock, clear_panels=lambda: closed.append(1))
+    step = make_step("clear_radius", svc, {"radius": 50, "center": "arrival"})
+    ctx = context()
+    ctx.notes["arrival"] = HOME
+    step.step(snap(ui=panels(offsets.UI_STASH), area=1), ctx)
+    assert not closed
+
+
+# -- review 001: the gap between the two radii ----------------------------------
+
+
+def test_clearance_asks_the_module_to_close_on_what_it_cannot_reach():
+    # The step measures from the arrival point, the module from the player,
+    # so a monster can be inside the clearance and outside the fight. The
+    # step used to call that patience and declare a wait.
+    clock = Clock()
+    hop = MoveTo((1008, 1000))
+    combat = StubCombat(approach_script=[hop])
+    step = make_step("clear_radius", services(clock, combat=combat),
+                     {"radius": 50, "center": "arrival"})
+    executor = RecordingExecutor(clock=clock)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    outcome = step.step(snap(monsters=[monster(1, (1045, 1000))]), ctx)
+    assert executor.actions == [hop]
+    assert outcome.acted and not outcome.waiting
+
+
+def test_clearance_still_declares_a_wait_when_the_module_says_no():
+    # The module refuses to close while a fight is genuinely in progress —
+    # its pauses (restrike cooldowns, waiting for the revives to take the
+    # front) are deliberate, and this must not have turned them into a
+    # charge. Patience is still patience.
+    clock = Clock()
+    combat = StubCombat()  # engage: None, approach: None
+    step = make_step("clear_radius", services(clock, combat=combat),
+                     {"radius": 50, "center": "arrival"})
+    ctx = context()
+    ctx.notes["arrival"] = HOME
+    outcome = step.step(snap(monsters=[monster(1, (1010, 1000))]), ctx)
+    assert combat.approach_calls == 1
+    assert outcome.waiting and not outcome.acted
+
+
+def test_the_clearance_reaches_a_hostile_that_started_out_of_reach():
+    """Review 001's validation, against the REAL combat module.
+
+    A hostile just inside `radius` (50) and just outside `engage_radius`
+    (40) is the exact shape that hung: `engage` returned None forever, the
+    step reported `waiting=True` forever, and `waiting` suppresses the idle
+    watchdog. Before the fix this loop reached its last tick having sent
+    nothing at all; now it closes the distance and strikes.
+    """
+    clock = Clock()
+    combat = NecroCombat(
+        config=CombatConfig(), is_walkable=lambda p: True, clock=clock
+    )
+    step = make_step("clear_radius", services(clock, combat=combat),
+                     {"radius": 50, "center": "arrival"})
+    here = {"pos": HOME}
+
+    def react(action):
+        if isinstance(action, MoveTo):
+            here["pos"] = action.target
+
+    executor = RecordingExecutor(clock=clock, on_execute=react)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    hostile = monster(1, (1045, 1000))
+    # A standing wall next to the hostile: approaching is gated on one, and
+    # placing it there means the wait-for-the-tanks phase ends immediately.
+    wall = [revive(900 + i, (1040, 1000)) for i in range(3)]
+    for _ in range(12):
+        step.step(snap(pos=here["pos"], monsters=[hostile], allies=wall), ctx)
+        clock.advance(0.5)
+        if any(isinstance(a, AttackUnit) for a in executor.actions):
+            break
+    assert any(isinstance(a, AttackUnit) for a in executor.actions), (
+        f"never reached the hostile: {executor.actions}"
+    )
 
 
 # -- pickup ---------------------------------------------------------------------

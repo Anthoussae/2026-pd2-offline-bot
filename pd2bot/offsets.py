@@ -768,6 +768,13 @@ CHAT_LAST_LINE_MAX = 160  # chat.py splits at 100 chars; this is slack, not a li
 # false negatives not).
 PLAYER_MODE_DEATH = 0
 PLAYER_MODE_DEAD = 17
+# 10 = SC, the cast-spell animation. Verified live by T48 (2026-08-01) on
+# this character: three bone-armor casts in town read 5 (town neutral) ->
+# 10 at 110-125 ms after the click -> 5 again at 610-640 ms. That is the
+# whole cast, measured, and it is what `GameActionExecutor` waits out
+# before sending the next CLICK — by reading this, not by sleeping a
+# guessed number (review 002).
+PLAYER_MODE_CASTING = 10
 
 # Monster UNIT_MODE values (kolbot sdk/types/sdk.d.ts:1590-1602, npcs.mode —
 # "same as monsters"): 0 = Death (dying animation), 12 = Dead. A dead

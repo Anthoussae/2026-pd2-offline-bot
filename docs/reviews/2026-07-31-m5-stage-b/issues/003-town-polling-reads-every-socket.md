@@ -1,6 +1,6 @@
 # 003 — Town waits re-read every inventory socket, ten times a second
 
-Severity: **P2**
+Severity: **P2** — **FIXED** 2026-08-01 (not yet re-measured live)
 
 `pd2bot/town.py` (`_await`, `poll_s`, the injected `carried`),
 `pd2bot/items.py` (`read_carried_items(with_sockets=True)` default).
@@ -53,3 +53,37 @@ dithering before touching `poll_s` again.
 A counter or timing assertion around a belt-fill verification showing the
 number of stat reads per poll drops to zero, plus a live re-run of T27 to
 see whether the preamble is visibly brisker.
+
+## Resolution (2026-08-01)
+
+`TownLayer` takes two readers instead of one, split along the line the
+finding drew: **deciding may be expensive, verifying may not.**
+
+- `carried` is the cheap read (`with_sockets=False`) and is what every
+  `_await` loop in the layer polls. That is all of them but one.
+- `carried_with_sockets` is used in exactly two places, both of which
+  decide something ABOUT an item rather than whether it still exists: the
+  cleanse's junk listing (its whitelist is socket-conditioned, R132) and
+  `deposit_to_stash`'s initial `keep` filtering. The `_gone` verification
+  inside that same deposit stays on the cheap reader.
+
+`read_carried_items` keeps defaulting to sockets-on, deliberately — a
+caller who forgets them gets `sockets=None`, which a permissive whitelist
+reads as "keep", and that failure is silent. What changed is that the
+town layer no longer takes that default for its loops. The wiring names
+both readers explicitly rather than relying on either default, since a
+silently-defaulted collaborator is the class of bug that module exists to
+prevent. A caller who injects only one reader gets it for both, so every
+existing test double behaves exactly as before.
+
+`poll_s` is left at 0.1 on purpose. The finding's advice was to re-measure
+the dithering before touching it again, and that measurement needs a live
+T27 — changing it now would be the same guess in the other direction.
+
+Tests: 3 new — the deposit's expensive read happens exactly once while its
+verification polls the cheap one; the cleanse still decides from the
+sockets reader; and one injected reader serves both.
+
+**Still owed: the live re-run of T27**, to see whether the preamble is
+visibly brisker. Until then this is a measured cost reduction with an
+unmeasured effect on the symptom the user actually reported.

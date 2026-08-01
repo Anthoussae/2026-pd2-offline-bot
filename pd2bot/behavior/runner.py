@@ -49,8 +49,12 @@ class TownStepFailed(ChickenExit):
     A `ChickenExit` subclass for the same reason `IdleBail` is one: the
     cycle's existing handler already does the right immediate thing (leave
     the game, keep cycling) and this module owns the counting. It is not a
-    vitals problem, so the runner books it separately.
+    vitals problem, so the runner books it separately — and says so to the
+    cycle as well, via `is_vitals` (R115), so its vitals backstop cannot
+    halt over a preamble failure and blame the character's health.
     """
+
+    is_vitals = False
 
 
 class TownStepHalt(CycleError):
@@ -64,7 +68,12 @@ class RunFailed(ChickenExit):
     enough — four different exception types escaped `run_games` and ended
     a session before this was written. Unattended running cannot depend
     on someone remembering to extend a list of survivable errors.
+
+    Not a vitals problem either (R115): whatever went wrong, the one
+    thing we know is that it was not the character's health.
     """
+
+    is_vitals = False
 
 
 class RunHalt(CycleError):

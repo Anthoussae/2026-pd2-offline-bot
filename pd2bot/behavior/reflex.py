@@ -181,6 +181,7 @@ def retreat_point(
     hostiles: list[tuple[int, int]],
     distance: int,
     is_walkable: Callable[[tuple[int, int]], bool],
+    accept: Callable[[tuple[int, int]], bool] | None = None,
 ) -> tuple[int, int] | None:
     """A walkable spot ~`distance` subtiles from `origin`, away from the pack.
 
@@ -190,6 +191,15 @@ def retreat_point(
     walkable, which callers must treat as "this escape is not available",
     never as "go anyway": warping onto unwalkable ground would burn the cast,
     the mana, and the hp cost for a teleport the game refuses.
+
+    `accept` is a second condition on the same ladder, for callers who want
+    somewhere away from the pack but not ANYWHERE away from it. The combat
+    module's idle drift uses it to refuse a step that would leave the fight
+    (review 001) — and because it rides the existing rotation ladder rather
+    than vetoing the one answer, a rejected straight-back step becomes a
+    LATERAL one instead of standing still. That distinction is the user's,
+    stated twice from watching live runs: standing still is the dangerous
+    option, so "cannot go backwards" must mean "go sideways", not "stop".
     """
     if not hostiles:
         base_angle = 0.0
@@ -206,7 +216,7 @@ def retreat_point(
             round(origin[0] + distance * math.cos(angle)),
             round(origin[1] + distance * math.sin(angle)),
         )
-        if is_walkable(candidate):
+        if is_walkable(candidate) and (accept is None or accept(candidate)):
             return candidate
     return None
 

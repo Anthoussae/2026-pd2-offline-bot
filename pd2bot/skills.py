@@ -96,6 +96,7 @@ def ensure_right_skill(
             f"skill {skill_id} has no hotkey in the table — cannot switch to it"
         )
 
+    started = clock()
     for _ in range(_PRESSES):
         gated.press_key(key)
         deadline = clock() + _VERIFY_TIMEOUT_S
@@ -106,8 +107,60 @@ def ensure_right_skill(
 
     raise SkillSwitchFailed(
         f"right skill reads {active()} after {_PRESSES} presses of the hotkey "
-        f"for skill {skill_id} — no cast will be sent on an unverified skill"
+        f"for skill {skill_id} — no cast will be sent on an unverified skill "
+        f"[{_failure_context(session, clock() - started)}]"
     )
+
+
+def _failure_context(session: GameSession, waited: float) -> str:
+    """What the world looked like at the moment a switch would not verify.
+
+    This exists because the failure has now outlived two theories and three
+    live runs. T47 pressed all six hotkeys and every one selected exactly
+    what `config/necro.toml` claims, so the bindings are right and the
+    presses land. T48 then showed a press sent 110 ms into a cast animation
+    still registers within 62 ms, so a cast does not eat them either. Two
+    more candidates die on the code as written: a blocking panel (the chat
+    console included) makes `press_key` raise `InputRefused` instead, and so
+    does losing the foreground.
+
+    What is left can only be told apart from inside the failure, so the next
+    occurrence carries its own evidence rather than costing another
+    supervised run. Everything here is read ONLY on the failure path and
+    every read is defended: an exception while explaining an exception would
+    replace the diagnosis with a traceback about the diagnosis.
+    """
+    parts = [f"waited {waited:.2f}s"]
+    try:
+        from pd2bot.player import read_player
+
+        player = read_player(session)
+        parts.append(
+            f"player mode {player.mode}, hp {player.hp}, mana {player.mana}"
+            if player is not None
+            else "player UNREADABLE"
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnosis must not raise
+        parts.append(f"player read raised {type(exc).__name__}")
+    try:
+        from pd2bot import uistate
+
+        state = uistate.read_ui_state(session)
+        parts.append(
+            f"ui {', '.join(state.names) or 'nothing open'}"
+            + (" (BLOCKING)" if state.blocks_input else "")
+        )
+    except Exception as exc:  # noqa: BLE001
+        parts.append(f"ui read raised {type(exc).__name__}")
+    try:
+        skills = read_active_skills(session)
+        parts.append(
+            f"left reads {skills.left_id}" if skills is not None
+            else "skills UNREADABLE"
+        )
+    except Exception as exc:  # noqa: BLE001
+        parts.append(f"skill read raised {type(exc).__name__}")
+    return "; ".join(parts)
 
 
 def belt_drink(gated: GatedInput, column: int) -> None:

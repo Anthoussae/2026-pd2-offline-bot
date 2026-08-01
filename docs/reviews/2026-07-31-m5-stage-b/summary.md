@@ -29,17 +29,48 @@ that unverified band.
 
 ## Findings
 
-| # | Sev | Title | File |
-|---|---|---|---|
-| [001](issues/001-reposition-can-strand-the-clearance.md) | **P1** | Repositioning can drift out of engagement and stall the run forever | `necro.py`, `steps.py` |
-| [002](issues/002-cast-settle-blocks-the-ladder.md) | **P2** | The cast settle blocks the tick the survival ladder needs | `execute.py` |
-| [003](issues/003-town-polling-reads-every-socket.md) | **P2** | Town waits re-read every inventory socket, 10x a second | `town.py`, `items.py` |
-| [004](issues/004-catch-all-masks-programming-errors.md) | P3 | The runner's catch-all cannot tell a bug from a bad moment | `runner.py` |
-| [005](issues/005-wiring-reaches-into-engine-privates.md) | P3 | The trace printer reaches into `engine._executor` | `wiring.py` |
+| # | Sev | Title | File | State |
+|---|---|---|---|---|
+| [001](issues/001-reposition-can-strand-the-clearance.md) | **P1** | Repositioning can drift out of engagement and stall the run forever | `necro.py`, `steps.py` | **fixed** 2026-08-01 |
+| [002](issues/002-cast-settle-blocks-the-ladder.md) | **P2** | The cast settle blocks the tick the survival ladder needs | `execute.py` | **fixed** 2026-08-01 |
+| [003](issues/003-town-polling-reads-every-socket.md) | **P2** | Town waits re-read every inventory socket, 10x a second | `town.py`, `items.py` | **fixed** 2026-08-01 |
+| [004](issues/004-catch-all-masks-programming-errors.md) | P3 | The runner's catch-all cannot tell a bug from a bad moment | `runner.py` | open |
+| [005](issues/005-wiring-reaches-into-engine-privates.md) | P3 | The trace printer reaches into `engine._executor` | `wiring.py` | open |
 
 001 must be fixed before any unattended run: it is a permanent hang, and
 the mechanism that would normally catch a hang was explicitly disabled on
 that path earlier in the same session.
+
+## Follow-up, 2026-08-01
+
+001, 002 and 003 are fixed; 685 tests pass and ruff is clean. Two of the
+three are also the review being wrong about something, which is worth
+recording as plainly as the fixes:
+
+- **The sim runtime was not 001.** This summary offered ~4.4 s per
+  scenario as circumstantial evidence that the bot was spending far more
+  ticks. It was not: `SimExecutor` inherits the real `time.sleep`, so the
+  runtime is 11 casts x `cast_settle_s` (0.4) = 4.4 s, every scenario
+  within 0.01 s of every other, and tick count is unchanged at 65 across
+  001's fix. It belonged to 002 — fixing it took the whole suite from
+  93.9 s to 2.4 s.
+- **The cast does not eat following input.** 002 was written on the
+  premise that a following command interrupts the cast, and T48 measured
+  a hotkey press sent 110 ms INTO an animation registering within 62 ms.
+  Only clicks are worth holding, so the ladder's potion rungs — keypresses
+  — are now explicitly exempt and never queue behind an animation.
+
+T48 also measured what nobody had: a cast is **610-640 ms**, which the
+0.4 s guess never covered.
+
+**The skill-switch failure is still open, and both its theories are now
+dead.** T47 pressed all six hotkeys and every one selected exactly what
+`config/necro.toml` claims; T48 killed the cast-eats-input explanation. A
+blocking panel (chat console included) and a lost foreground both raise
+`InputRefused` rather than `SkillSwitchFailed`, so they are excluded by
+construction. `ensure_right_skill` now attaches the state at the moment of
+failure — waited, player mode, UI panels, left-skill read — so the next
+occurrence is evidence rather than another supervised run.
 
 ## What was checked and found sound
 
