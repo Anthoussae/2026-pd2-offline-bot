@@ -1,176 +1,118 @@
-# Resume point — M5, review findings cleared; P6 wiring then stage B
+# Resume point — M5, P6 stage B: two full runs, review findings open
 
-Written 2026-07-31, updated the same day after the R132 batch. Read this
-plus [notes.md](notes.md) ("P4 build notes", "P5 build notes", "P5b — the
-R117 amendment") and you have the state; the gate artifact is
-[p5-sim-trace.md](p5-sim-trace.md), the architecture is in
-`docs/adr/2026-07-29-behavior-architecture.md`, and **R115 is the only
-request still open** in `docs/instruction-log.md`.
+Written 2026-07-31 after a long live session. Read this, then
+[the review](../../reviews/2026-07-31-m5-stage-b/summary.md), then
+[notes.md](notes.md). The architecture is in
+`docs/adr/2026-07-29-behavior-architecture.md`; the phase file is
+[06-staged-acceptance-closeout.md](06-staged-acceptance-closeout.md).
+
+Everything is committed and pushed on `m5-trial-run` (`0eb4034`).
+**666 tests, ruff clean.** R115 is the only unanswered request; the
+instruction log continues from R149.
 
 ## Where the milestone is
 
-M5 = the first end-to-end run (Cold Plains clearance, Hell). Phases:
-
 | Phase | State |
 |---|---|
-| P1 perception extensions | **done**, live-verified |
-| P2 input extensions | **done**, live-verified |
-| P3 town layer + waypoint | **done** (gate R114; commit cb63b67) |
-| P4 behaviour engine | **done** (sim-only) |
-| P5 combat + pickit | **done** (sim-only) |
-| P5b real pickit + hygiene (R117) | **done**; vocabulary closed (105 names, 0 pending) |
-| P6 stage A (town, drop gesture) | **PASSED** — T43 audit + T44 verification |
-| Review findings 002/003 + R132 batch | **done** (this session) |
-| P6 wiring checklist (review 005) | **done** — `pd2bot/wiring.py`, dry-run verified live |
-| P6 stage B (supervised Cold Plains clear) | **next** | ← here
+| P1 perception, P2 input, P3 town+waypoint | **done**, live-verified |
+| P4 behaviour engine, P5 combat+pickit, P5b hygiene | **done** (sim-only) |
+| P6 stage A (town, drop gesture) | **PASSED** |
+| P6 wiring (`pd2bot/wiring.py`) | **done**, live dry-run verified |
+| P6 stage B (supervised Cold Plains) | **partly** — see below |
 
-`623 tests, ruff clean.` All committed and pushed on `m5-trial-run`.
-**R130 is closed** — the commits were rewritten to the GitHub noreply
-address and pushed in the session that raised it; the log row saying
-otherwise was stale, and so was the claim here that four commits were
-waiting. The vocabulary is closed and the inventory cleanse is enabled;
-the only input path with no live evidence — ctrl+right-click — was
-verified in stage A.
+## What stage B achieved
 
-## What the R132 batch changed (2026-07-31, all sim/unit-tested)
+Nine live attempts. **The full run completed twice** — `[CVRL]`: town
+preamble, waypoint, clear_radius, pickup, done, clean leave. One of those
+involved real combat (the user confirmed it fought, and that it summoned
+three revives immediately).
 
-The user asked whether the cleanse was too conservative. It was, in
-exactly one place, and three neighbouring gaps got closed with it:
+Confirmed working live: bone armor cast as the first action of a game;
+the revive wall built before approaching; the town preamble end to end
+(heal, repair, belt, cleanse, stash, gold, merc); the waypoint trip; the
+decision trace.
 
-1. **`CarriedItem.sockets`** (R132a). A socket condition could not be
-   evaluated against a carried item, and the cleanse evaluates
-   permissively — so every necro head and archon plate was kept and
-   stashed whatever its sockets. `units.read_socket_count` now separates
-   "zero sockets" from "nothing read"; only the latter is None. The user
-   chose this over a conservative/ruthless toggle: strict and permissive
-   agree on every other condition, so with the field in place a toggle
-   changes nothing, and WITHOUT it a ruthless-strict mode would have
-   dropped the socketed bases the pickit collected on purpose.
-2. **Review 002** — `InputRefused` is caught at both engine send sites,
-   with `refusal_limit` escalating an unbroken streak to
-   `InputRefusedHalt`; `ReflexDecision.commit` defers every rung's
-   bookkeeping until the send lands.
-3. **Review 003** — `StepOutcome.waiting` declares a deliberate wait and
-   the watchdog treats it as progress. The wiring-time validation option
-   was deliberately not also taken (see the issue's resolution).
-4. **Full stash** — `StashFull` converts to a loop-halting
-   `StashFullHalt` at the runner boundary instead of escaping as an
-   unhandled `TownError`, and `warn_on_stash_pressure` gives notice
-   before the wall. Halting leaves the character in town, where the human
-   needs to be anyway.
+## START HERE — the P1 first
 
-Full inventory needed no new routine: suppress non-potion pickups,
-queue a field cleanse, empty the inventory next preamble. Ending a run
-early on a full inventory was considered and NOT done — it changes what
-the clearance step does, and stage B exists to validate that step as
-designed.
+**Do not run unattended until review finding 001 is fixed.** The combat
+repositioning added at the very end of the session (after the last live
+run, so it has NEVER executed against the game) can drift the player out
+of `engage_radius` while `clear_radius` still wants those monsters dead.
+`combat.engage` then returns None forever, the step reports
+`waiting=True`, and `waiting` suppresses the idle watchdog — a permanent
+hang with the alarm for hangs switched off on that exact path.
 
-## The wiring (done — `pd2bot/wiring.py`)
+The five findings are in
+[docs/reviews/2026-07-31-m5-stage-b/](../../reviews/2026-07-31-m5-stage-b/summary.md):
 
-The production assembly finally has a home; every review-005 checklist
-item is in it, and the resolution table is in that issue file. What a
-future session most needs to know:
+1. **001 (P1)** repositioning can strand the clearance — fix before any
+   unattended run.
+2. **002 (P2)** the 0.4 s cast settle blocks the tick the survival ladder
+   needs. Prefer waiting on the EFFECT (bone armor's stat is readable and
+   T46 characterised it) over a fixed sleep.
+3. **003 (P2)** town waits re-read every inventory socket at 10 Hz —
+   ~1200 stat reads per potion moved. Likely cause of the "dithering" the
+   `poll_s` change was meant to fix, and that change made it worse.
+4. **004/005 (P3)** runner catch-all can't tell a bug from a bad moment;
+   the trace printer reaches into `engine._executor`.
 
-- **Session-scoped**: `SafetyMonitor` (the death latch is instance state
-  — a per-game monitor would clear it), `TownLayer` (so the cleanse
-  baseline is session-wide), the navigator, the pickit and configs.
-- **Per-game**: the combat module, the ladder, the executor and
-  `RunServices` — that is what bounds the collections review 005 called
-  unbounded.
-- `SessionBaseline` **refuses to capture outside a game**: the inventory
-  reads empty there, and an empty baseline protects nothing rather than
-  everything.
-- The CLI is `python -m pd2bot.wiring --games N [--chicken PCT]
-  [--run FILE] [--dry-run]`. `--dry-run` assembles everything, builds a
-  throwaway engine (which is what proves the run file and step registry
-  compose) and prints what resolved, sending nothing.
+An **ADR candidate** is recorded and worth writing when 001 is resolved:
+*when may a wait suppress the never-idle watchdog?* `waiting` was added
+for a good reason and became the reason a hang is invisible.
 
-Live dry-run through the bridge resolved to: necromancer, cold-plains
-(`town_preamble, waypoint, clear_radius, pickup, done`), 16 pickit rules
-/ 0 pending, cleanse ENABLED, belt capacity `{healing 8, mana 4, rejuv
-4}`, chicken 35%, idle bail 10 s, refusal limit 50.
+## Then: the unexplained skill-switch failure
 
-## START HERE
+`SkillSwitchFailed` recurred in **three** separate runs on three
+different skill pairs (95←83, 68←83, 68←95) — the right slot stays on
+whatever was last selected. It is survivable now (absorbed like a refused
+send) but every failed desecrate is a thinner revive wall.
 
-**Stage B, a supervised Cold Plains clear** — the first time the
-bot fights anything. Everything in `necro.py`, ladder rungs 3-7 and the
-clearance step is sim-proven only, and the sim is a model of the game,
-not the game.
+Two live theories, neither confirmed:
 
-Per the phase file, stage B is ONE game at radius ~50 with the chicken
-raised to 50%, user hovering, hands near the controls:
+- the hotkey bindings differ from `config/necro.toml` — **`drills/t47_hotkey_audit.py` is written and unrun**; it presses F1-F6 and
+  reads back what each selects, which settles it in ~30 seconds;
+- the user's own (from manual play): bone armor has a slow cast animation
+  and following commands interrupt it, so the cast is spent and the buff
+  never lands — which from the bot's side looks exactly like a recast
+  loop. This is what finding 002's settle was trying to address.
 
-```
-python -m pd2bot.wiring --games 1 --chicken 50 --run runs/cold-plains-stageb.toml
-```
+## Open user requests
 
-That run file does not exist yet — stage B's radius-50 variant is the
-first thing to write. Watch for: the wait-for-revives beat, the
-dash/strike/retreat shape, bone-armor recasts, desecrate->revive
-maintenance, first potion drinks. Collect the decision trace
-(`executor.trace`) and compare it against `p5-sim-trace.md`.
+- **R115** — should `IdleBail` share the cycle's chicken counter? Now the
+  same shape as `StashFullHalt`/`TownStepHalt`; decide them together.
+- The user asked for a wider **patrol** around the waypoint ("2 screens in
+  each direction"). Note radius 50 already IS ~2 screens; the reason the
+  bot does not roam is that `clear_radius` has no patrol — it stands and
+  waits for the radius to read clear, and perception (80) exceeds the
+  radius, so it can verify from a standstill. A real patrol (visit sample
+  points so perception sweeps the area) is a **new feature** and P6's
+  phase file puts features out of scope — needs a decision.
+- The user is willing to **keep wrongly-picked items** for examination.
+  Probably unnecessary now: pickup logs its decision (kind, quality,
+  sockets, matching rule), so a surprise explains itself.
 
-**R115** (IdleBail sharing the cycle's chicken counter) is still
-unanswered. Note it is now the same shape as `StashFullHalt`, which took
-the "halt without leaving" route deliberately — worth deciding both
-together.
+## What this session changed (25 commits)
 
-P5b context: at the gate the user supplied the real pickup spec (R117)
-+ five clarifications (R118, all answered). Potion protocol v2 (belt
-first, reserve 2/type in inventory, drink ALL excess incl. rejuvs,
-never stash potions), the real pickit over a provenance-tracked
-vocabulary (most ids pending T39; unresolved names fail SAFE — no
-pickup, and the cleanse is disabled entirely), and the inventory
-cleanse (ctrl+right-click drop; town preamble pass + field pass in
-dead air only). See the phase file `05b-real-pickit-and-hygiene.md`.
+Highlights, all live-diagnosed:
 
-## What P4 and P5 built
+- **The item vocabulary is anchored to D2 CODES** (R144), not kind ids.
+  SIX of seven elite armours were wrong — the bot picked up a Wire Fleece
+  believing it was a Kraken Shell. `GOLD_KIND` was also wrong (523 is an
+  elixir; gold is 538).
+- **Unit dedup is per TYPE.** D2 ids are unique only within a type; a
+  monster and the Act 1 waypoint were both id 11, and objects lost every
+  collision. The fix took the live snapshot from 9 objects to 22.
+- **The stash tab question is retired** (R134). Materials self-route from
+  the regular tab (T45), so deposits toggle only on REFUSAL. The whole
+  tab-inference mechanism is deleted.
+- **Armor down is a trigger, not an unknown** (T46). Absent 132/133 with a
+  healthy stat list means the armor is DOWN, which is why it never cast.
+- **The runner survives anything unexpected.** `DeathHalt` and
+  `CycleError` propagate; everything else is counted and retried.
+- Review 002/003 fixed (refused sends, declared waits), plus
+  pacing-vs-cooldown split out after the fix caused a livelock.
 
-`pd2bot/behavior/` — the whole decision layer, ADR drafted (proposed,
-finalize in P6):
-
-- **engine.py** — ticked loop: snapshot -> `SafetyMonitor.tick()`
-  (raises pass through) -> reflex ladder -> current run step. A firing
-  rung consumes the tick, so offense is skipped by construction.
-  `IdleBail` watchdog after 10 s of no sends and no progress out of town.
-- **reflex.py** — the R49 ladder, rungs 3-8. Cooldowns, blood-warp
-  position-verify, town suppression of rungs 3-7. Belt keys follow R53
-  (mana 1, rejuv 2, heal 3+4), derived from `[belt] columns`.
-- **necro.py** — R47.2's skirmish pattern: contact, wait for revives to
-  tank, dash in SHORT HOPS (so the ladder gets a look between them),
-  strike, retreat, repeat. Poison does the killing, so targets are
-  chosen fresh-first with a 6 s restrike. Desecrate -> revive to 3,
-  bounded, never in town.
-- **execute.py** — the only module that sends: every cast goes through
-  `ensure_right_skill` (no cast on an unverified skill), attacks hold
-  SHIFT, pickups must not. Records the decision trace.
-- **steps.py** — the five step handlers + the wired registry.
-  `clear_radius` needs the radius empty for 5 s before finishing;
-  `pickup` sweeps with a shared, bounded inventory-full guard.
-- **run.py / combat.py** — runs and class configs as strict TOML.
-- **runner.py** — the `run_games` callback boundary, idle-bail counting.
-- `pd2bot/pickit.py` + `config/pickit.toml` — top-down, first-match-wins
-  loot rules over kind and quality (all perception can see).
-
-## What P6 does (read `06-staged-acceptance-closeout.md`)
-
-The staged live ladder (R46 Q8), the bridge, and a human. Everything
-below is sim-proven but has never met the game:
-
-1. Wire the real `GameActionExecutor` to a live `GatedInput`/`Navigator`
-   and the real `TownLayer`/`WaypointTravel` behind the two blocking
-   steps. Feed `chicken_life_pct` (35) into `SafetyConfig`.
-2. **Verify gold's kind (523)** on the first real drop — inherited from
-   kolbot, never confirmed on this client, and the pickit's gold rule
-   may simply never fire until it is.
-3. The bone-armor stat's falls-when-hit half still owes a live check
-   (deferred from P1 drill B); the R47 fallback covers an unreadable
-   stat.
-4. Finalize the ADR, write `docs/architecture/behavior.md`, README
-   section on the drill harness + drill log + bridge-run, and the date
-   normalization sweep (both noted in the P3 notes).
-
-## Live-test protocol (needed again from P6 on)
+## Live-test protocol
 
 The user starts the elevated bridge once per session:
 
@@ -178,30 +120,37 @@ The user starts the elevated bridge once per session:
 powershell -ExecutionPolicy Bypass -File "C:\dev\2026-pd2-bot\2026-pd2-offline-bot\tools\elevated-bridge.ps1"
 ```
 
-The `-ExecutionPolicy Bypass` child-process form is REQUIRED. Drills
-live in `drills/` on the `pd2bot/drill.py` harness; cancel with:
+The `-ExecutionPolicy Bypass` child-process form is REQUIRED. The agent
+then drops `<id>.cmd.ps1` into `%LOCALAPPDATA%\pd2bot-bridge` and reads
+`<id>.out.txt`. Cancel a drill with:
 
 ```
 powershell -File tools\drill-cancel.ps1
 ```
 
-Everything from P3 still holds: calibrations in `pd2bot/uipoints.py`
-(re-run after any window/resolution change), NPC dialog rows are
-keyboard ordinals, the charm inventory shares the container (y >= 4),
-the Cube is unmovable, PD2 potion kinds 610/611 mana / 606 healing /
-530/531 rejuv, rejuvs are materials, the materials tab makes the stash
-read empty, services are paid from the shared stash. Area ids: Rogue
-Encampment 1, Cold Plains 3.
+Run the bot:
 
-## Suggested opening prompt for a fresh conversation
+```
+python -m pd2bot.wiring --games 1 --chicken 50 --run runs/cold-plains-stage-b.toml
+```
 
-> Continuing the PD2 bot, milestone M5. P6 stage A is done and the
-> review's P2 findings (002, 003) plus the R132 cleanse/fullness batch
-> are fixed — 609 tests, ruff clean, uncommitted. Next is the P6 wiring
-> checklist from `docs/reviews/2026-07-31-m5-trial-run/issues/005-minor-
-> cleanups.md`, then stage B, the first supervised Cold Plains clear.
-> Read `docs/plans/2026-07-29-m5-trial-run/RESUME.md` first, then that
-> review's `summary.md`, then the phase file
-> `06-staged-acceptance-closeout.md`. Stage B needs the bridge and a
-> human watching. Instruction-log IDs continue from R133; R115 is the
-> only open request.
+`--dry-run` assembles everything and prints what resolved without sending
+anything. Stage B is radius 50 with the chicken raised to 50%; the full
+run (`runs/cold-plains.toml`) is radius 150.
+
+Still true from P3: calibrations in `pd2bot/uipoints.py` (re-run after any
+window/resolution change), NPC dialog rows are keyboard ordinals, the
+charm inventory shares the container (y >= 4), the Cube is unmovable, PD2
+potion kinds 610/611 mana / 606 healing / 530/531 rejuv, services are paid
+from the shared stash. Area ids: Rogue Encampment 1, Cold Plains 3. This
+character's stash is PD2's EXPANDED one (`game_location 8`, ~360 items);
+the classic stash (7) is empty, which is what broke the old tab
+inference.
+
+## Known-unclean
+
+- Leaving the game sometimes ends on an **unrecognized menu screen**
+  (`[CV--]`, 3 image controls). M4 cycle, not the run. Unfixed.
+- `test_behavior_sim` scenarios take ~4.4 s each (was negligible). The
+  bot spends far more ticks for the same outcome; finding 001 is the
+  likeliest explanation, so this should resolve with it.
