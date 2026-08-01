@@ -281,16 +281,22 @@ class Rule:
 
 
 def _belt_count(carried: CarriedItems, potion_type: str | None) -> int:
-    return sum(1 for i in carried.belt if _potion_type_of(i) == potion_type)
+    return sum(1 for i in carried.belt if potion_type_of(i) == potion_type)
 
 
 def _inventory_count(carried: CarriedItems, potion_type: str | None) -> int:
     return sum(
-        1 for i in carried.main_inventory if _potion_type_of(i) == potion_type
+        1 for i in carried.main_inventory if potion_type_of(i) == potion_type
     )
 
 
-def _potion_type_of(item: CarriedItem | GroundItem) -> str | None:
+def potion_type_of(item: CarriedItem | GroundItem) -> str | None:
+    """Which belt column this item wants, or None if it is not a potion.
+
+    Public because the pickup step needs it too: a potion that will not
+    come up means the BELT is full for its type, which is a completely
+    different fact from "the inventory grid is full" (stage B run 4).
+    """
     if item.kind in offsets.HEALING_POTION_KINDS:
         return "healing"
     if item.kind in offsets.MANA_POTION_KINDS:
@@ -380,7 +386,7 @@ def cleanse_keep(pickit: Pickit) -> Callable[[CarriedItem], bool] | None:
         return None
 
     def keep(item: CarriedItem) -> bool:
-        if _potion_type_of(item) is not None:
+        if potion_type_of(item) is not None:
             return True
         return pickit.wants(item, None, mode="permissive")
 

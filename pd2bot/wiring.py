@@ -218,6 +218,7 @@ class LiveBot:
     engine_config: EngineConfig = field(default_factory=EngineConfig)
     clock: Callable[[], float] = time.monotonic
     should_stop: Callable[[], bool] | None = None
+    _engines: list[BehaviorEngine] = field(default_factory=list)
 
     @property
     def cleanse_enabled(self) -> bool:
@@ -282,8 +283,24 @@ class LiveBot:
             clock=self.clock,
         )
 
+    def engines(self) -> list[BehaviorEngine]:
+        """Every engine built this session, newest last.
+
+        Kept because the run's whole value at stage B is its DECISION TRACE
+        — the phase file asks for it explicitly, to compare against the sim
+        — and until now a completed run printed one line of cycle summary
+        and threw the rest away. Run 4 finished the first end-to-end Cold
+        Plains clear and left no record of what it decided.
+        """
+        return self._engines
+
     def runner(self) -> BehaviorRunner:
-        return BehaviorRunner(self.engine_factory)
+        def factory(session: GameSession) -> BehaviorEngine:
+            engine = self.engine_factory(session)
+            self._engines.append(engine)
+            return engine
+
+        return BehaviorRunner(factory)
 
     def cycle(self) -> GameCycle:
         return GameCycle(self.session, MenuInput(self.session))
@@ -441,6 +458,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
 
     report = bot.cycle().run_games(bot.runner(), max_games=args.games)
     print(f"\n{report.summary() if hasattr(report, 'summary') else report}")
+    for index, engine in enumerate(bot.engines(), start=1):
+        print(f"\n--- game {index}: {engine.report.summary()} ---")
+        for line in engine.report.log:
+            print(f"  {line}")
     return 0
 
 

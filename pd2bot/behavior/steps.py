@@ -32,7 +32,7 @@ from pd2bot.behavior.actions import MoveTo, PickUpItem
 from pd2bot.behavior.engine import EngineContext, StepOutcome
 from pd2bot.behavior.run import ParamSpec, StepRegistry, StepSpec
 from pd2bot.items import CarriedItems
-from pd2bot.pickit import Pickit
+from pd2bot.pickit import Pickit, potion_type_of
 from pd2bot.snapshot import GameSnapshot
 from pd2bot.units import GroundItem
 
@@ -86,6 +86,11 @@ class RunServices:
     # panels open, which is precisely what must never happen in a fight.
     cleanse: Callable[[], int] | None = None
     cleanse_queued: bool = False
+    # Potion types the belt has refused this game. Kept apart from
+    # `inventory_full` because they are different facts with different
+    # remedies: the cleanse can free inventory grid space, and nothing
+    # the bot does in the field can empty a full belt column.
+    belt_full: set[str] = field(default_factory=set)
     cleanse_safe_radius: int = 40
 
 
@@ -172,10 +177,14 @@ class _PickupMixin:
             action, _ = self.services.pickit.decide(item, carried)
             if action == "skip":
                 continue
-            if action != "belt" and self.services.inventory_full:
-                # Belt-bound potions keep being attempted even now: they
-                # route to the belt, not the inventory grid, so a full
-                # inventory does not stop them.
+            if action == "belt":
+                # Belt-bound potions are unaffected by a full inventory —
+                # they route to the belt — but a belt column that has
+                # already refused this type will refuse it again, and
+                # re-attempting it every tick is how run 4 spent its time.
+                if potion_type_of(item) in self.services.belt_full:
+                    continue
+            elif self.services.inventory_full:
                 continue
             found.append(item)
         return found
@@ -203,11 +212,34 @@ class _PickupMixin:
             return False  # the last click is still resolving
         attempts = self.services.attempts.get(item.unit_id, 0)
         if attempts >= self.services.pickup_attempts:
-            # It will not come up. The only observable cause we can
-            # distinguish is "the inventory has no room" — item sizes are
-            # unreadable (P1), so free-cell arithmetic is not available and
-            # persistence IS the signal.
             self.services.stuck.add(item.unit_id)
+            potion = potion_type_of(item)
+            if potion is not None:
+                # A potion routes to the BELT, so a potion that will not come
+                # up says the belt is full for its type — NOT that the
+                # inventory grid is. Stage B run 4 conflated the two and
+                # reported "INVENTORY FULL" four times for three potions,
+                # while the inventory had room the whole time. Worse, it
+                # looped: marking full queued a cleanse, the cleanse cleared
+                # `inventory_full` and `stuck`, the same potion was retried,
+                # and it failed again for the same unchanged reason.
+                #
+                # Recorded per TYPE, because that is the granularity the belt
+                # refuses at — same reasoning as `fill_belt`'s own `full` set.
+                if potion not in self.services.belt_full:
+                    self.services.belt_full.add(potion)
+                    self.services.alert(
+                        f"belt full for {potion}: a {potion} potion at "
+                        f"{item.position} would not come up after "
+                        f"{self.services.pickup_attempts} attempts. Leaving "
+                        f"{potion} potions this game; the inventory has "
+                        "nothing to do with it."
+                    )
+                return False
+            # A non-potion that will not come up IS the inventory-full tell.
+            # The only observable cause we can distinguish is "the inventory
+            # has no room" — item sizes are unreadable (P1), so free-cell
+            # arithmetic is not available and persistence IS the signal.
             self._mark_inventory_full(item)
             # A failed pickup is the tell for accidental-pickup junk taking
             # up room (R117): ask for a cleanse at the next safe moment.
