@@ -6,12 +6,14 @@ from pd2bot.behavior.engine import IdleBail
 from pd2bot.behavior.runner import (
     BehaviorRunner,
     IdleLoopHalt,
+    RunFailed,
+    RunHalt,
     StashFullHalt,
     TownStepFailed,
     TownStepHalt,
 )
 from pd2bot.cycle import CycleError
-from pd2bot.safety import ChickenExit
+from pd2bot.safety import ChickenExit, DeathHalt
 from pd2bot.town import StashFull, TownError
 
 
@@ -182,3 +184,58 @@ def test_stash_full_is_still_its_own_case_not_a_town_failure():
     with pytest.raises(StashFullHalt):
         r(None)
     assert r.town_failures == 0
+
+
+# -- the catch-all: the fourth escape was one too many ----------------------------
+
+
+def test_an_unanticipated_error_costs_the_game_not_the_session():
+    """Stage B run 5 died on `SkillSwitchFailed` — the FOURTH exception type
+    to escape run_games this milestone, after InputRefused, StashFull and
+    TownError. Each fix named one class and left the next able to walk out.
+    A bot meant to run unattended cannot depend on someone remembering to
+    extend a list of survivable errors, so the default is now inverted."""
+    r = runner([RuntimeError("right skill reads 83 after 3 presses")])
+    with pytest.raises(RunFailed, match="RuntimeError"):
+        r(None)
+    assert r.run_failures == 1
+
+
+def test_run_failed_leaves_the_game_and_keeps_cycling():
+    assert issubclass(RunFailed, ChickenExit)
+
+
+def test_the_same_unexpected_failure_twice_halts():
+    alerts = []
+    r = runner([ValueError("one"), ValueError("two")], alerts)
+    with pytest.raises(RunFailed):
+        r(None)
+    with pytest.raises(RunHalt, match="2 games in a row"):
+        r(None)
+    assert len(alerts) == 1
+
+
+def test_the_death_latch_still_propagates_untouched():
+    """The one thing the catch-all must never swallow: after a death the bot
+    sends nothing, ever, and the cycle owns that."""
+    r = runner([DeathHalt("dead")])
+    with pytest.raises(DeathHalt):
+        r(None)
+    assert r.run_failures == 0
+
+
+def test_a_cycle_error_still_propagates_untouched():
+    r = runner([CycleError("wrong difficulty")])
+    with pytest.raises(CycleError):
+        r(None)
+    assert r.run_failures == 0
+
+
+def test_a_completed_run_resets_the_unexpected_count():
+    r = runner([ValueError("one"), None, ValueError("two")])
+    with pytest.raises(RunFailed):
+        r(None)
+    r(None)
+    assert r.run_failures == 0
+    with pytest.raises(RunFailed):
+        r(None)

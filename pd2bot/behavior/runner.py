@@ -30,7 +30,7 @@ from collections.abc import Callable
 from pd2bot.behavior.engine import BehaviorEngine, IdleBail
 from pd2bot.cycle import CycleError
 from pd2bot.memory import GameSession
-from pd2bot.safety import ChickenExit
+from pd2bot.safety import ChickenExit, DeathHalt
 from pd2bot.town import StashFull, TownError
 
 
@@ -55,6 +55,20 @@ class TownStepFailed(ChickenExit):
 
 class TownStepHalt(CycleError):
     """A town step failed twice running. Structural, not luck. Halting."""
+
+
+class RunFailed(ChickenExit):
+    """The run raised something nobody anticipated. Leave, try again.
+
+    The catch-all, and it exists because the named cases kept not being
+    enough — four different exception types escaped `run_games` and ended
+    a session before this was written. Unattended running cannot depend
+    on someone remembering to extend a list of survivable errors.
+    """
+
+
+class RunHalt(CycleError):
+    """The same unexpected failure twice running. Halting."""
 
 
 class StashFullHalt(CycleError):
@@ -118,16 +132,19 @@ class BehaviorRunner:
         *,
         idle_bail_max: int = 2,  # consecutive; an idle loop is a bug (R47.9)
         town_fail_max: int = 2,  # consecutive; twice is not bad luck
+        run_fail_max: int = 2,  # consecutive unexpected errors
         alert: Callable[[str], None] = _default_alert,
         stash_alert: Callable[[str], None] = _default_stash_alert,
     ) -> None:
         self._engine_factory = engine_factory
         self._idle_bail_max = idle_bail_max
         self._town_fail_max = town_fail_max
+        self._run_fail_max = run_fail_max
         self._alert = alert
         self._stash_alert = stash_alert
         self.idle_bails = 0  # consecutive, not lifetime
         self.town_failures = 0  # consecutive, not lifetime
+        self.run_failures = 0  # consecutive, not lifetime
 
     def __call__(self, session: GameSession) -> None:
         """The callback `cycle.run_games` invokes once per created game."""
@@ -165,6 +182,10 @@ class BehaviorRunner:
                 self._alert(reason)
                 raise TownStepHalt(reason) from exc
             raise TownStepFailed(str(exc)) from exc
+        except (DeathHalt, CycleError):
+            # The two that MUST reach the cycle untouched: the death latch is
+            # permanent, and a CycleError is already the loop-halting kind.
+            raise
         except IdleBail as exc:
             self.idle_bails += 1
             if self.idle_bails >= self._idle_bail_max:
@@ -175,6 +196,31 @@ class BehaviorRunner:
                 self._alert(reason)
                 raise IdleLoopHalt(reason) from exc
             raise  # the cycle's ChickenExit path leaves the game, routinely
+        except ChickenExit:
+            raise  # a real vitals chicken: the cycle books it, not us
+        except Exception as exc:
+            # ANYTHING else the run raised. This clause exists because the
+            # named ones kept not being enough: InputRefused escaped and
+            # ended a session (review 002), then StashFull did, then the
+            # parent TownError did, and then `SkillSwitchFailed` did — four
+            # times, one class at a time, each fix leaving the next one able
+            # to walk out. A bot meant to run unattended cannot have a list
+            # of survivable errors that someone must remember to extend.
+            #
+            # So the default flips: everything is survivable except what is
+            # explicitly not (the two above). An unexpected error costs the
+            # game, not the session — and if it repeats it is structural, so
+            # the second one halts loudly rather than cycling forever.
+            self.run_failures += 1
+            if self.run_failures >= self._run_fail_max:
+                reason = (
+                    f"the run failed {self.run_failures} games in a row with "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                self._alert(reason)
+                raise RunHalt(reason) from exc
+            raise RunFailed(f"{type(exc).__name__}: {exc}") from exc
         else:
             self.idle_bails = 0
             self.town_failures = 0
+            self.run_failures = 0
