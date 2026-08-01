@@ -79,6 +79,9 @@ def make(monkeypatch, *, active_skill=None, player=None, walk=None):
         walk_to=walk if walk is not None else walked.append,
         hotkeys={offsets.SKILL_BONE_ARMOR: VK_F1, offsets.SKILL_DESECRATE: VK_F5},
         clock=lambda: 0.0,
+        # The cast settle is real time in the game and must be no time
+        # here — every cast test would otherwise pay 0.4 s.
+        sleep=lambda seconds: None,
     )
     return executor, gated, walked, state
 

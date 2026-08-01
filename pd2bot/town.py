@@ -210,7 +210,11 @@ class TownConfig:
     # (R104). The menu highlights per key, and D2 samples input per
     # frame at 25 fps, so this is comfortably more than one frame.
     key_step_s: float = 0.15
-    poll_s: float = 0.2
+    # How often a wait re-checks. Halved from 0.2 after the user watched
+    # the bot 'dither' on arriving somewhere: the panel or dialog was
+    # already up and this was the lag before noticing. Cheap — these are
+    # memory reads — and it tightens every wait in the layer at once.
+    poll_s: float = 0.1
     # The stash's contents populate progressively after a tab switch — T15
     # caught a read with 10 of 18 items still in flight — so a tab toggle
     # must settle before its effect is read.

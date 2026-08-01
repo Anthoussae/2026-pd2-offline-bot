@@ -129,17 +129,36 @@ class ReflexDecision:
     ladder's promise is that it re-decides from fresh state every tick, and
     committing at decision time broke that promise precisely when input was
     being refused — which correlates with things going wrong (review 002).
+
+    `on_attempt` is the other half, and the difference between the two is
+    worth stating because collapsing them cost a live run. A COOLDOWN says
+    "the resource is spent" and must only start when the action actually
+    happened — that is `commit`, and it is review 002's point. PACING says
+    "do not spam this", and it has to record even when the send failed:
+    otherwise an action that keeps failing is retried at tick rate forever.
+
+    Stage B run 9 is what that looks like. The bone-armor switch would not
+    take, the rung fired, the send failed, nothing was recorded, and the
+    rung fired again on the very next tick — fifteen times in a row, every
+    tick consumed, the run unable to take a single step. A crash had become
+    a livelock.
     """
 
     rung: str
     action: Action
     reason: str
     commit: Callable[[], None] | None = None
+    on_attempt: Callable[[], None] | None = None
 
     def commit_sent(self) -> None:
         """Called by the engine once the action left the building."""
         if self.commit is not None:
             self.commit()
+
+    def commit_attempted(self) -> None:
+        """Called whether or not the action landed — pacing only."""
+        if self.on_attempt is not None:
+            self.on_attempt()
 
 
 def _chebyshev(a: tuple[int, int], b: tuple[int, int]) -> int:
@@ -527,7 +546,10 @@ class ReflexLadder:
                 rung="upkeep",
                 action=CastSelf(cfg.armor_skill_id),
                 reason=why,
-                commit=lambda: setattr(self, "_armor_attempt", now),
+                # PACING, not a cooldown: recorded even when the send
+                # fails, or a switch that never takes retries at tick rate
+                # and starves the whole run (stage B run 9).
+                on_attempt=lambda: setattr(self, "_armor_attempt", now),
             )
         if not in_town and self._combat_upkeep is not None:
             action = self._combat_upkeep(snap)

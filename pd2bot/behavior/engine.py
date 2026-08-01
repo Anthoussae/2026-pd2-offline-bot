@@ -260,12 +260,15 @@ class BehaviorEngine:
             try:
                 self._executor.execute(decision.action)
             except SEND_DID_NOT_LAND as exc:
-                # Do NOT commit the rung's bookkeeping and do NOT mark
+                # Do NOT commit the rung's cooldown and do NOT mark
                 # activity: nothing happened, so the next tick must be free
-                # to decide the very same thing again.
+                # to decide the very same thing again. PACING is different
+                # and is recorded either way — see `ReflexDecision`.
+                decision.commit_attempted()
                 self._note_refusal(f"reflex {decision.rung}", exc)
                 self._check_idle(snap, now)
                 return self.complete
+            decision.commit_attempted()
             decision.commit_sent()
             self._refusal_streak = 0
             self._mark_activity(self._clock())

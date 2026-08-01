@@ -521,6 +521,10 @@ def build_sim(
         pickit=pickit,
         carried=world.carried,
         clock=world.clock,
+        # The settle waits for a CLIENT to finish loading, which the sim
+        # does not model — so it costs no world time here. Advancing the
+        # world through it would shift every scripted spawn instead.
+        sleep=lambda seconds: None,
         cleanse=world.cleanse_inventory,
         **({"alert": alert} if alert is not None else {}),
     )

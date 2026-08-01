@@ -124,7 +124,8 @@ def fire(ladder, snapshot):
     """
     decision = ladder.evaluate(snapshot)
     if decision is not None:
-        decision.commit_sent()
+        decision.commit_attempted()  # pacing: recorded either way
+        decision.commit_sent()  # cooldowns: only because this one landed
     return decision
 
 
@@ -539,3 +540,33 @@ def test_armor_above_the_threshold_is_left_alone():
     # stated "keep it above 50%" floor.
     ladder, _ = make_ladder(armor=0.8)
     assert ladder.evaluate(snap(player(hp=1000), area=TOWN)) is None
+
+
+def test_a_failing_recast_is_still_paced():
+    """Stage B run 9: the bone-armor switch would not take, so the rung
+    fired, the send failed, nothing was recorded, and it fired again on the
+    very next tick — fifteen times running, every tick consumed, the run
+    unable to take a single step. Absorbing the failure had turned a crash
+    into a livelock.
+
+    Pacing must survive a failed send. A COOLDOWN must not (review 002):
+    that is why they are now two different callables.
+    """
+    ladder, clock = make_ladder(armor=0.0)
+    first = ladder.evaluate(snap(player(hp=1000), area=TOWN))
+    assert first.rung == "upkeep"
+    first.commit_attempted()  # the send FAILED: pacing only, no commit
+    assert ladder.evaluate(snap(player(hp=1000), area=TOWN)) is None
+    clock.advance(2.5)
+    assert ladder.evaluate(snap(player(hp=1000), area=TOWN)).rung == "upkeep"
+
+
+def test_a_refused_heal_cooldown_is_still_not_started():
+    """The other side of the split, and review 002's actual point: a
+    cooldown says the resource is spent, so a heal that never happened must
+    be offered again immediately."""
+    ladder, _ = make_ladder()
+    first = ladder.evaluate(snap(player(hp=900)))
+    assert first.rung == "heal"
+    first.commit_attempted()  # failed send: pacing runs, cooldown does not
+    assert ladder.evaluate(snap(player(hp=900))).rung == "heal"

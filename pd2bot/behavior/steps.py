@@ -176,9 +176,15 @@ class WaypointStep:
         if ctx.snapshot is None:
             return False
         deadline = self.services.clock() + self.settle_timeout_s
+        # Bounded by COUNT as well as by time: an injected clock that
+        # does not advance (a sim, a test) would never reach a deadline,
+        # and a wait that can hang forever is worse than one that gives
+        # up early — the caller treats a timeout as reportable, not fatal.
+        budget = int(self.settle_timeout_s / max(self.settle_poll_s, 1e-6)) + 1
         stable = 0
         last: tuple[int, object] | None = None
-        while self.services.clock() < deadline:
+        while self.services.clock() < deadline and budget > 0:
+            budget -= 1
             snap = ctx.snapshot()
             here = (
                 (snap.area.level_no, snap.player.position)

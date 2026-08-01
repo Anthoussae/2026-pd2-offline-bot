@@ -72,6 +72,19 @@ class GameActionExecutor:
     walk_to: Callable[[tuple[int, int]], object]
     hotkeys: dict[int, int]  # skill id -> VK, from the class config
     clock: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], None] = time.sleep
+    # Let a cast ANIMATION finish before the next send.
+    #
+    # The user, who has done it by hand: bone armor has a slow cast, and
+    # commands sent straight after it interrupt the animation — so the
+    # cast is spent and the buff never lands. From the bot's side that
+    # looks like a recast loop, because the armor keeps reading down and
+    # the rung keeps firing. Stage B run 9 shows exactly that pattern.
+    #
+    # A fixed pause rather than a stat poll on purpose: `read_armor_ratio`
+    # only answers for bone armor, and this has to protect every cast.
+    # Short enough to cost less than one tick of the ladder's attention.
+    cast_settle_s: float = 0.4
     trace: list[TraceEntry] = field(default_factory=list)
 
     def _record(self, action: Action, detail: str = "") -> None:
@@ -97,6 +110,7 @@ class GameActionExecutor:
                     f"cannot self-cast skill {action.skill_id}: player unreadable"
                 )
             self.gated.click_world(*player.position, button="right")
+            self.sleep(self.cast_settle_s)
             self._record(action, f"skill {action.skill_id} verified, self-cast")
             return
 
@@ -105,6 +119,7 @@ class GameActionExecutor:
                 self.session, self.gated, action.skill_id, hotkeys=self.hotkeys
             )
             self.gated.click_world(*action.target, button="right")
+            self.sleep(self.cast_settle_s)
             self._record(
                 action, f"skill {action.skill_id} verified, at {action.target}"
             )
@@ -144,6 +159,19 @@ class RecordingExecutor:
 
     on_execute: Callable[[Action], None] | None = None
     clock: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], None] = time.sleep
+    # Let a cast ANIMATION finish before the next send.
+    #
+    # The user, who has done it by hand: bone armor has a slow cast, and
+    # commands sent straight after it interrupt the animation — so the
+    # cast is spent and the buff never lands. From the bot's side that
+    # looks like a recast loop, because the armor keeps reading down and
+    # the rung keeps firing. Stage B run 9 shows exactly that pattern.
+    #
+    # A fixed pause rather than a stat poll on purpose: `read_armor_ratio`
+    # only answers for bone armor, and this has to protect every cast.
+    # Short enough to cost less than one tick of the ladder's attention.
+    cast_settle_s: float = 0.4
     trace: list[TraceEntry] = field(default_factory=list)
 
     @property
