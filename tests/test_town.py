@@ -133,6 +133,11 @@ class Town:
         self.pressed = []
         self.walked = []
         self.alerts = []
+        # Kept apart from `alerts` on purpose: a halt and a keep-going
+        # warning are different events, and a test that cannot tell them
+        # apart cannot catch the two being confused — which is exactly what
+        # T27's first run caught in the R132 stash-pressure warning.
+        self.notices = []
         self._uid = 0
         # Whose dialog is open, and where the highlight sits in it. The
         # menus genuinely differ, so the fake must too (R104/R105):
@@ -411,6 +416,7 @@ def layer(town_state, config=CALIBRATED, keep_item=None, protected_ids=None):
         carried=town_state.carried,
         read_player_fn=town_state.player,
         alert=town_state.alerts.append,
+        notice=town_state.notices.append,
         clock=clock,
         sleep=clock.sleep,
         keep_item=keep_item,
@@ -844,8 +850,8 @@ def test_preamble_runs_in_the_agreed_order(town):
     # tab inference (R134). Nothing toggles unless something refuses, so the
     # happy path reports a single deposit pass.
     assert steps == [
-        "heal", "repair", "belt", "belt", "stash", "gold", "merc"
-    ]
+        "heal", "repair", "belt", "belt", "stash", "stash", "gold", "merc"
+    ]  # two stash lines: the deposit, then the held-item count
 
 
 def charm(uid, cell):
@@ -1837,37 +1843,60 @@ def test_the_implicit_baseline_still_cleans_later_accidents(town):
 # -- stash pressure (R132) --------------------------------------------------------
 
 
+def _pressing(town, count):
+    """A character holding `count` stashed items, in the container PD2
+    actually uses (location 8 — location 7 is empty on this character, which
+    is the whole T45 story)."""
+    town.stash = [stashed(9000 + i) for i in range(count)]
+    town.inventory = [loot(1, (0, 0))]
+    full_belt(town)
+
+
 def test_stash_pressure_warns_before_the_stash_is_actually_full(town):
     """Give the human notice while there is still room to act.
 
     `StashFull` is a hard stop the bot cannot work around, so the first
     warning about a filling stash should not BE that stop.
     """
-    town.stash = [stashed(9000 + i) for i in range(130)]
-    town.inventory = [loot(1, (0, 0))]
-    full_belt(town)
+    _pressing(town, TownConfig().stash_pressure_at + 5)
     report = PreambleReport()
     layer(town).manage_inventory(report)
-    assert any("stash: WARNING" in line for line in report.log)
-    assert any("stash pressure" in a for a in town.alerts)
+    assert any("items stashed" in line for line in report.log)
+    assert any("stash pressure" in n for n in town.notices)
+
+
+def test_stash_pressure_is_a_notice_not_a_halt_alert(town):
+    """T27's first live run printed the HALT banner for a warning that halts
+    nothing — the drill sailed past it and passed while the console said the
+    bot was waiting for a human. An alert that lies about severity is worse
+    than no alert."""
+    _pressing(town, TownConfig().stash_pressure_at + 5)
+    layer(town).manage_inventory(PreambleReport())
+    assert town.notices and town.alerts == []
+
+
+def test_stash_pressure_warns_once_per_session_not_once_per_run(town):
+    """A warning that repeats every game is noise, and noise is how people
+    learn to ignore alerts."""
+    _pressing(town, TownConfig().stash_pressure_at + 5)
+    town_layer = layer(town)
+    for _ in range(3):
+        town.inventory = [loot(1, (0, 0))]
+        town_layer.manage_inventory(PreambleReport())
+    assert len(town.notices) == 1
 
 
 def test_no_stash_pressure_warning_with_room_to_spare(town):
-    town.stash = [stashed(9000 + i) for i in range(10)]
-    town.inventory = [loot(1, (0, 0))]
-    full_belt(town)
+    _pressing(town, 10)
     report = PreambleReport()
     layer(town).manage_inventory(report)
-    assert not any("WARNING" in line for line in report.log)
-    assert town.alerts == []
+    assert town.notices == [] and town.alerts == []
 
 
 def test_stash_pressure_is_a_warning_and_never_a_halt(town):
     """It is a count, not an occupancy — item sizes are unreadable (P1) —
     so it must never be the thing that stops a run."""
-    town.stash = [stashed(9000 + i) for i in range(149)]
-    town.inventory = [loot(1, (0, 0))]
-    full_belt(town)
+    _pressing(town, TownConfig().stash_pressure_at + 50)
     report = PreambleReport()
     layer(town).manage_inventory(report)  # no raise
     assert report.deposited == 1

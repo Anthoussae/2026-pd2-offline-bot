@@ -29,11 +29,15 @@ Setup, if you want full coverage (each independently optional):
     merc     merc dead, and kashya.resurrect calibrated in that same
              dead-merc window (T25 kashya) — otherwise this step halts
 
-The middle of the preamble is now R75's inventory-management loop
-(`manage_inventory`, drilled on its own as T35): belt, drink, materials,
-regular. It takes no keep-predicate, because the GAME classifies the items
-— everything is offered to the materials tab and whatever it declines goes
-to the regular stash.
+The middle of the preamble is R75's inventory-management loop
+(`manage_inventory`, drilled on its own as T35): belt, drink, cleanse,
+stash. It takes no keep-predicate, because the GAME classifies the items —
+everything is offered to the stash and routed by the game itself.
+
+Since R134 that is ONE deposit pass, not the old materials-then-regular
+pair: T45 established that a material self-routes from the regular tab, so
+nothing needs to identify or switch tabs. A blind toggle and one retry
+happen only if something refuses.
 
 Run from the repo root:
     & "$HOME/.venvs/pd2bot/Scripts/python.exe" -m drills.t27_full_preamble
@@ -172,12 +176,20 @@ def coverage(before: WorldState, after: WorldState, report: PreambleReport) -> l
         f"drink   {'EXERCISED' if drank else 'SKIPPED'} - "
         + (drank[0] if drank else "no excess healing/mana left over")
     )
-    for phase in ("materials", "regular"):
-        moved = [line for line in report.log if f"into {phase}" in line]
-        got = moved[0].split()[1] if moved else "0"
-        lines.append(
-            f"{phase:8}{'EXERCISED' if got != '0' else 'NO-OP'} - {got} deposited"
-        )
+    # One deposit pass, not two (R134): the materials/regular split went
+    # with the tab inference. The first live run after that change still
+    # reported "materials NO-OP / regular NO-OP" while 11 items had just
+    # been deposited — a coverage line that reads the wrong log key is a
+    # coverage line that lies, and this one lied in the safe-looking
+    # direction.
+    deposited = [line for line in report.log if "deposited on the" in line]
+    got = deposited[0].split()[1] if deposited else "0"
+    lines.append(
+        f"stash   {'EXERCISED' if got != '0' else 'NO-OP'} - {got} deposited"
+    )
+    retried = [line for line in report.log if "after switching tab" in line]
+    if retried:
+        lines.append(f"tab     TOGGLED - {retried[0]}")
     gold_lines = [line for line in report.log if line.startswith("gold:")]
     banked = gold_lines and "none carried" not in gold_lines[0]
     lines.append(

@@ -107,6 +107,18 @@ def _potion_type(item: CarriedItem) -> str | None:
     return None
 
 
+def _default_notice(reason: str) -> None:  # pragma: no cover - exercised live
+    """Something a human should know, on a run that is still going.
+
+    Deliberately quieter than `_default_alert` and deliberately NOT saying
+    "halted". T27's first run after the R132 stash-pressure warning printed
+    the halt banner for a warning that halts nothing — the drill sailed past
+    it and passed, while the operator's console said the bot was waiting for
+    them. An alert that lies about severity is worse than no alert.
+    """
+    print(f"\n--  NOTICE: {reason}\n", flush=True)
+
+
 def _default_alert(reason: str) -> None:  # pragma: no cover - exercised live
     print("\n" + "!" * 66)
     print(f"!!  TOWN LAYER HALTED: {reason}")
@@ -178,15 +190,17 @@ class TownConfig:
     interact_retries: int = 2
     transfer_attempts: int = 2  # shift-clicks per item before StashFull
     verify_timeout_s: float = 3.0
-    # Warn when the regular stash tab is listing at least this many items
-    # after a deposit. A HEURISTIC, and the docstring on
-    # `warn_on_stash_pressure` says exactly how weak: item sizes are
-    # unreadable (P1), so a count is not an occupancy. Its whole job is to
-    # give the human a few runs of notice before a full stash halts the
-    # session, which is strictly better than the first warning being the
-    # halt itself. The regular tab is a 10x15 grid = 150 cells, so 120
-    # 1x1 items is 80% at best and rather worse in practice.
-    stash_pressure_at: int = 120
+    # Warn once per session when this many items are stashed across both
+    # READABLE containers (classic + expanded; materials cannot be counted).
+    #
+    # An openly arbitrary number, and it has to be: item sizes are
+    # unreadable (P1) and PD2's expanded stash has no capacity we can read,
+    # so there is no denominator to be a percentage of. The first value
+    # tried, 120, came from treating the classic 10x15 grid as the whole
+    # story — and fired immediately on a live character holding 360, which
+    # is how a warning becomes noise. Set above where a healthy character
+    # sits, and treat it as "notably more than usual", not "nearly full".
+    stash_pressure_at: int = 800
     # Between arrow presses when walking an NPC dialog by keyboard
     # (R104). The menu highlights per key, and D2 samples input per
     # frame at 25 fps, so this is comfortably more than one frame.
@@ -305,6 +319,7 @@ class TownLayer:
         carried: Callable[[GameSession], CarriedItems] = read_carried_items,
         read_player_fn: Callable[[GameSession], Player | None] = read_player,
         alert: Callable[[str], None] = _default_alert,
+        notice: Callable[[str], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         should_stop: Callable[[], bool] | None = None,
@@ -321,6 +336,13 @@ class TownLayer:
         self._carried = carried
         self._read_player = read_player_fn
         self._alert = alert
+        # A notice is not an alert: it reports something worth knowing on a
+        # run that CONTINUES. Defaulting it to `alert` would be the tidy
+        # choice and the wrong one — the halt banner would come back, saying
+        # the bot is waiting when it is not. Tests that inject an alert and
+        # want to see notices too can pass the same callable deliberately.
+        self._notice = notice if notice is not None else _default_notice
+        self._pressure_warned = False
         self._clock = clock
         self._sleep = sleep
         # The cleanse whitelist (R117): an item this returns False for is
@@ -1656,17 +1678,20 @@ class TownLayer:
         displayed: it counts what the character OWNS, not what is on screen.
         """
         held = self._stash_held()
-        if held < self.config.stash_pressure_at:
+        report.log.append(f"stash: {held} items stashed")
+        if held < self.config.stash_pressure_at or self._pressure_warned:
+            # Once per session, not once per run. A warning that repeats
+            # every game is noise, and noise is how people learn to ignore
+            # alerts — which would cost us the one that matters.
             return
-        message = (
+        self._pressure_warned = True
+        self._notice(
             f"stash pressure: {held} items stashed (warning at "
             f"{self.config.stash_pressure_at}). Item sizes are unreadable and "
             "the materials tab cannot be counted at all, so this is a floor, "
             "not an occupancy — clear space before a deposit refuses and "
-            "halts the session."
+            "halts the session. The run continues."
         )
-        report.log.append(f"stash: WARNING — {held} items stashed")
-        self._alert(message)
 
     def manage_inventory(self, report: PreambleReport) -> None:
         """The inventory loop: belt, drink, cleanse, materials, regular.
