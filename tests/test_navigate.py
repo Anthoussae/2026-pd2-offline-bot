@@ -402,3 +402,39 @@ def test_ground_items_are_hazards(monkeypatch):
         ground_items=[_obj(999, (7, 7))],
     )
     assert hazards == {(7, 7)}
+
+
+def test_a_hazard_on_the_destination_does_not_block_arrival():
+    """Stage B run 6, as a test.
+
+    Ground items became hazards so a stray travel click would not scoop up
+    the junk the cleanse had just dropped — and that immediately broke the
+    opposite case. `collect` walks to an item's exact position to get in
+    range, so every click was nudged off the very thing it was walking to
+    and the bot could never reach anything it wanted.
+
+    A hazard at the destination is not a hazard; it is the destination.
+    """
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    target = (20, 0)
+    result = navigator(world, sim, fake, avoid=lambda: (target,)).walk_to(target)
+    assert abs(result.arrived_at[0] - 20) <= 3, "the walk must still arrive"
+    assert not any("nudged" in line for line in result.log)
+
+
+def test_a_hazard_short_of_the_destination_is_still_avoided():
+    """The narrowing must not disarm the mechanism generally: only what sits
+    AT the goal is exempt, not everything on the way to it."""
+    from pd2bot.navigate import AVOID_RADIUS
+
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    hazard = (10, 0)  # on the route, far from the (20, 0) goal
+    result = navigator(world, sim, fake, avoid=lambda: (hazard,)).walk_to((20, 0))
+    assert any("nudged" in line for line in result.log)
+    for click in fake.clicks:
+        span = max(abs(click[0] - hazard[0]), abs(click[1] - hazard[1]))
+        assert span >= AVOID_RADIUS

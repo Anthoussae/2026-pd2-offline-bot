@@ -107,6 +107,10 @@ class Navigator:
         # Where the clickable hazards are RIGHT NOW (NPCs pace), or None for
         # environments with nothing interactive to hit (tests, open field).
         self._avoid = avoid_provider
+        # The destination of the walk in flight, so `_safe_click_point`
+        # can tell a hazard we are deliberately approaching from one we
+        # merely happen to pass. Set per walk_to, cleared after.
+        self._goal: Point | None = None
 
     # -- pieces ---------------------------------------------------------------
 
@@ -154,6 +158,24 @@ class Navigator:
         if self._avoid is None:
             return waypoint
         hazards = self._avoid()
+        # A hazard AT THE DESTINATION is not a hazard — it is the
+        # destination. Ground items became travel-click hazards so that a
+        # stray click would not scoop the junk the cleanse had just dropped,
+        # and that immediately broke the opposite case: `collect` walks to an
+        # item's exact position to get in range, every travel click was
+        # nudged off the very thing it was walking to, and the bot could
+        # never reach anything it wanted. Stage B run 6 died on it, stuck
+        # 12 subtiles from a target with a hazard sitting on it.
+        #
+        # Deliberate approach is distinguishable from an accidental pass:
+        # the goal is what the caller ASKED for. Anything else nearby is
+        # still avoided.
+        if self._goal is not None:
+            hazards = tuple(
+                h for h in hazards
+                if max(abs(h[0] - self._goal[0]), abs(h[1] - self._goal[1]))
+                >= AVOID_RADIUS
+            )
         if not hazards:
             return waypoint
 
@@ -237,6 +259,13 @@ class Navigator:
     # -- the public act ---------------------------------------------------------
 
     def walk_to(self, target: Point) -> WalkResult:
+        self._goal = target
+        try:
+            return self._walk_to(target)
+        finally:
+            self._goal = None
+
+    def _walk_to(self, target: Point) -> WalkResult:
         started = self._clock()
         result = WalkResult(
             target=target, arrived_at=(0, 0), duration_seconds=0.0, waypoints=0
