@@ -132,6 +132,7 @@ class Town:
         self.panel_clicks = []
         self.pressed = []
         self.walked = []
+        self.pos = (5880, 5720)
         self.alerts = []
         # Kept apart from `alerts` on purpose: a halt and a keep-going
         # warning are different events, and a test that cannot tell them
@@ -169,7 +170,7 @@ class Town:
 
     def player(self, session=None):
         return Player(
-            name="MaqiuDoubing", level=91, act=1, position=(5880, 5720), mode=1,
+            name="MaqiuDoubing", level=91, act=1, position=self.pos, mode=1,
             hp=self.hp, max_hp=self.max_hp, mana=self.mana, max_mana=self.max_mana,
             stamina=586, max_stamina=586, experience=0, gold=self.gold,
             gold_stash=self.gold_stash, strength=122, dexterity=72,
@@ -1941,3 +1942,41 @@ def test_a_failed_drop_abandons_the_cleanse_rather_than_continuing(town):
     assert town.dropped == []
     assert len(town.alerts) == 1, "one alert, not one per item"
     assert "abandoning the cleanse" in town.alerts[0]
+
+
+def test_walking_near_steps_back_when_standing_on_the_target(town):
+    """Stage B, live: the character ended at (5885, 5710) clicking the
+    waypoint at (5884, 5709) — distance 1 — three times and never opened it.
+
+    Clicking a distant object makes the character WALK ONTO it, so an
+    interaction that does not take leaves us standing on the thing we are
+    trying to click, and a click on your own tile does nothing. Every retry
+    then found itself already "close enough" and re-clicked from the same
+    hopeless spot: a one-sided range cannot express "step back".
+    """
+    target = (5884, 5709)
+    town.pos = target  # dead on top of it
+    layer(town)._walk_near(target, minimum=CALIBRATED.min_interact_range)
+    assert town.walked, "standing on the target must produce a walk"
+    away = max(
+        abs(town.walked[-1][0] - target[0]), abs(town.walked[-1][1] - target[1])
+    )
+    assert away >= CALIBRATED.min_interact_range
+
+
+def test_walking_near_still_does_nothing_at_a_sane_distance(town):
+    """The other end stays intact: already in range means no walk at all —
+    the shortest walk is none."""
+    target = (5884, 5709)
+    town.pos = (target[0] + 8, target[1])
+    layer(town)._walk_near(target, minimum=CALIBRATED.min_interact_range)
+    assert town.walked == []
+
+
+def test_walking_near_without_a_minimum_is_unchanged(town):
+    """NPC approaches pass no minimum: you cannot stand inside a unit, and
+    the close-range behaviour they rely on must not move."""
+    target = (5884, 5709)
+    town.pos = target
+    layer(town)._walk_near(target)
+    assert town.walked == []

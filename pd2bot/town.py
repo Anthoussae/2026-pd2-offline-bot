@@ -174,6 +174,11 @@ class TownConfig:
     # 12 keeps a margin.
     npc_standoff: int = 10
     interact_range: int = 12  # already this close? then do not walk at all
+    # ...but not THIS close. Clicking the tile under your own feet does
+    # nothing, so an object approach that ends on top of the object can
+    # never open it (stage B, live). Objects only: an NPC is a unit you
+    # cannot stand inside.
+    min_interact_range: int = 4
     interact_timeout_s: float = 6.0
     # Clicking an NPC from across the screen makes the character walk over
     # before the dialog opens, so this wait covers a journey. Six seconds
@@ -538,7 +543,7 @@ class TownLayer:
             if self._any_panel_open():
                 self.close_panels()
 
-    def _walk_near(self, target: tuple[int, int]) -> None:
+    def _walk_near(self, target: tuple[int, int], minimum: int = 0) -> None:
         """Get within clicking distance of `target` WITHOUT walking onto it.
 
         A travel click that lands on an NPC opens their dialog instead of
@@ -546,6 +551,15 @@ class TownLayer:
         stop `npc_standoff` subtiles short, on our own side of the target,
         and leave the interaction to a deliberate click. Already close
         enough? Then do not walk at all — the shortest walk is none.
+
+        `minimum` is the other end of that range, and it exists because
+        TOO CLOSE is its own failure: a click on the tile you are
+        standing on does nothing in D2. Stage B ended with the character
+        at (5885, 5710) clicking the waypoint at (5884, 5709) — distance
+        1 — three times, because clicking a distant object makes the
+        character WALK ONTO it, and every retry then found itself
+        already 'close enough' and re-clicked from the same hopeless
+        spot. A one-sided range cannot express 'step back'.
         """
         player = self._read_player(self.session)
         if player is None:
@@ -554,8 +568,10 @@ class TownLayer:
         px, py = player.position
         dx, dy = px - target[0], py - target[1]
         distance = max(abs(dx), abs(dy))
-        if distance <= self.config.interact_range:
+        if minimum <= distance <= self.config.interact_range:
             return
+        if distance == 0:
+            dx, dy, distance = 1, 1, 1  # standing dead centre: any way out
         scale = self.config.npc_standoff / distance
         self._walk_guarded(
             (round(target[0] + dx * scale), round(target[1] + dy * scale))
@@ -605,14 +621,14 @@ class TownLayer:
                     f"{name} is not in perception range and has no configured "
                     "position — cannot walk blind to an unknown spot"
                 )
-            self._walk_near(known)
+            self._walk_near(known, minimum=self.config.min_interact_range)
             position = self._find_object(kind)
             if position is None:
                 raise TownError(
                     f"{name} still not visible after walking to {known} — the "
                     "configured position may be wrong for this map"
                 )
-        self._walk_near(position)
+        self._walk_near(position, minimum=self.config.min_interact_range)
         return position
 
     def _find_object(self, kind: int) -> tuple[int, int] | None:
