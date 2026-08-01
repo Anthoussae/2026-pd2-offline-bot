@@ -498,3 +498,35 @@ def test_an_undeclared_wait_still_bails():
     clock.advance(11.0)
     with pytest.raises(IdleBail):
         eng.tick()
+
+
+# -- the area-change stutter (stage B run 5, user-diagnosed) ---------------------
+
+
+def test_a_dropped_hotkey_press_is_absorbed_like_a_refusal():
+    """The user watched run 5 stutter on the area change and then stand
+    still. `SkillSwitchFailed` means the client dropped the keypress —
+    nothing reached the game — which is exactly what InputRefused means, so
+    it gets exactly the same handling: absorb, do not commit, decide again
+    next tick. It used to end the session."""
+    from pd2bot.skills import SkillSwitchFailed
+
+    class DroppingExecutor:
+        def __init__(self):
+            self.attempts = 0
+
+        def execute(self, action):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise SkillSwitchFailed("right skill reads 83 after 3 presses")
+
+    ladder = CommittingLadder(count=2)
+    eng, _ = engine(
+        states=[FakeStep("s", ticks_to_done=99)],
+        ladder=ladder, executor=DroppingExecutor(),
+    )
+    eng.tick()
+    assert ladder.committed == 0  # the cast never happened; do not book it
+    eng.tick()
+    assert ladder.committed == 1
+    assert eng.report.refusals == 1

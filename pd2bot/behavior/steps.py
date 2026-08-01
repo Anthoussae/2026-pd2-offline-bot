@@ -59,6 +59,7 @@ class RunServices:
     pickit: Pickit
     carried: Callable[[], CarriedItems]
     clock: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], None] = time.sleep
     # Tuning that belongs to the steps rather than to a class.
     clear_settle_s: float = 5.0
     pickup_radius: int = 30  # opportunistic pickups during clearance
@@ -129,9 +130,15 @@ class WaypointStep:
     services: RunServices
     dest: int
     name: str = "waypoint"
+    # The post-arrival settle. Small numbers on purpose: this runs once
+    # per area change, and its whole job is to outlast a load stutter.
+    settle_timeout_s: float = 8.0
+    settle_poll_s: float = 0.2
+    stable_reads: int = 3
 
     def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
         self.services.travel_to(self.dest)
+        settled = self.settle(ctx)
         # Read the position AFTER travelling: the snapshot handed to this
         # tick was taken in town, before the trip.
         arrival = None
@@ -142,7 +149,51 @@ class WaypointStep:
             arrival = snap.player.position
         if arrival is not None:
             ctx.notes["arrival"] = arrival
-        return StepOutcome(done=True, acted=True, note=f"arrived at {arrival}")
+        return StepOutcome(
+            done=True, acted=True,
+            note=f"arrived at {arrival}" + ("" if settled else " (never settled)"),
+        )
+
+    def settle(self, ctx: EngineContext) -> bool:
+        """Wait for the new area to finish arriving before anything is sent.
+
+        `travel_to` returns when the area ID changes, which is the START of
+        the new area loading, not the end. The user watched run 5 stutter
+        right there — "common when changing areas" — and the bot's next act
+        was a hotkey press that the loading client simply dropped. Three
+        presses inside 1.8 s all landed in that window, the switch never
+        verified, and the run died on an unverified skill.
+
+        So: poll until the world reads back consistently — a player, in one
+        area, unchanged across `stable_reads` consecutive looks. Cheap
+        insurance measured in a second or two, once per area change, in the
+        one place where the client is guaranteed to be busy.
+
+        Returns whether it settled; a timeout is reported, not raised. The
+        engine is a loop and the ladder is about to get its look either way,
+        which is a better answer than refusing to continue.
+        """
+        if ctx.snapshot is None:
+            return False
+        deadline = self.services.clock() + self.settle_timeout_s
+        stable = 0
+        last: tuple[int, object] | None = None
+        while self.services.clock() < deadline:
+            snap = ctx.snapshot()
+            here = (
+                (snap.area.level_no, snap.player.position)
+                if snap.area is not None and snap.player is not None
+                else None
+            )
+            if here is not None and here == last:
+                stable += 1
+                if stable >= self.stable_reads:
+                    return True
+            else:
+                stable = 0
+            last = here
+            self.services.sleep(self.settle_poll_s)
+        return False
 
 
 @dataclass

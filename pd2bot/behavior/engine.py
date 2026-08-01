@@ -36,7 +36,21 @@ from pd2bot.behavior.actions import ActionExecutor
 from pd2bot.behavior.reflex import ReflexLadder
 from pd2bot.input import InputRefused
 from pd2bot.safety import ChickenExit
+from pd2bot.skills import SkillSwitchFailed
 from pd2bot.snapshot import GameSnapshot
+
+# Two different ways a send can fail to land, treated identically on
+# purpose. `InputRefused` is the guard saying "not now"; `SkillSwitchFailed`
+# is the client having dropped a hotkey press, which the user watched happen
+# during an area-change stutter in stage B run 5. Both mean the same thing
+# to the engine — nothing reached the game, so decide again next tick —
+# and both must keep the SAFETY they encode: no cast on an unverified
+# skill, and no bookkeeping for an action that never happened.
+#
+# Retrying inside the tick was the alternative and it is worse: the ladder
+# is not consulted while a tick blocks, so a patient retry buys reliability
+# with exactly the seconds the survival rungs need.
+SEND_DID_NOT_LAND = (InputRefused, SkillSwitchFailed)
 
 
 class BehaviorError(RuntimeError):
@@ -245,7 +259,7 @@ class BehaviorEngine:
             )
             try:
                 self._executor.execute(decision.action)
-            except InputRefused as exc:
+            except SEND_DID_NOT_LAND as exc:
                 # Do NOT commit the rung's bookkeeping and do NOT mark
                 # activity: nothing happened, so the next tick must be free
                 # to decide the very same thing again.
@@ -261,7 +275,7 @@ class BehaviorEngine:
             state = self._states[self._index]
             try:
                 outcome = state.step(snap, self.ctx)
-            except InputRefused as exc:
+            except SEND_DID_NOT_LAND as exc:
                 # Steps send through the same executor, so they refuse the
                 # same way. A step is free to have done part of its work
                 # before the refusal; it is written to be re-entered, which
@@ -287,16 +301,18 @@ class BehaviorEngine:
         self._check_idle(snap, now)
         return self.complete
 
-    def _note_refusal(self, where: str, exc: InputRefused) -> None:
+    def _note_refusal(self, where: str, exc: Exception) -> None:
         """Absorb one refused send, and escalate only on a long streak."""
         self.report.refusals += 1
         self._refusal_streak += 1
-        self.report.log.append(f"{where}: send refused ({exc})")
+        self.report.log.append(
+            f"{where}: send did not land — {type(exc).__name__}: {exc}"
+        )
         if self._refusal_streak >= self.config.refusal_limit:
             raise InputRefusedHalt(
-                f"{self._refusal_streak} sends refused in a row (last at "
-                f"{where}: {exc}) — the bot is deciding but nothing is "
-                "reaching the game"
+                f"{self._refusal_streak} sends failed to land in a row "
+                f"(last at {where}: {type(exc).__name__}: {exc}) — the "
+                "bot is deciding but nothing is reaching the game"
             ) from exc
 
     def run(self) -> EngineReport:
