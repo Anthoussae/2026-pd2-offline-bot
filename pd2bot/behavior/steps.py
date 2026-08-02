@@ -34,6 +34,7 @@ from pd2bot.behavior.actions import MoveTo, PickUpItem
 from pd2bot.behavior.engine import EngineContext, StepOutcome
 from pd2bot.behavior.run import ParamSpec, StepRegistry, StepSpec
 from pd2bot.items import CarriedItems
+from pd2bot.narrate import noop as narrate_noop
 from pd2bot.navigate import NavigationError
 from pd2bot.pickit import Pickit, potion_type_of
 from pd2bot.snapshot import GameSnapshot
@@ -61,6 +62,56 @@ def _hop(
         return destination
     scale = step / span
     return (round(origin[0] + dx * scale), round(origin[1] + dy * scale))
+
+
+# How close counts as "at" a route waypoint. The navigator's own
+# ARRIVAL_RADIUS, restated here because the steps follow routes without
+# owning the walking.
+_ROUTE_WAYPOINT_REACH = 3
+
+
+def _next_route_waypoint(
+    route: list[tuple[int, int]], origin: tuple[int, int]
+) -> tuple[int, int] | None:
+    """The first waypoint of `route` not already underfoot, or None when
+    the whole route is within reach (i.e. we are effectively there)."""
+    for waypoint in route:
+        if _chebyshev(waypoint, origin) > _ROUTE_WAYPOINT_REACH:
+            return waypoint
+    return None
+
+
+def _route_leg(
+    services: RunServices,
+    origin: tuple[int, int],
+    target: tuple[int, int],
+) -> tuple[int, int] | None:
+    """The next short leg toward `target`, following the MAP's answer.
+
+    R181, watched live twice: the atlas answered every navigator question
+    and no step ever asked it. Legs were straight-line bearings, so a
+    far-corner target had each hop plan locally, clamp at the fence, and
+    burn the no-progress budget while the bot visibly shuffled at dead
+    edges — and a bearing hop happily leads through a zone exit the
+    target is not behind (T53 run 2 wandered into Stony Field that way).
+
+    With a route service wired, the leg aims at the route's next waypoint
+    — a route planned on the area's grid never crosses an exit — capped
+    at `patrol_step`, because the reflex ladder must get its look between
+    legs (the whole reason hops exist). None means the map says NO ROUTE
+    EXISTS, and the caller writes the target off on the spot: the honest
+    fast-fail the R174 closure wrongly claimed already happened. Without
+    a service (open-ground sims, drills), the bearing hop stands.
+    """
+    if services.route_to is None:
+        return _hop(origin, target, services.patrol_step)
+    route = services.route_to(target)
+    if route is None:
+        return None
+    waypoint = _next_route_waypoint(route, origin)
+    if waypoint is None:
+        return _hop(origin, target, services.patrol_step)
+    return _hop(origin, waypoint, services.patrol_step)
 
 
 def _point_away(
@@ -129,6 +180,12 @@ class RunServices:
     # Where per-decision detail goes. Separate from `alert`, which is for
     # things a human must act on; this is the run's record.
     log: Callable[[str], None] = _default_log
+    # The NARRATIVE channel (R179): one line per broad act, wall-clock
+    # stamped by the Narrator behind it. Deliberately coarser than `log`
+    # — the contract lives in pd2bot/narrate.py, and every call site here
+    # is an editorial decision. Defaults to a no-op so sims and drills
+    # stay silent unless they opt in.
+    narrate: Callable[[str], None] = narrate_noop
     # Pickup bookkeeping, shared by every step that collects loot.
     #
     # It lives HERE rather than on a step because it must outlast the step
@@ -283,6 +340,18 @@ class RunServices:
     # the step finishes immediately rather than guessing.
     survey_targets: Callable[[], list[tuple[int, int]]] | None = None
     survey_coverage: Callable[[], str] | None = None
+    # -- the route service (R181) ------------------------------------------
+    #
+    # `route_to(target)` plans A* over the navigator's grid (atlas + live
+    # overlay) and returns the simplified waypoint list, or None when NO
+    # PATH EXISTS. Read-only — no clicks, no walking — and cached briefly
+    # by the wiring, because re-planning every tick is the tick-rate waste
+    # this repo keeps refusing. None (the field, not the answer) means no
+    # service is wired: open-ground sims and drills fall back to the old
+    # straight-line hops via `_route_leg`.
+    route_to: Callable[
+        [tuple[int, int]], list[tuple[int, int]] | None
+    ] | None = None
     # Fight only what comes this close while surveying (R176 Q1): a
     # survey is not a clearance, and the reflex ladder plus chicken stay
     # on above this either way.
@@ -605,6 +674,9 @@ class _PickupMixin:
                 f"sockets {item.sockets} at {item.position} -> {action} "
                 f"({rule})"
             )
+            self.services.narrate(
+                f"pickup: kind {item.kind} at {item.position} ({rule})"
+            )
         self.services.attempts[item.unit_id] = attempts + 1
         self.services.last_try[item.unit_id] = now
         ctx.executor.execute(PickUpItem(item.unit_id, item.position))
@@ -797,6 +869,9 @@ class _PickupMixin:
         services.cleanse_queued = False
         dropped = services.cleanse()
         if dropped:
+            self.services.narrate(
+                f"cleanse: dropped {dropped} junk item(s) at {origin}"
+            )
             # The pile exists where we stand. The re-arm of stuck items
             # deliberately does NOT happen here — it happens in branch 1,
             # after the step-off, when the retry can actually differ.
@@ -932,7 +1007,16 @@ class _PatrolMixin:
             self._advance()
             return StepOutcome(done=False, acted=True, note=f"patrol gave up on {target}")
 
-        leg = _hop(here, target, self.services.patrol_step)
+        leg = _route_leg(self.services, here, target)
+        if leg is None:
+            # The map itself says no route exists (R181): the honest
+            # instant write-off, before any leg is spent at a fence.
+            self.services.log(f"patrol: no route to {target} — written off")
+            self.services.narrate(f"patrol: no route to ring point {target}")
+            self._advance()
+            return StepOutcome(
+                done=False, acted=True, note=f"patrol wrote off {target} (no route)"
+            )
         try:
             ctx.executor.execute(MoveTo(leg))
         except NavigationError as exc:
@@ -945,6 +1029,7 @@ class _PatrolMixin:
             # — swallowing those would mark a point visited that we never
             # actually tried to walk to.
             self.services.log(f"patrol: skipping {target} ({exc})")
+            self.services.narrate(f"patrol: gave up ring point {target}")
             _note_unsurveyed(self.services, exc)
             self._advance()
             return StepOutcome(done=False, acted=True, note=f"patrol skipped {target}")
@@ -1024,6 +1109,9 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
         self.services.log(
             f"clearance: writing off monster {unit_id} at {position} — {why}. "
             "It stops counting toward the radius unless it moves."
+        )
+        self.services.narrate(
+            f"clearance: wrote off monster {unit_id} at {position} ({why})"
         )
 
     def _closing_progress(self, monster, origin: tuple[int, int]) -> None:
@@ -1146,7 +1234,25 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
                 in_radius,
                 key=lambda m: _chebyshev(m.position, snap.player.position),
             )
-            closing = self.services.combat.approach(snap, nearest.position)
+            # Route-aware closing (R181): ask the map first. No route =
+            # an instant write-off (expiry-on-movement keeps it honest),
+            # and otherwise the route's next waypoint steers the hop —
+            # the module stays grid-ignorant, it just dashes where told.
+            via = None
+            if self.services.route_to is not None:
+                route = self.services.route_to(nearest.position)
+                if route is None:
+                    self._write_off(
+                        nearest.unit_id, nearest.position, "no route exists"
+                    )
+                    return StepOutcome(
+                        done=False, acted=True,
+                        note=f"no route to monster {nearest.unit_id}",
+                    )
+                via = _next_route_waypoint(route, snap.player.position)
+            closing = self.services.combat.approach(
+                snap, nearest.position, via=via
+            )
             if closing is not None:
                 if self.send(ctx, closing):
                     # Walked. Whether it ACHIEVED anything is the question,
@@ -1497,7 +1603,17 @@ class SurveyStep(_PickupMixin):
                 done=False, acted=True, note=f"survey gave up on {target}"
             )
 
-        leg = _hop(origin, target, self.services.patrol_step)
+        leg = _route_leg(self.services, origin, target)
+        if leg is None:
+            # No route on the map (R181): write the frontier point off on
+            # the first tick instead of clamping legs at a fence.
+            self.services.log(f"survey: no route to frontier {target}")
+            self._done_targets.add(target)
+            self._written_off += 1
+            self._current = None
+            return StepOutcome(
+                done=False, acted=True, note=f"survey wrote off {target} (no route)"
+            )
         self._legs += 1
         if not self.send(ctx, MoveTo(leg)):
             # Unknown/blocked ground on the way: this frontier is not

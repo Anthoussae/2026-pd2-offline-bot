@@ -129,3 +129,32 @@ Constraints that shaped the decision:
 - The combat rotation, pickit, and the step handlers behind the run
   vocabulary are P5's; `build_states` refuses to build a run over a
   declared-but-unimplemented step rather than skipping it.
+
+## Amendments (2026-08-02, the R179/R181 cycle)
+
+Extensions of the shape above, none changing it — recorded here because
+this ADR is where the superseded details were written down:
+
+- **The belt contract is type-based (R179).** The R53 layout (key 1
+  mana, 2 rejuv, 3+4 healing) is now a *preference*, not a requirement:
+  every drink rung searches all four columns for the needed type
+  (configured column first), the town refill counts minimums per TYPE
+  across the whole belt (a misplaced potion counts where it sits, and
+  spends its column's slot), and the halt-for-a-human narrows to the
+  mechanical case — a type short while the inventory holds it AND a
+  column would take it. Merely missing potions is a loud notice and a
+  run that continues; the R178 mixed-belt halt cannot recur.
+- **Rung 7.5, merc first aid (R179).** Merc alive and under 50% with a
+  healing potion anywhere in the belt → an Alt+key chord
+  (`GiveMercPotion`, `input.press_key_with_alt` — modifier settled down
+  before the key, released in a `finally`). Below every player-survival
+  rung, paced on attempt, never in town.
+- **The narrative channel (`pd2bot/narrate.py`, R179).** A per-run,
+  wall-clock-stamped `logs/run-<stamp>.log` of BROAD acts where waits
+  explain themselves (each preamble station narrates its outcome with
+  its duration; the engine narrates step transitions). Coarseness is a
+  stated contract: anything that could fire more than ~once a second
+  belongs in the micro-log. `narrate` is a no-op-defaulted callable on
+  `RunServices`, the engine, and the town layer.
+- **Route-aware legs (R181).** Steps ask the map before spending legs:
+  see navigation.md's "route service" section.

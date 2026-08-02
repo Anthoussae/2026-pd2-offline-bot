@@ -130,6 +130,24 @@ def test_the_whole_run_completes(sim):
     assert world.travels == [offsets.AREA_COLD_PLAINS]
 
 
+def test_the_narrative_is_o_actions_not_o_ticks(monkeypatch):
+    """The coarseness contract (R179), measured: a full run's narrative is
+    a story a human reads in one screen — lines scale with meaningful
+    acts, never with ticks. If this ratio creeps up, some call site has
+    started narrating inside a loop and belongs in the micro-log."""
+    world = cold_plains_scenario()
+    lines = []
+    run = build_sim(world, monkeypatch=monkeypatch, narrate=lines.append)
+    assert run_to_completion(run, world), "the run never finished"
+    ticks = run.engine.report.ticks
+    assert lines[0].startswith("run: ")
+    assert lines[-1].startswith("run complete")
+    assert len(lines) < max(15, ticks / 4), (
+        f"{len(lines)} narrative lines over {ticks} ticks — the coarseness "
+        "contract has been broken:\n" + "\n".join(lines)
+    )
+
+
 def test_no_cast_was_ever_sent_on_an_unverified_skill(sim):
     # The single most expensive mistake available to this bot: casting
     # whatever the game happens to have selected. The world counts them.

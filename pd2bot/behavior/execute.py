@@ -38,13 +38,14 @@ from pd2bot.behavior.actions import (
     CastAtPoint,
     CastSelf,
     DrinkPotion,
+    GiveMercPotion,
     MoveTo,
     PickUpItem,
 )
 from pd2bot.input import GatedInput, InputRefused
 from pd2bot.memory import GameSession
 from pd2bot.player import read_player
-from pd2bot.skills import belt_drink, ensure_right_skill
+from pd2bot.skills import belt_drink, belt_give_merc, ensure_right_skill
 
 
 class ExecutionError(RuntimeError):
@@ -145,6 +146,13 @@ class GameActionExecutor:
             # rungs must never queue behind an animation.
             belt_drink(self.gated, action.column)
             self._record(action, f"key {action.column + 1} ({action.potion_type})")
+            return
+
+        if isinstance(action, GiveMercPotion):
+            # A keypress chord, same reasoning as DrinkPotion: T48 proved
+            # keypresses land mid-animation, so no cast check queues it.
+            belt_give_merc(self.gated, action.column)
+            self._record(action, f"alt+key {action.column + 1} (merc)")
             return
 
         # Everything below CLICKS, and a click inside a cast animation is the

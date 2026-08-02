@@ -136,6 +136,13 @@ Two classification traps, both found live:
 Corpses stay in the table. `Monster.is_alive` exposes that rather than
 filtering silently, so callers decide.
 
+One non-issue worth recording because it was asked and answered (R179):
+**ALT item-name visibility cannot affect the bot.** Perception reads the
+unit table from memory; holding ALT (or not) only changes what the client
+*renders*. The bot cannot be blinded by hidden labels and gains nothing
+from visible ones — screen-side toggles are simply outside this
+architecture's sensory path.
+
 ## Knowing when it is safe to act
 
 This is the part that exists because of a specific mistake. During M1 a test

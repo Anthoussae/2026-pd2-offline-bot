@@ -51,8 +51,10 @@ from pd2bot.items import read_carried_items
 from pd2bot.mapstore import MapStore
 from pd2bot.memory import GameSession
 from pd2bot.menuinput import MenuInput
+from pd2bot.narrate import Narrator
 from pd2bot.navigate import live_navigator
 from pd2bot.panelinput import PanelInput
+from pd2bot.pathing import astar, nearest_walkable, simplify
 from pd2bot.pickit import Pickit, cleanse_keep, load_item_table, load_pickit
 from pd2bot.player import read_player
 from pd2bot.safety import SafetyConfig, SafetyMonitor
@@ -66,7 +68,9 @@ REPO = Path(__file__).resolve().parent.parent
 CONFIG = REPO / "config"
 RUNS = REPO / "runs"
 
-BELT_ROWS = 4  # a belt column holds 4 potions; capacity is columns x rows
+# A belt column holds 4 potions; capacity is columns x rows. One source:
+# the same constant the town layer's capacity accounting reads (P1, R179).
+BELT_ROWS = offsets.BELT_ROWS
 
 
 class WiringError(RuntimeError):
@@ -107,6 +111,51 @@ def town_config_for(class_config: ClassConfig, base: TownConfig | None = None) -
         min_mana=class_config.belt.min_mana,
         min_rejuv=class_config.belt.min_rejuv,
     )
+
+
+def route_service(
+    navigator,
+) -> Callable[[tuple[int, int]], list[tuple[int, int]] | None]:
+    """`route_to(target)` for RunServices (R181): the same A* the
+    navigator walks with, exposed READ-ONLY so steps can ask "is there a
+    route, and which way?" before spending legs at a fence.
+
+    Returns the simplified waypoint list, or None when the map says no
+    path exists — the steps' instant write-off signal. Cached per
+    (origin bucket, target): a route survives the few legs walked inside
+    one 8-subtile bucket, because re-planning every tick is the tick-rate
+    waste this repo keeps refusing; the atlas only grows, so a briefly
+    stale route is at worst conservative. An unreadable position answers
+    "walk straight" (`[target]`) rather than None — a torn read must not
+    write a target off.
+    """
+    cache: dict = {"key": None, "route": None}
+
+    def route_to(target: tuple[int, int]) -> list[tuple[int, int]] | None:
+        try:
+            start = navigator.position()
+        except Exception:
+            return [target]
+        key = ((start[0] // 8, start[1] // 8), target)
+        if cache["key"] == key:
+            return cache["route"]
+        # The grid is assembled only on a cache MISS: stitching live
+        # collision over the atlas is the expensive half of a plan.
+        try:
+            grid = navigator.grid()
+        except Exception:
+            return [target]
+        route: list[tuple[int, int]] | None = None
+        goal = nearest_walkable(grid, *target)
+        if goal is not None:
+            path = astar(grid, start, goal)
+            if path is not None:
+                route = simplify(grid, path)
+        cache["key"] = key
+        cache["route"] = route
+        return route
+
+    return route_to
 
 
 def walkability(navigator) -> Callable[[tuple[int, int]], bool]:
@@ -227,6 +276,12 @@ class LiveBot:
     # `--radius`, applied to every clear_radius step at engine-build time.
     # None means "whatever the run file says".
     radius_override: int | None = None
+    # The narrative channel's indirection (R179). The town layer is
+    # SESSION-scoped and the Narrator is PER-RUN (one file per run), so the
+    # town holds a closure that reads this holder, and each engine build
+    # points it at the fresh run's narrator. build_bot wires the closure;
+    # engine_factory swaps the target.
+    narrate_ref: dict = field(default_factory=lambda: {"fn": None})
     _engines: list[BehaviorEngine] = field(default_factory=list)
 
     @property
@@ -238,6 +293,12 @@ class LiveBot:
 
     def engine_factory(self, session: GameSession) -> BehaviorEngine:
         """Build one game's engine. Everything stateful is fresh here."""
+        # One narrative file per run (R179). Constructing the Narrator
+        # writes nothing — the file appears on the first narrated line —
+        # so the throwaway engine `describe` builds for pre-flight leaves
+        # no empty log behind.
+        narrator = Narrator(REPO / "logs", clock=self.clock)
+        self.narrate_ref["fn"] = narrator.narrate
         combat = NecroCombat(
             config=self.class_config.combat,
             is_walkable=self.is_walkable,
@@ -331,6 +392,8 @@ class LiveBot:
             # nothing out there opens one deliberately and every send is
             # refused until it closes.
             clear_panels=self.town.close_panels,
+            narrate=narrator.narrate,
+            route_to=route_service(self.navigator),
         )
         registry = build_registry(services)
         run = load_run(self.paths.run, registry)
@@ -345,6 +408,7 @@ class LiveBot:
             combat=combat,
             config=self.engine_config,
             clock=self.clock,
+            narrate=narrator.narrate,
         )
 
     def engines(self) -> list[BehaviorEngine]:
@@ -412,6 +476,16 @@ def build_bot(
     perception = Perception(session)
     baseline = SessionBaseline(session)
 
+    # The narrative dispatch (R179): the town layer outlives any one run,
+    # so it narrates through this holder and each engine build repoints it
+    # at the fresh run's Narrator (see LiveBot.narrate_ref).
+    narrate_ref: dict = {"fn": None}
+
+    def town_narrate(text: str) -> None:
+        fn = narrate_ref["fn"]
+        if fn is not None:
+            fn(text)
+
     town = TownLayer(
         session=session,
         gated=gated,
@@ -434,6 +508,7 @@ def build_bot(
         keep_item=cleanse_keep(pickit),
         protected_ids=baseline,
         should_stop=should_stop,
+        narrate=town_narrate,
     )
     monitor = SafetyMonitor(
         session,
@@ -463,6 +538,7 @@ def build_bot(
         engine_config=engine_config if engine_config is not None else EngineConfig(),
         should_stop=should_stop,
         radius_override=radius_override,
+        narrate_ref=narrate_ref,
     )
 
 

@@ -113,6 +113,15 @@ reposition_cooldown_s = 2.0
 # below this: retreat from the pack instead of trading hits unarmored.
 disengage_hp_pct = 70.0
 
+# Rung 7.5 — merc first aid (R179, the user's numbers): merc alive and
+# below merc_heal_below_pct of its hp, with a healing potion anywhere in
+# the belt -> Alt+<column key> feeds it one. Sits BELOW every
+# player-survival rung (the merc gets a potion only on a tick the player
+# needed nothing) and is paced by merc_heal_retry_s. Never in town — the
+# preamble's Akara visit heals the merc for free.
+merc_heal_below_pct = 50.0
+merc_heal_retry_s = 3.0
+
 # Rung 8 — upkeep: recast bone armor when its remaining absorb falls
 # below armor_recast_below_pct (fallback when the stat is unreadable:
 # recast after being hit, R47.2). armor_retry_s paces attempts, since the

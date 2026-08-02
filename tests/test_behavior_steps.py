@@ -94,8 +94,10 @@ class StubCombat:
     def upkeep(self, snap, ctx=None):
         return None
 
-    def approach(self, snap, position):
+    def approach(self, snap, position, via=None):
         self.approach_calls += 1
+        self.approach_targets = getattr(self, "approach_targets", [])
+        self.approach_targets.append((position, via))
         return self.approach_script.pop(0) if self.approach_script else None
 
 
@@ -539,6 +541,117 @@ def test_fighting_suspends_the_patrol():
     assert outcome.acted and not outcome.done
     assert executor.actions == [AttackUnit(1, (1002, 1000))]
     assert not step._visited, "it walked while something was alive in the radius"
+
+
+# -- route-aware legs (R181) ------------------------------------------------------
+#
+# The atlas answered every NAVIGATOR question and no STEP ever asked it:
+# legs were straight-line bearings, so far-corner targets clamped at fences
+# and burned no-progress budgets, and a bearing hop happily crossed a zone
+# exit (T53 run 2 wandered into Stony Field). These pin the new contract:
+# legs follow the route's answer, and "no route" is an instant write-off.
+
+
+def test_route_leg_walks_around_the_wall_not_into_the_pocket():
+    from pd2bot.behavior.steps import _route_leg
+
+    clock = Clock()
+    # A U-shaped pocket between us and the target: the bearing is +x,
+    # straight into the pocket; the route goes up (+y), across, and down.
+    target = (1040, 1000)
+    route = [(1000, 1020), (1040, 1020), target]
+    svc = services(clock, route_to=lambda t: route)
+    leg = _route_leg(svc, HOME, target)
+    assert leg == (1000, 1012)  # toward the first corner, capped at patrol_step
+    # The old bearing hop is what we must NOT get:
+    assert leg != (1012, 1000)
+
+
+def test_route_leg_without_a_service_is_the_bearing_hop():
+    from pd2bot.behavior.steps import _route_leg
+
+    svc = services(Clock())
+    assert svc.route_to is None
+    assert _route_leg(svc, HOME, (1040, 1000)) == (1012, 1000)
+
+
+def test_route_leg_skips_waypoints_already_underfoot():
+    from pd2bot.behavior.steps import _route_leg
+
+    route = [(1001, 1000), (1040, 1000)]
+    svc = services(Clock(), route_to=lambda t: route)
+    assert _route_leg(svc, HOME, (1040, 1000)) == (1012, 1000)
+
+
+def test_patrol_walks_the_routes_answer_not_the_bearing():
+    clock = Clock()
+    corner = (1000, 1060)
+    step, svc, here, executor, ctx = patrolling(
+        clock, route_to=lambda t: [corner, t]
+    )
+    step.step(snap(pos=here["pos"]), ctx)
+    first_move = next(a for a in executor.actions if isinstance(a, MoveTo))
+    assert first_move.target == (1000, 1012)  # toward the corner, not the ring
+
+
+def test_patrol_writes_off_a_routeless_point_on_the_first_tick():
+    """No-path targets fail FAST: the run-2 dawdle was budgets burning at
+    fences, and the R174 closure wrongly claimed this already happened."""
+    clock = Clock()
+    step, svc, here, executor, ctx = patrolling(clock, route_to=lambda t: None)
+    outcome = drive(step, here, ctx, clock, ticks=30)
+    assert outcome is not None, "routeless points must not hold the step open"
+    assert not [a for a in executor.actions if isinstance(a, MoveTo)], (
+        "a routeless point earned walking legs"
+    )
+    assert len(step._visited) == svc.patrol_points
+
+
+def test_survey_writes_off_a_routeless_frontier_on_the_first_tick():
+    clock = Clock()
+    svc = services(
+        clock,
+        route_to=lambda t: None,
+        survey_targets=lambda: [(1200, 1200)],
+        survey_coverage=lambda: "1 room",
+    )
+    step = make_step("survey", svc)
+    executor = RecordingExecutor(clock=clock)
+    ctx = context(executor)
+    outcome = step.step(snap(), ctx)
+    assert "no route" in outcome.note
+    assert executor.actions == []
+
+
+def test_clearance_writes_off_a_routeless_monster_and_steers_by_route():
+    clock = Clock()
+    combat = StubCombat()
+    svc = services(clock, combat=combat, route_to=lambda t: None)
+    step = make_step("clear_radius", svc, {"radius": 150, "center": "arrival"})
+    ctx = context(RecordingExecutor(clock=clock))
+    ctx.notes["arrival"] = HOME
+    far = monster(1, (1100, 1000))  # inside the clearance, outside the fight
+    outcome = step.step(snap(monsters=[far]), ctx)
+    assert outcome.acted and "no route" in outcome.note
+    assert 1 in step._unreachable, "the routeless monster was not written off"
+    assert combat.approach_calls == 0, "approach was asked despite no route"
+
+
+def test_clearance_hands_the_route_waypoint_to_the_approach():
+    clock = Clock()
+    corner = (1050, 1040)
+    combat = StubCombat(approach_script=[MoveTo(corner)])
+    svc = services(
+        clock, combat=combat, route_to=lambda t: [corner, t]
+    )
+    step = make_step("clear_radius", svc, {"radius": 150, "center": "arrival"})
+    ctx = context(RecordingExecutor(clock=clock))
+    ctx.notes["arrival"] = HOME
+    far = monster(1, (1100, 1000))
+    step.step(snap(monsters=[far]), ctx)
+    assert combat.approach_targets == [((1100, 1000), corner)], (
+        "the module must gate on the monster and steer by the route"
+    )
 
 
 # -- the waypoint lock-out (stage B attempt 10) ---------------------------------

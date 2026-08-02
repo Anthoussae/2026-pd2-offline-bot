@@ -138,7 +138,7 @@ class FakeStep:
 
 def engine(
     *, states=None, monitor=None, ladder=None, executor=None,
-    snaps=None, config=None, clock=None,
+    snaps=None, config=None, clock=None, narrate=None,
 ):
     clock = clock or Clock()
     snaps = snaps if snaps is not None else [snap()]
@@ -156,6 +156,7 @@ def engine(
             config=config or EngineConfig(),
             clock=clock,
             sleep=lambda s: clock.advance(s),
+            **({"narrate": narrate} if narrate is not None else {}),
         ),
         clock,
     )
@@ -169,6 +170,22 @@ DECISION = ReflexDecision(
 def test_engine_refuses_an_empty_run():
     with pytest.raises(BehaviorError):
         engine(states=[])
+
+
+def test_engine_narrates_step_transitions_not_ticks():
+    """The narrative log (R179): the run header once, one line per step
+    completion with its duration, a summary at the end — and NOTHING per
+    tick, because the channel's value is its sparseness."""
+    lines = []
+    steps = [FakeStep("walk", ticks_to_done=5), FakeStep("fight", ticks_to_done=3)]
+    eng, clock = engine(states=steps, narrate=lines.append)
+    while not eng.tick():
+        clock.advance(1.0)
+    assert lines[0].startswith("run: walk -> fight")
+    assert len(lines) == 4  # header + 2 step lines + run complete, 8 ticks
+    assert lines[1].startswith("walk: done after ")
+    assert lines[2].startswith("fight: done after ")
+    assert lines[3].startswith("run complete")
 
 
 def test_tick_order_is_monitor_ladder_step():

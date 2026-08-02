@@ -26,6 +26,18 @@ class DrinkPotion:
 
 
 @dataclass(frozen=True)
+class GiveMercPotion:
+    """Alt + one belt column's key: feed the merc that potion (R179).
+
+    Always a healing column in practice — the ladder's merc rung picks a
+    column that actually holds one — but the action carries only the
+    column, like `DrinkPotion`: the key press is per-column, whatever
+    sits there."""
+
+    column: int
+
+
+@dataclass(frozen=True)
 class CastSelf:
     """Switch to `skill_id` (verified) and cast it on ourselves in place."""
 
@@ -84,7 +96,13 @@ class PickUpItem:
 
 
 Action = (
-    DrinkPotion | CastSelf | CastAtPoint | MoveTo | AttackUnit | PickUpItem
+    DrinkPotion
+    | GiveMercPotion
+    | CastSelf
+    | CastAtPoint
+    | MoveTo
+    | AttackUnit
+    | PickUpItem
 )
 
 

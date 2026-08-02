@@ -216,7 +216,10 @@ class NecroCombat:
         return MoveTo(spot) if spot is not None else None
 
     def approach(
-        self, snap: GameSnapshot, position: tuple[int, int]
+        self,
+        snap: GameSnapshot,
+        position: tuple[int, int],
+        via: tuple[int, int] | None = None,
     ) -> Action | None:
         """One hop toward something the RUN wants dead that we are not fighting.
 
@@ -238,6 +241,15 @@ class NecroCombat:
         A HOP, capped at `dash_step` like every other approach here, for
         the same reason: a blocking walk is time the reflex ladder is not
         being consulted.
+
+        `via` is the route's next waypoint when the step has one (R181):
+        the hop takes the ROUTE's direction rather than the bearing when
+        they differ, so a monster behind a fence is approached around it.
+        The gates stay keyed to `position` (the monster) — whether the
+        fight is close enough to refuse is a fact about the monster, not
+        about the corner we would round first. This module remains
+        grid-ignorant: it dashes where the step says, and the step asked
+        the map.
         """
         if snap.player is None or snap.in_town:
             return None
@@ -246,7 +258,7 @@ class NecroCombat:
             return None
         if _chebyshev(position, origin) <= self.config.engage_radius:
             return None
-        return MoveTo(self._dash_target(origin, position))
+        return MoveTo(self._dash_target(origin, via if via is not None else position))
 
     def _select_target(
         self, origin: tuple[int, int], hostiles: list[Monster], now: float

@@ -41,3 +41,25 @@ tune · stop if blocked · report.
 ```
 
 Done when: the scripted scenarios pass, suite green, ruff clean.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-08-02
+Commit: pending
+
+- Changed: `input.py` (`VK_MENU`, `press_key_with_alt` — gated chord, Alt
+  settled down before the key, release in a `finally`), `skills.py`
+  (`belt_give_merc`), `behavior/actions.py` (`GiveMercPotion`),
+  `behavior/execute.py` (keypress path, before the cast check like
+  DrinkPotion), `behavior/reflex.py` (rung 7.5 merc_heal: below every
+  player rung, above armor upkeep; paced on attempt; never in town; uses
+  P1's type search), `behavior/combat.py` (loader keys),
+  `config/necro.toml` (merc_heal_below_pct = 50.0, merc_heal_retry_s =
+  3.0 — R179, the user's numbers).
+- Tests: fires at 49% not 50/51; dead merc/no merc quiet; town quiet;
+  pacing across failed sends; wrong-column healing serves the merc;
+  player rejuv outranks; chord ordering + gate + stuck-Alt release;
+  executor chord test + never-queues-behind-a-cast test.
+- Validated: full suite 801 passed, ruff clean.
+- Deviations: none.

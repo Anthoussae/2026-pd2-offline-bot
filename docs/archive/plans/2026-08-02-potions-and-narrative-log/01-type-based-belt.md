@@ -51,3 +51,28 @@ stop if blocked · report changes + validation.
 ```
 
 Done when: the R178 shape passes as a test, suite green, ruff clean.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-08-02
+Commit: pending
+
+- Changed: `behavior/reflex.py` (`_potion_column` type search; rungs 3/5/6
+  drink from whichever column holds the type, configured column preferred;
+  module docstring updated to the R179 contract), `town.py`
+  (`assert_belt_minimums` narrowed: halts only when a short type has
+  inventory stock AND a column that would take it — otherwise loud notice
+  and continue; `refill_belt` delegates to it; new `_belt_accepts`),
+  `offsets.py` (`BELT_ROWS = 4`).
+- Tests: fake upgraded from per-type capacity to honest column routing
+  (squatters cost their slot); R178 mixed-belt, fully-squatted,
+  click-failure, no-stock, and charm-space cases; 4 reflex type-search
+  tests. Two old tests updated to the new contract (no-stock halt ->
+  notice-and-continue).
+- Validated: full suite 788 passed, ruff clean.
+- Deviations: "inventory/stash stock" in the phase file — stock is counted
+  from the main inventory only, because the refill can only reach the
+  inventory (no stash-withdrawal machinery exists; potions are never
+  stashed by policy). A stash-only restock still produces the notice, not
+  a halt.

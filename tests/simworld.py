@@ -446,6 +446,7 @@ def build_sim(
     tick_s: float = 0.5,
     alert=None,
     run_file: str = "cold-plains.toml",
+    narrate=None,
 ) -> SimRun:
     """Assemble the real stack over `world`.
 
@@ -529,6 +530,7 @@ def build_sim(
         sleep=lambda seconds: None,
         cleanse=world.cleanse_inventory,
         **({"alert": alert} if alert is not None else {}),
+        **({"narrate": narrate} if narrate is not None else {}),
     )
     registry = build_registry(services)
     run = load_run(REPO / "runs" / run_file, registry)
@@ -555,6 +557,7 @@ def build_sim(
         # bot time is one tick of world time, so poison, damage and
         # cooldowns all advance together.
         sleep=lambda seconds: world.advance_tick(seconds),
+        **({"narrate": narrate} if narrate is not None else {}),
     )
     return SimRun(world=world, engine=engine, executor=executor, gated=gated)
 

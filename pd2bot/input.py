@@ -71,6 +71,10 @@ VK_1, VK_2, VK_3, VK_4 = 0x31, 0x32, 0x33, 0x34
 # options by accident, which is the R89 defect.
 VK_UP, VK_DOWN, VK_RETURN = 0x26, 0x28, 0x0D
 VK_I = 0x49  # the inventory toggle (default binding)
+# Alt: held with a belt key it feeds that column's potion to the mercenary
+# (R179, merc first aid). Held alone it also shows ground-item labels,
+# which is harmless — perception reads memory, not pixels (R179-1a).
+VK_MENU = 0x12
 
 # Down/up spacing: a real click is never instantaneous, and the game samples
 # input per frame (25 fps sim); 60 ms was proven against the live client in M1
@@ -259,3 +263,24 @@ class GatedInput:
         _send_key(vk, 0)
         time.sleep(_CLICK_HOLD_S)
         _send_key(vk, _KEY_UP)
+
+    def press_key_with_alt(self, vk: int) -> None:
+        """Gated Alt+key chord: Alt provably down before the key.
+
+        The same-frame race that bought `_MODIFIER_SETTLE_S` (R113: a
+        shift-click processed as unmodified) applies to any modifier, so
+        the chord is sequenced like `stand_still`'s shift: Alt down, one
+        settle, the key, one settle, Alt up — and the release lives in a
+        `finally`, because a stuck Alt would silently reinterpret every
+        belt key that comes after it.
+        """
+        self.check()
+        _send_key(VK_MENU, 0)
+        time.sleep(_MODIFIER_SETTLE_S)
+        try:
+            _send_key(vk, 0)
+            time.sleep(_CLICK_HOLD_S)
+            _send_key(vk, _KEY_UP)
+            time.sleep(_MODIFIER_SETTLE_S)
+        finally:
+            _send_key(VK_MENU, _KEY_UP)

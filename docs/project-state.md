@@ -7,10 +7,11 @@ same commit as the transition itself.
 
 - **Milestone:** M5 — trial run (Cold Plains clearance)
 - **Phase:** P6 — staged live acceptance
-- **Next request ID:** R182 (overall counter; R171 was never issued — a
+- **Next request ID:** R183 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
 - **Next test ID:** T54 (check `docs/drill-log.md`)
 
-Updated: 2026-08-02 (session end ~04:00; branch pushed, PR #1 open;
-next work: docs/plans/2026-08-02-potions-and-narrative-log/)
+Updated: 2026-08-02 (~05:15; potions + narrative-log + route-legs cycle
+implemented and archived, 823 tests green, UNCOMMITTED pending R182;
+PR #1 still open awaiting the user's merge decision)

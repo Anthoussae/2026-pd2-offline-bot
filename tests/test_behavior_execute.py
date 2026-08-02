@@ -14,6 +14,7 @@ from pd2bot.behavior.actions import (
     CastAtPoint,
     CastSelf,
     DrinkPotion,
+    GiveMercPotion,
     MoveTo,
     PickUpItem,
 )
@@ -23,7 +24,7 @@ from pd2bot.behavior.execute import (
     GameActionExecutor,
     RecordingExecutor,
 )
-from pd2bot.input import VK_1, VK_F1, VK_F5
+from pd2bot.input import VK_1, VK_3, VK_F1, VK_F5
 from pd2bot.player import ActiveSkills, Player
 
 HOME = (1000, 1000)
@@ -38,6 +39,9 @@ class FakeGated:
 
     def press_key(self, vk):
         self.pressed.append(vk)
+
+    def press_key_with_alt(self, vk):
+        self.pressed.append(("alt", vk))
 
     def click_world(self, wx, wy, button="left", *, stand_still=False):
         self.world_clicks.append(((wx, wy), button, stand_still))
@@ -192,6 +196,23 @@ def test_drink_presses_the_column_key(monkeypatch):
     executor.execute(DrinkPotion(0, "mana"))
     assert gated.pressed == [VK_1]
     assert "key 1" in executor.trace[0].detail
+
+
+def test_give_merc_potion_presses_the_alt_chord(monkeypatch):
+    executor, gated, _, _ = make(monkeypatch)
+    executor.execute(GiveMercPotion(2))
+    assert gated.pressed == [("alt", VK_3)]
+    assert "alt+key 3" in executor.trace[0].detail
+
+
+def test_merc_feed_never_waits_for_a_cast(monkeypatch):
+    # Same T48 reasoning as the drink: a keypress lands mid-animation, so
+    # the merc's potion must not queue behind our own cast.
+    executor, gated, _, world = casting(monkeypatch)
+    executor.execute(CastSelf(offsets.SKILL_BONE_ARMOR))
+    world["mode"] = offsets.PLAYER_MODE_CASTING
+    executor.execute(GiveMercPotion(2))
+    assert ("alt", VK_3) in gated.pressed
 
 
 def test_self_cast_verifies_the_switch_before_clicking(monkeypatch):

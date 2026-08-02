@@ -2,9 +2,11 @@
 kind: plan
 size: md
 depth: implementation
-status: active
+status: done
 repo: 2026-pd2-offline-bot
 created: 2026-08-02
+completed: 2026-08-02
+commit: none
 adr: none
 ---
 

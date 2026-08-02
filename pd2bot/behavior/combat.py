@@ -103,7 +103,10 @@ class FakeCombatModule:
         return self._upkeep.pop(0) if self._upkeep else None
 
     def approach(
-        self, snap: GameSnapshot, position: tuple[int, int]
+        self,
+        snap: GameSnapshot,
+        position: tuple[int, int],
+        via: tuple[int, int] | None = None,
     ) -> Action | None:
         self.approach_calls += 1
         return self._approach.pop(0) if self._approach else None
@@ -202,6 +205,8 @@ _REFLEX_NUMBERS: dict[str, type] = {
     "reposition_step": int,
     "reposition_cooldown_s": float,
     "disengage_hp_pct": float,
+    "merc_heal_below_pct": float,
+    "merc_heal_retry_s": float,
     "armor_recast_below_pct": float,
     "armor_retry_s": float,
 }

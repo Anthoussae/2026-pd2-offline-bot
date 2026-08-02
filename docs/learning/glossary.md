@@ -16,6 +16,28 @@ two points. Its trick is always extending the candidate route that scores
 best on "distance walked so far + estimated distance remaining," so the
 search heads toward the goal instead of flooding the whole map.
 
+**alert fatigue** — what happens when a system raises so many alarms
+for non-problems that humans stop reacting to any of them — including
+the real one. The cure is precision about severity: a halt banner means
+"a human must act now," a notice means "worth knowing, the run
+continues," and the two must never share a voice. *(First seen:
+2026-08-02, honest halts and logs for humans.)*
+
+**cache (and cache key)** — keeping the answer to an expensive
+computation so the next identical question is free. The *key* is the
+definition of "identical": too precise and nothing is ever reused, too
+loose and you serve stale answers. Our route planner caches per
+(position rounded to an 8-subtile bucket, target) — a few steps reuse
+one plan, a bigger move replans. *(First seen: 2026-08-02, honest halts
+and logs for humans.)*
+
+**closure** — a function that carries with it the variables from the
+place it was created, even after that place has finished running.
+Used here as precision wiring: `route_service(navigator)` returns a
+`route_to` function that quietly keeps its navigator and its private
+cache — the caller gets exactly one capability, not the whole object.
+*(First seen: 2026-08-02, honest halts and logs for humans.)*
+
 **dataclass** — a Python class that is essentially a set of named fields, with
 the repetitive boilerplate generated automatically. Used here as the state
 model: readable, cheap, and immutable by default. First seen in
@@ -91,6 +113,14 @@ survival checks keep running between them. First seen in
 [simulating the game](2026-07-31-simulating-the-game.md).
 
 **flaky test** — a test that sometimes passes and sometimes fails with no code change in between. Usually a symptom of a race condition, a timing assumption, or a fragile selector in the test itself; professionals treat flakiness as a bug in the test harness to be fixed, not ignored. *(First seen: 2026-07-31, when the tools lie.)*
+
+**failure semantics** — the deliberate choice of what a component does
+when things go wrong: which failures stop the program, which are
+absorbed and logged, and which wake a human. The sharp question is "is
+the *world* short of something (normal), or is the *mechanism* broken
+(halt)?" — our belt refill halts only when stock exists, room exists,
+and the click still didn't land. *(First seen: 2026-08-02, honest halts
+and logs for humans.)*
 
 **fragile selector** — locating something by where it happens to be (a pixel position, "the third element on the page") rather than by a stable identity. Breaks silently the moment the layout shifts. The cure is addressing by identity: an ID, a label, or an ordinal in a structure that cannot move. *(First seen: 2026-07-31, when the tools lie.)*
 
@@ -170,6 +200,16 @@ than standing still, because activity defeats watchdogs that only ask
 our survey: distance closing or the target's hp falling) and a budget
 of progress-free effort before giving up. *(First seen: 2026-08-02,
 frontiers and livelocks.)*
+
+**log level** — the tag on a log message saying who it is for and how
+urgent it is; the classic ladder is debug / info / warn / error. One
+program writes for several audiences at once, and picking a message's
+level is an editorial decision, not a mirror of the code. Our version
+is two channels with a stated contract: the micro-log records every
+decision for debugging, the narrative log records one line per
+meaningful act for a human reading the run as a story — and a test
+enforces that the narrative scales with acts, not ticks. *(First seen:
+2026-08-02, honest halts and logs for humans.)*
 
 **memory offset** — the fixed distance, in bytes, from the start of a data
 structure to one of its fields. A table of offsets plus a starting address

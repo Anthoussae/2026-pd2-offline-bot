@@ -168,3 +168,15 @@ def belt_drink(gated: GatedInput, column: int) -> None:
     if not 0 <= column < len(BELT_KEYS):
         raise ValueError(f"belt column must be 0-3, got {column}")
     gated.press_key(BELT_KEYS[column])
+
+
+def belt_give_merc(gated: GatedInput, column: int) -> None:
+    """Alt + one belt column's key: feed that potion to the mercenary (R179).
+
+    The dumb primitive only, like `belt_drink`: the WHEN (merc hp
+    threshold, pacing, which column holds a healing potion) is the reflex
+    ladder's; the chord sequencing (Alt provably down first) is the input
+    layer's."""
+    if not 0 <= column < len(BELT_KEYS):
+        raise ValueError(f"belt column must be 0-3, got {column}")
+    gated.press_key_with_alt(BELT_KEYS[column])

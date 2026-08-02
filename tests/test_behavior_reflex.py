@@ -9,7 +9,13 @@ bookkeeping, the warp position-verify, and town suppression.
 import pytest
 
 from pd2bot import offsets
-from pd2bot.behavior.actions import CastAtPoint, CastSelf, DrinkPotion, MoveTo
+from pd2bot.behavior.actions import (
+    CastAtPoint,
+    CastSelf,
+    DrinkPotion,
+    GiveMercPotion,
+    MoveTo,
+)
 from pd2bot.behavior.reflex import (
     ReflexConfig,
     ReflexLadder,
@@ -63,12 +69,22 @@ def pack(count, center=POS, spread=2):
     ]
 
 
-def snap(pl=None, area=FIELD, monsters=()):
+def snap(pl=None, area=FIELD, monsters=(), allies=()):
     return GameSnapshot(
         in_game=True, taken_at=0.0,
         player=pl if pl is not None else player(),
         area=Area(level_no=area, position=(0, 0), size=(500, 500)),
         monsters=tuple(monsters),
+        allies=tuple(allies),
+    )
+
+
+def merc(hp=100, max_hp=100):
+    """The rogue hireling (kind 271), friendly, at the player's side."""
+    return Monster(
+        unit_id=900, kind=271, position=(1005, 1000), hp=hp, max_hp=max_hp,
+        is_champion=False, is_boss=False, is_minion=False,
+        alignment=offsets.ALIGNMENT_FRIENDLY,
     )
 
 
@@ -322,6 +338,104 @@ def test_heal_checks_column_contents_not_layout():
     wrong = belt(belt_potion(9, MANA, 2))
     ladder, _ = make_ladder(carried=lambda: wrong)
     assert ladder.evaluate(snap(player(hp=900))) is None
+
+
+# -- type search: column order must never matter (R179) --------------------------
+
+
+def test_rejuv_in_the_wrong_column_is_still_drunk():
+    # The R179 rule: a rejuv is a rejuv wherever it sits. Column 3 is a
+    # healing column by layout; the press follows the potion.
+    wrong = belt(belt_potion(9, REJUV, 3))
+    ladder, _ = make_ladder(carried=lambda: wrong)
+    decision = ladder.evaluate(snap(player(hp=490)))
+    assert decision.rung == "rejuv"
+    assert decision.action == DrinkPotion(3, "rejuv")
+
+
+def test_configured_column_is_preferred_when_both_hold_the_type():
+    both = belt(belt_potion(1, REJUV, 0), belt_potion(2, REJUV, 1))
+    ladder, _ = make_ladder(carried=lambda: both)
+    decision = ladder.evaluate(snap(player(hp=490)))
+    assert decision.action == DrinkPotion(1, "rejuv")  # the R53 home wins
+
+
+def test_heal_found_outside_its_configured_columns():
+    wrong = belt(belt_potion(9, HEAL, 0))  # the mana column
+    ladder, _ = make_ladder(carried=lambda: wrong)
+    decision = ladder.evaluate(snap(player(hp=900)))
+    assert decision.rung == "heal"
+    assert decision.action == DrinkPotion(0, "healing")
+
+
+def test_mana_found_outside_its_configured_column():
+    wrong = belt(belt_potion(9, MANA, 2))
+    ladder, _ = make_ladder(carried=lambda: wrong)
+    decision = ladder.evaluate(snap(player(mana=90)))
+    assert decision.rung == "mana"
+    assert decision.action == DrinkPotion(2, "mana")
+
+
+# -- rung 7.5: merc first aid (R179) ---------------------------------------------
+
+
+def test_merc_heal_fires_below_half():
+    ladder, _ = make_ladder()
+    decision = ladder.evaluate(snap(allies=[merc(hp=49)]))
+    assert decision is not None and decision.rung == "merc_heal"
+    assert decision.action == GiveMercPotion(2)  # the R53 primary heal column
+    assert "merc hp 49%" in decision.reason
+
+
+def test_merc_heal_holds_at_half_and_above():
+    ladder, _ = make_ladder()
+    assert ladder.evaluate(snap(allies=[merc(hp=51)])) is None
+    assert ladder.evaluate(snap(allies=[merc(hp=50)])) is None  # strict <
+
+
+def test_dead_merc_is_not_fed():
+    # A dead merc leaves snapshot.merc (hp 0 fails is_alive); no rung.
+    ladder, _ = make_ladder()
+    assert ladder.evaluate(snap(allies=[merc(hp=0)])) is None
+
+
+def test_merc_heal_never_fires_in_town():
+    ladder, _ = make_ladder()
+    assert ladder.evaluate(snap(area=TOWN, allies=[merc(hp=30)])) is None
+
+
+def test_merc_heal_is_paced_across_failed_sends():
+    # The stage B run 9 rule: a send that keeps failing must not refire at
+    # tick rate. Pacing records on ATTEMPT, so even a refused chord waits
+    # out merc_heal_retry_s.
+    ladder, clock = make_ladder()
+    first = ladder.evaluate(snap(allies=[merc(hp=30)]))
+    assert first.rung == "merc_heal"
+    first.commit_attempted()  # the send FAILED; pacing still recorded
+    clock.advance(0.5)
+    assert ladder.evaluate(snap(allies=[merc(hp=30)])) is None
+    clock.advance(3.0)
+    assert ladder.evaluate(snap(allies=[merc(hp=30)])).rung == "merc_heal"
+
+
+def test_merc_heal_needs_a_healing_potion_somewhere():
+    ladder, _ = make_ladder(carried=lambda: belt(belt_potion(1, MANA, 0)))
+    assert ladder.evaluate(snap(allies=[merc(hp=30)])) is None
+
+
+def test_merc_served_from_the_wrong_column():
+    # P1 integration: healing only in the rejuv column still serves the merc.
+    wrong = belt(belt_potion(9, HEAL, 1))
+    ladder, _ = make_ladder(carried=lambda: wrong)
+    decision = ladder.evaluate(snap(allies=[merc(hp=30)]))
+    assert decision is not None and decision.action == GiveMercPotion(1)
+
+
+def test_player_survival_outranks_the_merc():
+    # Both trigger on the same tick: the player's rejuv wins, the merc waits.
+    ladder, _ = make_ladder()
+    decision = ladder.evaluate(snap(player(hp=490), allies=[merc(hp=30)]))
+    assert decision.rung == "rejuv"
 
 
 # -- rung 6: mana --------------------------------------------------------------

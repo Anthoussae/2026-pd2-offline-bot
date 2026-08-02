@@ -479,6 +479,10 @@ NODE_CURSOR = 4
 # column = slot % 4 (kolbot Town.checkColumns uses exactly this). Rows vary
 # by belt; this character wears a 4-row belt (16 slots, R47.6).
 BELT_COLUMNS = 4
+# This character's belt (R47.6). If the worn belt ever changes, the refill's
+# capacity accounting reads short or long but never crashes — the halt logic
+# it feeds only fires when stock AND room agree a click should have landed.
+BELT_ROWS = 4
 
 # The USABLE inventory grid: 10x4, cells (0,0)..(9,3). Measured live by the
 # four-corner calibration (R60, 2026-07-30) with the user defining the

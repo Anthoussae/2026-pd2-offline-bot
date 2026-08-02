@@ -40,6 +40,7 @@ from typing import Protocol
 from pd2bot.behavior.actions import ActionExecutor
 from pd2bot.behavior.reflex import ReflexLadder
 from pd2bot.input import InputRefused
+from pd2bot.narrate import noop as narrate_noop
 from pd2bot.safety import ChickenExit
 from pd2bot.skills import SkillSwitchFailed
 from pd2bot.snapshot import GameSnapshot
@@ -235,6 +236,7 @@ class BehaviorEngine:
         config: EngineConfig | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        narrate: Callable[[str], None] = narrate_noop,
     ) -> None:
         if not states:
             raise BehaviorError("a run with no steps cannot do anything")
@@ -251,6 +253,10 @@ class BehaviorEngine:
         )
         self.report = EngineReport()
         self._index = 0
+        # The narrative channel (R179): step transitions with durations —
+        # the engine is the only thing that knows when a step began.
+        self._narrate = narrate
+        self._step_started = self._clock()
         self._last_activity = self._clock()
         self._last_position: tuple[int, int] | None = None
         self._refusal_streak = 0
@@ -433,6 +439,12 @@ class BehaviorEngine:
         self._monitor.tick()
         now = self._clock()
         self.report.ticks += 1
+        if self.report.ticks == 1:
+            # On the first TICK, not at construction: `describe` builds a
+            # throwaway engine pre-flight, and an inert engine must leave
+            # no narrative file behind.
+            self._narrate(f"run: {' -> '.join(self.step_names)}")
+            self._step_started = now
 
         # Movement counts as progress: a walk in flight sends nothing new
         # per tick, and bailing out mid-journey would make every long walk
@@ -507,6 +519,14 @@ class BehaviorEngine:
                     f"step {state.name} done"
                     + (f": {outcome.note}" if outcome.note else "")
                 )
+                elapsed = self._clock() - self._step_started
+                self._narrate(
+                    f"{state.name}: done after {elapsed:.0f}s"
+                    + (f" — {outcome.note}" if outcome.note else "")
+                )
+                self._step_started = self._clock()
+                if self.complete:
+                    self._narrate(f"run complete ({self.report.summary()})")
                 self._mark_activity(self._clock())
 
         self._check_idle(snap, now)

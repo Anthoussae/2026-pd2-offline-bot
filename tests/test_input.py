@@ -164,3 +164,33 @@ def test_refused_stand_still_click_sends_no_shift(sent):
     with pytest.raises(InputRefused):
         gated(make_session(in_game=False)).click_screen(400, 300, stand_still=True)
     assert sent == []
+
+
+def test_alt_chord_holds_the_modifier_around_the_key(sent):
+    """The merc-feed chord (R179): Alt provably down before the belt key,
+    provably still down when the key releases — the R113 same-frame race,
+    applied to a keyboard modifier."""
+    gated(make_session()).press_key_with_alt(0x33)
+    assert sent.index(("key", 0x12, 0)) < sent.index(("key", 0x33, 0))
+    assert sent.index(("key", 0x33, 0x0002)) < sent.index(("key", 0x12, 0x0002))
+
+
+def test_alt_chord_is_gated(sent):
+    with pytest.raises(InputRefused):
+        gated(make_session(), foreground=False).press_key_with_alt(0x33)
+    assert sent == []
+
+
+def test_alt_released_when_the_key_send_fails(sent, monkeypatch):
+    """A stuck Alt would reinterpret every later belt key as a merc feed;
+    the release must survive a mid-chord failure."""
+
+    def explode(vk, flags):
+        sent.append(("key", vk, flags))
+        if vk == 0x33 and flags == 0:
+            raise OSError("SendInput failed")
+
+    monkeypatch.setattr("pd2bot.input._send_key", explode)
+    with pytest.raises(OSError):
+        gated(make_session()).press_key_with_alt(0x33)
+    assert ("key", 0x12, 0x0002) in sent

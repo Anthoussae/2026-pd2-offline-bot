@@ -173,6 +173,31 @@ All timing is injected, so the whole ladder is tested against a scripted
 fake world in `tests/test_navigate.py` — the game is only needed for the
 acceptance walks (`python -m pd2bot.navigate --demo`).
 
+## The route service: steps ask the map too (R181)
+
+For most of M5 the atlas was fully used by the navigator and ignored by
+the STEPS: patrol legs, survey legs, and combat approaches were
+straight-line bearing hops, so a far-corner target had each hop plan
+locally, clamp at a fence, and burn the target's no-progress budget
+while the bot visibly shuffled at dead edges — and a bearing hop could
+lead straight through a zone exit (T53 run 2 wandered into Stony Field
+and back). The map could answer "is there a route, and which way?"; no
+step asked.
+
+`wiring.route_service(navigator)` closes that gap: `route_to(target)`
+runs the same A* + `simplify` the navigator walks with, READ-ONLY (no
+clicks, no walking), and returns the waypoint list — or **None when no
+path exists**, which the steps treat as an instant write-off instead of
+a budget burned at a fence. Legs then aim at the route's next waypoint,
+still capped at `patrol_step`/`dash_step` so the reflex ladder gets its
+look between hops; a route planned on the area's grid never leads
+through an exit the target is not behind, so the zone-wander class dies
+with the bearings. Plans are cached per (8-subtile origin bucket,
+target) — re-planning every tick is waste, and the atlas only grows, so
+a briefly stale route is at worst conservative. The combat module stays
+grid-ignorant: the step hands `approach()` the route's next waypoint as
+`via`, while the module's own gates stay keyed to the monster.
+
 ## Re-verification after a PD2 patch
 
 Same drill as perception (see perception.md), plus: re-run the click

@@ -24,6 +24,7 @@ from pd2bot.wiring import (
     SessionBaseline,
     WiringError,
     belt_capacity,
+    route_service,
     town_config_for,
     walkability,
 )
@@ -87,6 +88,70 @@ def test_town_config_takes_its_minimums_from_the_class_config(class_config):
 def test_town_config_keeps_every_other_field_of_its_base(class_config):
     base = replace(town_config_for(class_config), npc_standoff=99)
     assert town_config_for(class_config, base).npc_standoff == 99
+
+
+# -- the route service (R181) -----------------------------------------------------
+
+
+class _CountingGridNav:
+    """A fake navigator over a scripted grid, counting grid reads."""
+
+    def __init__(self, walkable, pos=(100, 100)):
+        self._walkable = walkable
+        self.pos = pos
+        self.grid_reads = 0
+
+    def position(self):
+        return self.pos
+
+    def grid(self):
+        self.grid_reads += 1
+        walkable = self._walkable
+        return SimpleNamespace(
+            is_walkable=lambda x, y: walkable(x, y),
+            is_known=lambda x, y: True,
+        )
+
+
+def test_route_service_plans_over_the_grid():
+    nav = _CountingGridNav(lambda x, y: True)
+    route = route_service(nav)((140, 100))
+    assert route is not None
+    assert route[-1] == (140, 100)
+
+
+def test_route_service_answers_none_when_no_path_exists():
+    # Everything past x=120 is wall, thicker than nearest_walkable's
+    # 15-subtile search: the map's honest "no route exists".
+    nav = _CountingGridNav(lambda x, y: x < 120)
+    assert route_service(nav)((140, 100)) is None
+
+
+def test_route_service_caches_per_origin_bucket():
+    """Unchanged origin bucket + same target = ONE plan over many legs —
+    re-planning every tick is the tick-rate waste this repo keeps
+    refusing."""
+    nav = _CountingGridNav(lambda x, y: True)
+    route = route_service(nav)
+    first = route((140, 100))
+    assert route((140, 100)) == first
+    assert nav.grid_reads == 1
+    nav.pos = (102, 100)  # same 8-subtile bucket: still cached
+    route((140, 100))
+    assert nav.grid_reads == 1
+    nav.pos = (110, 100)  # new bucket: re-plan
+    route((140, 100))
+    assert nav.grid_reads == 2
+
+
+def test_route_service_walks_straight_when_position_is_unreadable():
+    # A torn read must not write a target off: the answer degrades to the
+    # old bearing hop, not to "no route".
+    def boom():
+        raise RuntimeError("left the game?")
+
+    nav = SimpleNamespace(position=boom, grid=lambda: None)
+    assert route_service(nav)((140, 100)) == [(140, 100)]
 
 
 # -- the cleanse whitelist and its baseline ---------------------------------------

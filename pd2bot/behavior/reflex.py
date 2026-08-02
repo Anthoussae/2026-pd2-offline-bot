@@ -20,6 +20,10 @@ is config, sourced from the class TOML):
     6  mana       mana < 25%: mana column, 15 s cooldown (R49 amendment).
     7  disengage  bone armor down AND on cooldown AND hp < 70%: retreat
                   from the pack; no attacking until rearmored.
+    7.5 merc heal merc alive and hp < 50% with a healing potion in the
+                  belt: Alt+<column key> feeds it one (R179). Below every
+                  player rung, above the armor upkeep; paced, never in
+                  town.
     8  upkeep     bone armor off cooldown and absorb < 75% (fallback when
                   the stat is unreadable: after being hit): recast.
                   Revive raising is DELEGATED to the combat module's
@@ -33,10 +37,13 @@ action (castable and harmless there, proven live in P2); the combat-module
 delegation is out-of-town only (desecrate/revive are not castable in town,
 R47.4).
 
-Belt columns follow the PERMANENT layout the user declared at R53 — key 1
-mana, key 2 rejuv, keys 3+4 healing. (The phase file's rung table still
-carries R47.6's original key numbers; R53 superseded them, and the config
-here is the R53 mapping.)
+Belt columns follow the layout the user declared at R53 — key 1 mana, key 2
+rejuv, keys 3+4 healing — as a PREFERENCE, not a requirement (R179): every
+drink searches all four columns for the needed type, configured column
+first. Column order must never matter, because the belt routes clicks by
+column and a potion can sit anywhere a refill or a pickup left it; the
+R178 halt was a mana potion squatting in a healing column, and the answer
+is to read the belt as it is, not to demand the layout.
 
 Cooldown and last-attempt bookkeeping is this module's job; P2's primitives
 are dumb on purpose. It is DECIDED here and COMMITTED by the engine, once
@@ -63,6 +70,7 @@ from pd2bot.behavior.actions import (
     CastAtPoint,
     CastSelf,
     DrinkPotion,
+    GiveMercPotion,
     MoveTo,
 )
 from pd2bot.items import CarriedItem, CarriedItems
@@ -120,6 +128,12 @@ class ReflexConfig:
     reposition_cooldown_s: float = 2.0  # pacing between fires
     # Rung 7 — disengage.
     disengage_hp_pct: float = 70.0
+    # Rung 7.5 — merc first aid (R179, the user's numbers): merc alive and
+    # below this hp%, with a healing potion anywhere in the belt -> Alt+key
+    # of the column that holds one. Upkeep-tier: below every player-survival
+    # rung on purpose, and paced on attempt like the armor recast.
+    merc_heal_below_pct: float = 50.0
+    merc_heal_retry_s: float = 3.0
     # Rung 8 — bone armor upkeep.
     armor_skill_id: int = offsets.SKILL_BONE_ARMOR
     armor_recast_below_pct: float = 75.0
@@ -304,6 +318,7 @@ class ReflexLadder:
         self._warp_attempt: tuple[float, tuple[int, int]] | None = None
         self._armor_attempt: float | None = None
         self._reposition_attempt: float | None = None
+        self._merc_heal_attempt: float | None = None
 
     # -- shared bookkeeping ----------------------------------------------------
 
@@ -379,6 +394,28 @@ class ReflexLadder:
         return any(
             i.belt_column == column and type_check(i) for i in carried.belt
         )
+
+    def _potion_column(
+        self,
+        carried: CarriedItems,
+        preferred: tuple[int, ...],
+        type_check: Callable[[CarriedItem], bool],
+    ) -> int | None:
+        """The column to press for this potion type, or None when the belt
+        holds none of it anywhere.
+
+        Configured column(s) first — the R53 layout is still the preferred
+        home — then the rest, because column ORDER must never matter
+        (user, R179): a rejuv is a rejuv wherever a refill or a misclick
+        left it, and the press goes where the potion actually sits.
+        """
+        others = tuple(
+            c for c in range(offsets.BELT_COLUMNS) if c not in preferred
+        )
+        for column in (*preferred, *others):
+            if self._column_potion(carried, column, type_check):
+                return column
+        return None
 
     # -- the rungs -------------------------------------------------------------
 
@@ -481,12 +518,13 @@ class ReflexLadder:
             # Rung 3 — rejuv. No cooldown: a rejuv fills instantly, so a
             # re-fire next tick means it genuinely did not help enough.
             if hp_pct < cfg.rejuv_below_pct:
-                if self._column_potion(
-                    carried, cfg.rejuv_column, lambda i: i.is_rejuv_potion
-                ):
+                rejuv_column = self._potion_column(
+                    carried, (cfg.rejuv_column,), lambda i: i.is_rejuv_potion
+                )
+                if rejuv_column is not None:
                     return ReflexDecision(
                         rung="rejuv",
-                        action=DrinkPotion(cfg.rejuv_column, "rejuv"),
+                        action=DrinkPotion(rejuv_column, "rejuv"),
                         reason=f"hp {hp_pct:.0f}% < {cfg.rejuv_below_pct:.0f}%",
                     )
                 if (
@@ -529,24 +567,24 @@ class ReflexLadder:
                 if warp is not None:
                     return warp
 
-            # Rung 5 — healing potion, cooldown-gated, backup column when
-            # the primary is empty (R53 layout: two healing columns).
+            # Rung 5 — healing potion, cooldown-gated, drunk from whichever
+            # column actually holds one (configured columns preferred).
             if hp_pct < cfg.heal_below_pct and (
                 now - self._last_drink.get("healing", -math.inf)
                 >= cfg.heal_cooldown_s
             ):
-                for column in cfg.heal_columns:
-                    if self._column_potion(
-                        carried, column, lambda i: i.is_healing_potion
-                    ):
-                        return ReflexDecision(
-                            rung="heal",
-                            action=DrinkPotion(column, "healing"),
-                            reason=f"hp {hp_pct:.0f}% < {cfg.heal_below_pct:.0f}%",
-                            commit=lambda: self._last_drink.__setitem__(
-                                "healing", now
-                            ),
-                        )
+                heal_column = self._potion_column(
+                    carried, cfg.heal_columns, lambda i: i.is_healing_potion
+                )
+                if heal_column is not None:
+                    return ReflexDecision(
+                        rung="heal",
+                        action=DrinkPotion(heal_column, "healing"),
+                        reason=f"hp {hp_pct:.0f}% < {cfg.heal_below_pct:.0f}%",
+                        commit=lambda: self._last_drink.__setitem__(
+                            "healing", now
+                        ),
+                    )
 
             # Rung 6 — mana potion, 15 s cooldown (the R49 amendment).
             if player.max_mana > 0:
@@ -555,12 +593,13 @@ class ReflexLadder:
                     now - self._last_drink.get("mana", -math.inf)
                     >= cfg.mana_cooldown_s
                 ):
-                    if self._column_potion(
-                        carried, cfg.mana_column, lambda i: i.is_mana_potion
-                    ):
+                    mana_column = self._potion_column(
+                        carried, (cfg.mana_column,), lambda i: i.is_mana_potion
+                    )
+                    if mana_column is not None:
                         return ReflexDecision(
                             rung="mana",
-                            action=DrinkPotion(cfg.mana_column, "mana"),
+                            action=DrinkPotion(mana_column, "mana"),
                             reason=f"mana {mana_pct:.0f}% < {cfg.mana_below_pct:.0f}%",
                             commit=lambda: self._last_drink.__setitem__("mana", now),
                         )
@@ -620,6 +659,38 @@ class ReflexLadder:
                             f"{cfg.disengage_hp_pct:.0f}%"
                         ),
                     )
+
+            # Rung 7.5 — merc first aid (R179). Below EVERY player-survival
+            # rung on purpose: the merc gets a potion only on a tick the
+            # player needed nothing. Alt+key of a column that actually
+            # holds a healing potion (the type search — a heal serves the
+            # merc from the "wrong" column too). Paced on ATTEMPT, not
+            # cooled down (the stage B run 9 rule): the proof it helped is
+            # the merc's hp, re-read next tick, and a failing send must
+            # not refire at tick rate. Never in town — the preamble heals
+            # the merc there for free.
+            merc = snap.merc
+            if merc is not None and merc.max_hp > 0 and (
+                self._merc_heal_attempt is None
+                or now - self._merc_heal_attempt >= cfg.merc_heal_retry_s
+            ):
+                merc_pct = 100.0 * merc.hp / merc.max_hp
+                if merc_pct < cfg.merc_heal_below_pct:
+                    heal_column = self._potion_column(
+                        carried, cfg.heal_columns, lambda i: i.is_healing_potion
+                    )
+                    if heal_column is not None:
+                        return ReflexDecision(
+                            rung="merc_heal",
+                            action=GiveMercPotion(heal_column),
+                            reason=(
+                                f"merc hp {merc_pct:.0f}% < "
+                                f"{cfg.merc_heal_below_pct:.0f}%"
+                            ),
+                            on_attempt=lambda: setattr(
+                                self, "_merc_heal_attempt", now
+                            ),
+                        )
 
         # Rung 8 — upkeep. The armor half runs in town too (castable there,
         # proven in P2's live drill; arriving armored is strictly better);

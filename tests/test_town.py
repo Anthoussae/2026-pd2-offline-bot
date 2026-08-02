@@ -218,9 +218,38 @@ class Town:
         self.dialog_row = 1  # a freshly opened menu always starts here
 
     @staticmethod
-    def belt_capacity(item) -> int:
-        """4 rows per column; healing owns two columns (R53)."""
-        return 8 if item.is_healing_potion else 4
+    def _same_potion_type(a, b) -> bool:
+        return (
+            a.is_healing_potion == b.is_healing_potion
+            and a.is_mana_potion == b.is_mana_potion
+            and a.is_rejuv_potion == b.is_rejuv_potion
+        )
+
+    def _belt_column_items(self, column):
+        return [b for b in self.belt if b.belt_column == column]
+
+    def _route_belt_column(self, item):
+        """Where the game would put a shift-clicked potion: a column of its
+        own type with room first, else an empty column, else nowhere.
+
+        The old fake gave each TYPE a fixed capacity (healing 8, others 4),
+        which is the R53 layout in disguise — it could not express the R178
+        belt, where a mana potion squats in a healing column and eats a slot
+        the capacity model still counted as free. Routing by column makes
+        the squatter cost what it costs in the real game.
+        """
+        for column in range(offsets.BELT_COLUMNS):
+            items = self._belt_column_items(column)
+            if (
+                items
+                and all(self._same_potion_type(b, item) for b in items)
+                and len(items) < offsets.BELT_ROWS
+            ):
+                return column
+        for column in range(offsets.BELT_COLUMNS):
+            if not self._belt_column_items(column):
+                return column
+        return None
 
     @property
     def dialog_rows(self) -> int:
@@ -303,25 +332,21 @@ class Town:
                 index, item = self._item_at_pixel(sx, sy)
                 if item is None or item.potion_name is None:
                     return
-                # The belt has CAPACITY, and shift-click routes by type into
-                # its column (R53: 1 mana, 2 rejuv, 3+4 healing). Without
-                # that, the fake would swallow every potion ever offered and
-                # `fill_belt` would never learn the belt was full — which is
-                # exactly how it decides what counts as excess (R107).
-                def same_type(b, target=item):
-                    return (
-                        b.is_healing_potion == target.is_healing_potion
-                        and b.is_mana_potion == target.is_mana_potion
-                        and b.is_rejuv_potion == target.is_rejuv_potion
-                    )
-
-                held = sum(1 for b in self.belt if same_type(b))
-                if held >= self.belt_capacity(item):
+                # The belt routes by COLUMN, and a refused click is how it
+                # reports itself full. Without that, the fake would swallow
+                # every potion ever offered and `fill_belt` would never
+                # learn the belt was full — which is exactly how it decides
+                # what counts as excess (R107).
+                column = self._route_belt_column(item)
+                if column is None:
                     return
+                slot = column + offsets.BELT_COLUMNS * len(
+                    self._belt_column_items(column)
+                )
                 moved = self.inventory.pop(index)
                 self._uid += 1
                 self.belt.append(
-                    potion(900 + self._uid, moved.kind, belt_slot=len(self.belt))
+                    potion(900 + self._uid, moved.kind, belt_slot=slot)
                 )
 
     def press_key(self, vk):
@@ -417,6 +442,7 @@ def layer(
     protected_ids=None,
     carried=None,
     carried_with_sockets=None,
+    narrate=None,
 ):
     clock = FakeClock()
     gated = SimpleNamespace(
@@ -446,6 +472,7 @@ def layer(
         sleep=clock.sleep,
         keep_item=keep_item,
         protected_ids=protected_ids,
+        narrate=narrate,
     )
 
 
@@ -665,12 +692,58 @@ def test_refill_moves_potions_until_minimums_hold(town):
     assert offsets.UI_INVENTORY not in town.panels  # and closed after
 
 
-def test_refill_below_minimum_halts_loudly(town):
+def test_refill_short_with_no_stock_logs_and_continues(town):
+    """Emptiness is normal (user, R179): a shortfall the inventory cannot
+    cover is a loud notice, never a halt — R178 halted a healthy run over
+    exactly this, and R180 repeated it the same night."""
     town.belt = []
     town.inventory = [potion(30, 606, cell=(1, 1))]  # one healing, nothing else
+    report = PreambleReport()
+    layer(town).refill_belt(report)  # must NOT raise
+    assert report.refilled == 1  # what stock there was got loaded
+    assert town.alerts == []
+    assert len(town.notices) == 1 and "belt short" in town.notices[0]
+
+
+def test_refill_click_failure_with_stock_and_room_still_halts(town):
+    """The halt that remains: stock in the inventory, an empty column to
+    take it, and the potion still not landing — the clicks themselves are
+    failing, which is worth a human."""
+    town.belt = []
+    town.inventory = [potion(30 + n, 606, cell=(n, 1)) for n in range(4)]
+    town.refill_works = False
     with pytest.raises(BeltBelowMinimum):
         layer(town).refill_belt(PreambleReport())
-    assert len(town.alerts) == 1
+    assert len(town.alerts) == 1 and "mechanically failing" in town.alerts[0]
+
+
+def test_refill_r178_mixed_belt_refills_around_the_squatter(town):
+    """The R178 belt: mana potions squatting in a healing column. The
+    refill loads healing around them, the squatters count toward the MANA
+    minimum where they sit, and nothing halts."""
+    town.belt = [
+        potion(20, 611, belt_slot=2), potion(21, 611, belt_slot=6),  # col 2
+        potion(22, 606, belt_slot=3),  # one healing in col 3
+    ]
+    town.inventory = [potion(30 + n, 606, cell=(n, 1)) for n in range(3)]
+    report = PreambleReport()
+    layer(town).refill_belt(report)  # must NOT raise
+    assert report.refilled == 3  # routed into col 3 around the squatters
+    assert town.alerts == []
+    carried = town.carried()
+    assert sum(1 for i in carried.belt if i.is_healing_potion) == 4
+
+
+def test_refill_fully_squatted_belt_continues_despite_stock(town):
+    """Every column bottom-held by the wrong type: healing stock exists but
+    has no home the game would route it to. Not a mechanical failure — the
+    run continues and says so."""
+    town.belt = [potion(20 + n, 611, belt_slot=n) for n in range(4)]  # 4 cols mana
+    town.inventory = [potion(30 + n, 606, cell=(n, 1)) for n in range(4)]
+    report = PreambleReport()
+    layer(town).refill_belt(report)  # must NOT raise
+    assert town.alerts == []
+    assert len(town.notices) == 1 and "belt short" in town.notices[0]
 
 
 def test_refill_closes_the_stash_before_clicking(town):
@@ -988,6 +1061,31 @@ def test_preamble_runs_in_the_agreed_order(town):
     ]  # two stash lines: the deposit, then the held-item count
 
 
+def test_preamble_narrates_each_station_with_its_duration(town):
+    """The narrative log (R179): one line per station, each carrying what
+    its report lines said and how long it took — the answer to "what was
+    it doing while it dawdled at Akara?"."""
+    import re
+
+    town.inventory = [loot(1, (2, 1))]
+    _stock_belt_at_minimums(town)
+    lines = []
+    layer(town, narrate=lines.append).run_preamble()
+    assert len(lines) == 4  # heal, repair, inventory, merc — never per poll
+    assert lines[0].startswith("heal:")
+    assert lines[-1].startswith("merc:")
+    assert all(re.search(r"\(\d+\.\ds\)$", line) for line in lines)
+
+
+def test_preamble_narrates_a_station_failure(town):
+    town.akara_present = False
+    town.heal_on_interact = False
+    lines = []
+    with pytest.raises(TownError):
+        layer(town, narrate=lines.append).run_preamble()
+    assert len(lines) == 1 and lines[0].startswith("heal: FAILED after ")
+
+
 def charm(uid, cell):
     """An item in PD2's charm space: same container, same bytes, off limits."""
     return CarriedItem(uid, 522, 6, offsets.ITEM_MODE_IN_STORAGE,
@@ -1008,15 +1106,19 @@ def test_deposit_never_touches_charm_space(town):
 
 
 def test_refill_ignores_potions_sitting_in_charm_space(town):
+    """Charm-space potions are not stock: nothing is clickable, so the
+    shortfall is a no-stock notice (R179), not a mechanical halt."""
     town.belt = [potion(20, 610, belt_slot=0), potion(21, 611, belt_slot=4)]
     town.inventory = [
         CarriedItem(50 + n, 606, 2, offsets.ITEM_MODE_IN_STORAGE,
                     offsets.STORAGE_INVENTORY, offsets.NODE_STORAGE, (n, 5), 1)
         for n in range(6)
     ]
-    with pytest.raises(BeltBelowMinimum):
-        layer(town).refill_belt(PreambleReport())
+    report = PreambleReport()
+    layer(town).refill_belt(report)  # must NOT raise
     assert town.panel_clicks == []  # nothing was clickable
+    assert town.alerts == []
+    assert len(town.notices) == 1 and "belt short" in town.notices[0]
 
 
 def test_grid_pixel_refuses_cells_outside_the_usable_grid(town):

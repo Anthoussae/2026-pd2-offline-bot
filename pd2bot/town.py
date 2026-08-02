@@ -370,6 +370,7 @@ class TownLayer:
         read_player_fn: Callable[[GameSession], Player | None] = read_player,
         alert: Callable[[str], None] = _default_alert,
         notice: Callable[[str], None] | None = None,
+        narrate: Callable[[str], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         should_stop: Callable[[], bool] | None = None,
@@ -412,6 +413,11 @@ class TownLayer:
         # the bot is waiting when it is not. Tests that inject an alert and
         # want to see notices too can pass the same callable deliberately.
         self._notice = notice if notice is not None else _default_notice
+        # The narrative channel (R179): one line per preamble station,
+        # with its duration — the "dawdle at Akara" is heal verification
+        # polling plus settle timers, and this is where it says so. No-op
+        # by default so drills and tests stay silent.
+        self._narrate = narrate if narrate is not None else (lambda text: None)
         self._pressure_warned = False
         self._clock = clock
         self._sleep = sleep
@@ -1555,13 +1561,67 @@ class TownLayer:
         return moved
 
     def assert_belt_minimums(self, report: PreambleReport) -> None:
-        """Halt loudly if the belt is still short. Manual restock (R48)."""
+        """Halt ONLY for a real failure; merely missing potions is normal.
+
+        The old contract halted on any unmet minimum, and R178 showed what
+        that costs: a mana potion squatting in a healing column left the
+        count short, the preamble halted a healthy run at 2 AM, and the
+        user had to restock a belt that nothing was wrong with. The user's
+        rule (R179) is the new contract: minimums are met WHEN STOCK
+        ALLOWS, emptiness is normal, and the halt-for-a-human fires only
+        when the refill mechanically failed — a type is short while the
+        inventory holds that type AND the belt has a column that would
+        take it, which means the clicks themselves are not landing.
+        """
         shortfall = self._belt_shortfall()
-        if any(shortfall.values()):
-            missing = ", ".join(f"{k} short {v}" for k, v in shortfall.items() if v)
-            self._alert(f"belt below minimum after refill: {missing} — manual restock")
+        if not any(shortfall.values()):
+            report.log.append("belt: minimums hold")
+            return
+        carried = self._carried(self.session)
+        stock: dict[str, int] = {"healing": 0, "mana": 0, "rejuv": 0}
+        for item in carried.main_inventory:
+            potion_type = _potion_type(item)
+            if potion_type is not None:
+                stock[potion_type] += 1
+        mechanical = [
+            potion_type
+            for potion_type, short in shortfall.items()
+            if short and stock[potion_type] and self._belt_accepts(carried, potion_type)
+        ]
+        missing = ", ".join(f"{k} short {v}" for k, v in shortfall.items() if v)
+        if mechanical:
+            self._alert(
+                f"belt refill is mechanically failing: {missing}, with "
+                f"{', '.join(mechanical)} stock in the inventory and belt room "
+                "to take it — the clicks are not landing; a human should look"
+            )
             raise BeltBelowMinimum(missing)
-        report.log.append("belt: minimums hold")
+        self._notice(
+            f"belt short ({missing}) with no loadable stock — continuing; "
+            "restock when convenient"
+        )
+        report.log.append(f"belt: short ({missing}), no loadable stock — continuing")
+
+    def _belt_accepts(self, carried: CarriedItems, potion_type: str) -> bool:
+        """Would a shift-click of this type land somewhere in the belt?
+
+        The game routes a belted potion to a column of its own type with
+        room, or to an empty column. A column holding ANY other type is
+        not a home for this one — that is how a misplaced potion "counts
+        where it sits" (R179): it spends a slot of whatever column it
+        squats in, and the capacity sums honestly around it. A mixed
+        column is conservatively counted as accepting nothing; the cost
+        of underestimating room here is a quieter run, never a halt.
+        """
+        for column in range(offsets.BELT_COLUMNS):
+            occupants = [i for i in carried.belt if i.belt_column == column]
+            if len(occupants) >= offsets.BELT_ROWS:
+                continue
+            if not occupants or all(
+                _potion_type(i) == potion_type for i in occupants
+            ):
+                return True
+        return False
 
     def deposit_gold(self, report: PreambleReport) -> int:
         """Bank the carried gold. Returns the amount moved.
@@ -1747,12 +1807,8 @@ class TownLayer:
                         report.refilled += 1
             self.close_panels()
 
-        shortfall = self._belt_shortfall()
-        if any(shortfall.values()):
-            missing = ", ".join(f"{k} short {v}" for k, v in shortfall.items() if v)
-            self._alert(f"belt below minimum after refill: {missing} — manual restock")
-            raise BeltBelowMinimum(missing)
-        report.log.append(f"belt: {report.refilled} moved, minimums hold")
+        report.log.append(f"belt: {report.refilled} moved")
+        self.assert_belt_minimums(report)
 
     def drop_item(self, item: CarriedItem) -> bool:
         """Ctrl+right-click one inventory item onto the ground. Did it leave?
@@ -2170,8 +2226,31 @@ class TownLayer:
         (T13, T14).
         """
         report = report if report is not None else PreambleReport()
-        self.heal_at_akara(report)
-        self.repair_at_charsi(report)
-        self.manage_inventory(report)
-        self.resurrect_merc_if_dead(report)
+        # Each station narrates ONE completion line: what its own report
+        # lines said, plus how long it took. The duration is the answer to
+        # "what was it doing while it dawdled at Akara?" (R179) — the
+        # station was polling its verification and sitting out settle
+        # timers, and now it says so instead of standing there mutely. A
+        # station that raises narrates too, via the failure line: the
+        # dawdle a human asks about is usually the one that ended badly.
+        stations: tuple[tuple[str, Callable[[PreambleReport], None]], ...] = (
+            ("heal", self.heal_at_akara),
+            ("repair", self.repair_at_charsi),
+            ("inventory", self.manage_inventory),
+            ("merc", self.resurrect_merc_if_dead),
+        )
+        for label, station in stations:
+            started = self._clock()
+            before = len(report.log)
+            try:
+                station(report)
+            except Exception as exc:
+                self._narrate(
+                    f"{label}: FAILED after {self._clock() - started:.1f}s "
+                    f"({type(exc).__name__})"
+                )
+                raise
+            elapsed = self._clock() - started
+            outcome = "; ".join(report.log[before:]) or "nothing to do"
+            self._narrate(f"{outcome} ({elapsed:.1f}s)")
         return report
