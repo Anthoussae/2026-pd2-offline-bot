@@ -63,6 +63,24 @@ def _hop(
     return (round(origin[0] + dx * scale), round(origin[1] + dy * scale))
 
 
+def _point_away(
+    origin: tuple[int, int], repel: tuple[int, int], distance: int
+) -> tuple[int, int]:
+    """A point `distance` from `repel`, on the far side of `origin`.
+
+    The cleanse hygiene's direction chooser: walk directly away from the
+    thing the junk must not land near. Standing exactly ON the repel point
+    has no away direction, so any fixed one serves — the distance is what
+    matters, not the bearing.
+    """
+    dx, dy = origin[0] - repel[0], origin[1] - repel[1]
+    span = max(abs(dx), abs(dy))
+    if span == 0:
+        dx, dy, span = 1, 1, 1
+    scale = distance / span
+    return (round(repel[0] + dx * scale), round(repel[1] + dy * scale))
+
+
 def _default_alert(reason: str) -> None:  # pragma: no cover - exercised live
     print(f"\n!!  {reason}\n", flush=True)
 
@@ -204,6 +222,29 @@ class RunServices:
     # the bot does in the field can empty a full belt column.
     belt_full: set[str] = field(default_factory=set)
     cleanse_safe_radius: int = 40
+    # -- cleanse drop hygiene (R175, user-diagnosed live) ------------------
+    #
+    # The R173 run found the loop: the cleanse drops junk AT THE FEET,
+    # right where the failed pickup is about to click again, and the click
+    # scoops the junk straight back. Dropped items appear at the pointer
+    # (user observation, watching it happen). So: never drop within this
+    # distance of an item we intend to click, and after dropping, get at
+    # least this far from the pile before clicking anything. 8 is
+    # comfortably past the sprite-overlap zone (a click hits items within
+    # a subtile or two) without costing real walking time.
+    cleanse_standoff: int = 8
+    # Where the last cleanse dropped its junk; None = no pile to avoid.
+    # Shared service state, not step state, for the usual reason: both the
+    # clearance and the sweep cleanse, and the pile does not care which
+    # step made it.
+    cleanse_dropped_at: tuple[int, int] | None = None
+    # Items that already got their one post-cleanse retry. The cleanse
+    # frees space and the bot steps clear of the pile, so the retry
+    # genuinely differs from the attempt that failed — once. A second
+    # failure of the same item cannot be explained by junk-at-the-feet
+    # again, so it is final for this game: re-queueing another cleanse for
+    # it is the retry-that-cannot-differ this codebase keeps refusing.
+    cleanse_retried: set[int] = field(default_factory=set)
 
 
 # -- blocking steps ------------------------------------------------------------
@@ -483,8 +524,13 @@ class _PickupMixin:
             # arithmetic is not available and persistence IS the signal.
             self._mark_inventory_full(item)
             # A failed pickup is the tell for accidental-pickup junk taking
-            # up room (R117): ask for a cleanse at the next safe moment.
-            self.services.cleanse_queued = True
+            # up room (R117): ask for a cleanse at the next safe moment —
+            # unless this item already failed AFTER a cleanse-and-step-off
+            # retry. That retry differed in everything a cleanse can change
+            # (space freed, pile avoided), so another cleanse cannot help
+            # it, and re-queueing one is how the R173 loop span forever.
+            if item.unit_id not in self.services.cleanse_retried:
+                self.services.cleanse_queued = True
             return False
         if attempts == 0:
             # Log the DECISION, not just the click (R144). "The bot picked up
@@ -553,35 +599,113 @@ class _PickupMixin:
         self.services.clear_panels()
         return True
 
+    def _desired_nearby(
+        self, snap: GameSnapshot, origin: tuple[int, int], radius: int
+    ) -> list[GroundItem]:
+        """Ground items the pickit wants within `radius`, IGNORING the
+        stuck/full suppressions. The cleanse hygiene needs this exact list:
+        the item whose failed pickup queued the cleanse is in `stuck` right
+        now, and it is precisely the item the retry will click next — a
+        filter that hides it would put the drop pile back at its feet."""
+        carried = self.services.carried()
+        return [
+            item for item in snap.ground_items
+            if _chebyshev(item.position, origin) <= radius
+            and self.services.pickit.decide(item, carried)[0] != "skip"
+        ]
+
     def maybe_cleanse(self, snap: GameSnapshot, ctx: EngineContext) -> bool:
-        """Run a queued inventory cleanse if this is a safe moment.
+        """Run a queued inventory cleanse if this is a safe moment — with
+        drop hygiene (R175, after the R173 loop the user diagnosed live).
 
         Safe = no live hostile within `cleanse_safe_radius`. The cleanse is
         a blocking stretch with the inventory open — the character stands
         still and the ladder is not consulted — so it gets the same
         treatment as the town steps: only where nothing can punish it.
         Never in town (the town preamble has its own cleanse pass).
+
+        Hygiene, in tick order:
+        1. If the last cleanse left a pile we are still standing on, one
+           walk away from it wins the tick — nothing gets clicked near the
+           pile. Only once clear does the post-cleanse retry get re-armed,
+           because only then does the retry actually differ.
+        2. A queued cleanse with a wanted item in click range walks AWAY
+           from that item first, and drops only when clear — the junk must
+           never land where the next deliberate click is aimed.
         """
         services = self.services
-        if not services.cleanse_queued or services.cleanse is None:
-            return False
         if snap.player is None or snap.in_town:
             return False
         origin = snap.player.position
+
+        # 1 — step off the drop pile before anything near it gets clicked.
+        if services.cleanse_dropped_at is not None:
+            if _chebyshev(origin, services.cleanse_dropped_at) < services.cleanse_standoff:
+                away = _point_away(
+                    origin, services.cleanse_dropped_at,
+                    services.cleanse_standoff + 4,
+                )
+                if self.send(ctx, MoveTo(away)):
+                    self.services.log(
+                        f"cleanse hygiene: stepping off the drop pile at "
+                        f"{services.cleanse_dropped_at} toward {away}"
+                    )
+                    return True
+                # Boxed in: clear the marker rather than loop on a walk
+                # that cannot happen. One risky retry beats a hang.
+                self.services.log(
+                    "cleanse hygiene: could not step off the drop pile; "
+                    "accepting the risk rather than looping"
+                )
+            services.cleanse_dropped_at = None
+            # Clear of the pile (or accepting we cannot get clear): NOW the
+            # retry differs — space was freed and the junk is out of the
+            # click path — so the written-off items get their one re-try.
+            # Once each: an id already in `cleanse_retried` failed AFTER a
+            # differing retry, and stays written off for the game.
+            for unit_id in list(services.stuck):
+                if unit_id not in services.cleanse_retried:
+                    services.cleanse_retried.add(unit_id)
+                    services.stuck.discard(unit_id)
+                    services.attempts.pop(unit_id, None)
+            services.inventory_full = False
+            return False
+
+        if not services.cleanse_queued or services.cleanse is None:
+            return False
         if any(
             _chebyshev(m.position, origin) <= services.cleanse_safe_radius
             for m in snap.live_monsters
         ):
             return False
+
+        # 2 — never drop junk beside something we intend to click.
+        desired = self._desired_nearby(snap, origin, services.cleanse_standoff)
+        if desired:
+            nearest = min(
+                desired, key=lambda i: _chebyshev(i.position, origin)
+            )
+            away = _point_away(
+                origin, nearest.position, services.cleanse_standoff + 4
+            )
+            if self.send(ctx, MoveTo(away)):
+                self.services.log(
+                    f"cleanse hygiene: walking clear of wanted item at "
+                    f"{nearest.position} before dropping junk"
+                )
+                return True
+            self.services.log(
+                "cleanse hygiene: could not walk clear of the wanted item; "
+                "dropping here rather than looping"
+            )
+
         services.cleanse_queued = False
         dropped = services.cleanse()
-        # Whatever was stuck may be liftable now that room was made; give
-        # every written-off item one more chance.
         if dropped:
-            for unit_id in list(services.stuck):
-                services.stuck.discard(unit_id)
-                services.attempts.pop(unit_id, None)
-            services.inventory_full = False
+            # The pile exists where we stand. The re-arm of stuck items
+            # deliberately does NOT happen here — it happens in branch 1,
+            # after the step-off, when the retry can actually differ.
+            services.cleanse_dropped_at = origin
         return True
 
     def _mark_inventory_full(self, item: GroundItem) -> None:

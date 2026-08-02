@@ -861,6 +861,96 @@ def test_the_full_inventory_flag_is_shared_across_steps():
     assert clearance.services is sweep.services
 
 
+# -- cleanse drop hygiene (R175, after the R173 loop) ----------------------------
+#
+# The loop, watched live by the user: the cleanse drops junk at the feet —
+# right at the pointer — and the retried pickup click scoops it straight
+# back. Then `maybe_cleanse` re-armed the same doomed retry, forever, until
+# the character (standing in fire the whole time) chickened at 49%.
+
+
+def hygiene_setup(cleanse_result=3):
+    clock = Clock()
+    calls = []
+    svc = services(clock, cleanse=lambda: (calls.append(1), cleanse_result)[1])
+    step = make_step("pickup", svc)
+    executor = RecordingExecutor(clock=clock)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    return step, svc, executor, ctx, calls
+
+
+def test_the_cleanse_walks_clear_of_a_wanted_item_before_dropping():
+    step, svc, executor, ctx, calls = hygiene_setup()
+    svc.cleanse_queued = True
+    svc.stuck.add(601)  # the failed pickup that queued the cleanse
+    rune = GroundItem(unit_id=601, kind=999, position=(1003, 1000), quality=RARE)
+
+    assert step.maybe_cleanse(snap(items=[rune]), ctx)
+    assert not calls, "junk must not be dropped beside the item we will click"
+    moves = [a for a in executor.actions if isinstance(a, MoveTo)]
+    assert moves, "the tick should be spent walking clear"
+    assert _chebyshev(moves[-1].target, rune.position) >= svc.cleanse_standoff
+
+    # Standing clear now: the drop happens, and the pile is remembered.
+    away = moves[-1].target
+    assert step.maybe_cleanse(snap(pos=away, items=[rune]), ctx)
+    assert calls == [1]
+    assert svc.cleanse_dropped_at == away
+
+
+def test_the_rearm_waits_for_the_step_off_and_happens_once():
+    step, svc, executor, ctx, calls = hygiene_setup()
+    svc.cleanse_dropped_at = HOME
+    svc.stuck.add(601)
+    svc.inventory_full = True
+
+    # Still on the pile: the tick is spent leaving, nothing is re-armed.
+    assert step.maybe_cleanse(snap(), ctx)
+    assert 601 in svc.stuck and svc.inventory_full
+    assert isinstance(executor.actions[-1], MoveTo)
+
+    # Clear of the pile: the one differing retry is granted.
+    far = (HOME[0] + svc.cleanse_standoff + 4, HOME[1])
+    assert not step.maybe_cleanse(snap(pos=far), ctx)
+    assert 601 not in svc.stuck
+    assert not svc.inventory_full
+    assert 601 in svc.cleanse_retried
+
+    # The retry fails again: written off for the game, NO new cleanse —
+    # a second cleanse cannot differ from the first for this item.
+    rune = GroundItem(unit_id=601, kind=999, position=(1001, 1000), quality=RARE)
+    svc.attempts[601] = svc.pickup_attempts
+    assert not step.collect(snap(items=[rune]), ctx, rune)
+    assert 601 in svc.stuck and svc.inventory_full
+    assert not svc.cleanse_queued
+
+
+def test_a_cleanse_with_nothing_wanted_nearby_drops_immediately():
+    step, svc, executor, ctx, calls = hygiene_setup()
+    svc.cleanse_queued = True
+    assert step.maybe_cleanse(snap(), ctx)
+    assert calls == [1], "no wanted item near = no reason to walk first"
+    assert svc.cleanse_dropped_at == HOME
+
+
+def test_a_different_item_still_earns_its_own_cleanse():
+    step, svc, executor, ctx, calls = hygiene_setup()
+    svc.cleanse_retried.add(601)  # 601 spent its retry; 602 has not
+    other = GroundItem(unit_id=602, kind=998, position=(1001, 1000), quality=RARE)
+    svc.attempts[602] = svc.pickup_attempts
+    assert not step.collect(snap(items=[other]), ctx, other)
+    assert svc.cleanse_queued, "601's exhaustion must not block 602's cleanse"
+
+
+def test_a_dry_cleanse_leaves_no_pile_to_avoid():
+    step, svc, executor, ctx, calls = hygiene_setup(cleanse_result=0)
+    svc.cleanse_queued = True
+    assert step.maybe_cleanse(snap(), ctx)
+    assert calls == [1]
+    assert svc.cleanse_dropped_at is None, "nothing dropped, nothing to flee"
+
+
 # -- blocking steps and the registry ---------------------------------------------
 
 

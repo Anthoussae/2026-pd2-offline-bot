@@ -96,6 +96,19 @@ heal_cooldown_s = 10.0
 mana_below_pct = 25.0
 mana_cooldown_s = 15.0
 
+# Rung 6.5 — reposition (R176 Q3, user-approved numbers): losing at
+# least reposition_loss_pct of max hp within reposition_window_s while
+# having moved less than reposition_still_subtiles = step reposition_step
+# subtiles away (from the hostiles when any are visible; ground fire has
+# no unit to see, so the trigger never asks WHAT is doing the damage).
+# Paced by reposition_cooldown_s. Sits below the potion/warp rungs:
+# emergencies get the emergency answers first.
+reposition_loss_pct = 2.0
+reposition_window_s = 2.5
+reposition_still_subtiles = 3
+reposition_step = 10
+reposition_cooldown_s = 2.0
+
 # Rung 7 — disengage: bone armor down AND still on recast cooldown AND hp
 # below this: retreat from the pack instead of trading hits unarmored.
 disengage_hp_pct = 70.0

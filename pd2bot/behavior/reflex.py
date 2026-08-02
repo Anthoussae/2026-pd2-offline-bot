@@ -107,6 +107,17 @@ class ReflexConfig:
     # Rung 6 — mana potion.
     mana_below_pct: float = 25.0
     mana_cooldown_s: float = 15.0  # 15 s, the R49 amendment (was 5)
+    # Rung 6.5 — reposition (R176 Q3, numbers user-approved). Sustained
+    # chip damage while standing still means "stand somewhere else", even
+    # at low damage (user, watching the R173 run hold its ground in fire
+    # until chicken). Ground fire has no unit for perception to see, so
+    # the trigger is damage-source-agnostic: health falling while the feet
+    # are not moving IS the signal.
+    reposition_loss_pct: float = 2.0  # of max hp lost within the window ...
+    reposition_window_s: float = 2.5  # ... this long ...
+    reposition_still_subtiles: int = 3  # ... while moving less than this
+    reposition_step: int = 10  # how far to step away
+    reposition_cooldown_s: float = 2.0  # pacing between fires
     # Rung 7 — disengage.
     disengage_hp_pct: float = 70.0
     # Rung 8 — bone armor upkeep.
@@ -283,28 +294,63 @@ class ReflexLadder:
         self._clock = clock
         # Bookkeeping. All of it lives here because P2's primitives are dumb
         # on purpose: the ladder owns the WHEN, skills.py owns the HOW.
-        self._hp_samples: deque[tuple[float, int]] = deque()
+        # (time, hp, position) — one history serves both windowed triggers
+        # (warp's burst and reposition's chip-while-still); each computes
+        # over ITS OWN window, because the deque is trimmed to the longer
+        # of the two and warp's threshold must not quietly widen.
+        self._hp_samples: deque[tuple[float, int, tuple[int, int]]] = deque()
         self._last_hp: int | None = None
         self._last_drink: dict[str, float] = {}
         self._warp_attempt: tuple[float, tuple[int, int]] | None = None
         self._armor_attempt: float | None = None
+        self._reposition_attempt: float | None = None
 
     # -- shared bookkeeping ----------------------------------------------------
 
-    def _record_vitals(self, now: float, hp: int) -> bool:
-        """Track hp history for the loss-rate trigger. Returns 'was hit'."""
+    def _record_vitals(
+        self, now: float, hp: int, position: tuple[int, int]
+    ) -> bool:
+        """Track hp+position history for the windowed triggers. Returns
+        'was hit'."""
         was_hit = self._last_hp is not None and hp < self._last_hp
         self._last_hp = hp
-        self._hp_samples.append((now, hp))
-        horizon = now - self.config.warp_loss_window_s
+        self._hp_samples.append((now, hp, position))
+        horizon = now - max(
+            self.config.warp_loss_window_s, self.config.reposition_window_s
+        )
         while self._hp_samples and self._hp_samples[0][0] < horizon:
             self._hp_samples.popleft()
         return was_hit
 
     def _hp_lost_in_window(self, hp: int) -> int:
-        if not self._hp_samples:
+        horizon = self._clock() - self.config.warp_loss_window_s
+        losses = [
+            sample_hp for when, sample_hp, _ in self._hp_samples
+            if when >= horizon
+        ]
+        if not losses:
             return 0
-        return max(sample_hp for _, sample_hp in self._hp_samples) - hp
+        return max(losses) - hp
+
+    def _bleeding_while_still(
+        self, now: float, hp: int, max_hp: int, position: tuple[int, int]
+    ) -> bool:
+        """Rung 6.5's trigger: lost enough within the window without moving.
+
+        Movement is judged as the furthest any in-window sample sits from
+        where we stand NOW — a wiggle that returns to the same spot is
+        still standing in the fire, and must not read as travel.
+        """
+        cfg = self.config
+        horizon = now - cfg.reposition_window_s
+        window = [s for s in self._hp_samples if s[0] >= horizon]
+        if not window:
+            return False
+        lost = max(sample_hp for _, sample_hp, _ in window) - hp
+        if lost < cfg.reposition_loss_pct / 100.0 * max_hp:
+            return False
+        moved = max(_chebyshev(position, at) for _, _, at in window)
+        return moved < cfg.reposition_still_subtiles
 
     def _resolve_warp_attempt(self, position: tuple[int, int]) -> None:
         """Position-verify the outstanding warp attempt, if any.
@@ -423,7 +469,7 @@ class ReflexLadder:
         if player is None or player.max_hp <= 0:
             return None
         now = self._clock()
-        was_hit = self._record_vitals(now, player.hp)
+        was_hit = self._record_vitals(now, player.hp, player.position)
         self._resolve_warp_attempt(player.position)
         hp_pct = 100.0 * player.hp / player.max_hp
         in_town = snap.in_town
@@ -518,6 +564,42 @@ class ReflexLadder:
                             reason=f"mana {mana_pct:.0f}% < {cfg.mana_below_pct:.0f}%",
                             commit=lambda: self._last_drink.__setitem__("mana", now),
                         )
+
+            # Rung 6.5 — reposition (R176 Q3): bleeding while standing
+            # still. Below the potion and warp rungs on purpose — an
+            # emergency gets an emergency's answer first — and paced
+            # rather than cooled down: the timestamp records on ATTEMPT,
+            # because a step that keeps failing to send must not re-fire
+            # at tick rate (the stage B run 9 lesson).
+            if (
+                self._bleeding_while_still(
+                    now, player.hp, player.max_hp, player.position
+                )
+                and (
+                    self._reposition_attempt is None
+                    or now - self._reposition_attempt
+                    >= cfg.reposition_cooldown_s
+                )
+            ):
+                target = retreat_point(
+                    player.position, hostiles, cfg.reposition_step,
+                    self._is_walkable,
+                )
+                if target is not None:
+                    return ReflexDecision(
+                        rung="reposition",
+                        action=MoveTo(target),
+                        reason=(
+                            "losing health while standing still "
+                            f"(>={cfg.reposition_loss_pct:.0f}% max hp in "
+                            f"{cfg.reposition_window_s:.1f}s, moved "
+                            f"<{cfg.reposition_still_subtiles}) — stand "
+                            "somewhere else"
+                        ),
+                        on_attempt=lambda: setattr(
+                            self, "_reposition_attempt", now
+                        ),
+                    )
 
             # Rung 7 — disengage: armor down, recast pending, hp sliding.
             if (

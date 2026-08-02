@@ -570,3 +570,89 @@ def test_a_refused_heal_cooldown_is_still_not_started():
     assert first.rung == "heal"
     first.commit_attempted()  # failed send: pacing runs, cooldown does not
     assert ladder.evaluate(snap(player(hp=900))).rung == "heal"
+
+
+# -- rung 6.5: reposition (R176 Q3) ---------------------------------------------
+#
+# The R173 run stood in ground fire — invisible to perception, no unit to
+# see — until chicken fired at 49%. The rung's trigger is therefore
+# damage-source-agnostic: losing health while the feet are not moving IS
+# the signal, whatever is doing the damage.
+
+
+def empty_belt():
+    return belt()
+
+
+def bleed(ladder, clock, *, hp_steps, pos=POS, step_s=1.0):
+    """Feed a sequence of hp readings from a stationary character; return
+    the last decision."""
+    decision = None
+    for hp in hp_steps:
+        decision = ladder.evaluate(snap(player(hp=hp, pos=pos)))
+        clock.advance(step_s)
+    return decision
+
+
+def test_bleeding_while_still_fires_reposition():
+    ladder, clock = make_ladder(carried=empty_belt)
+    decision = bleed(ladder, clock, hp_steps=[1000, 990, 975])
+    assert decision is not None and decision.rung == "reposition"
+    assert isinstance(decision.action, MoveTo)
+    assert max(
+        abs(decision.action.target[0] - POS[0]),
+        abs(decision.action.target[1] - POS[1]),
+    ) >= ReflexConfig().reposition_step - 1
+    assert "standing still" in decision.reason
+
+
+def test_moving_through_the_damage_does_not_fire():
+    ladder, clock = make_ladder(carried=empty_belt)
+    positions = [(1000, 1000), (1006, 1000), (1012, 1000)]
+    decision = None
+    for hp, pos in zip([1000, 990, 975], positions, strict=True):
+        decision = ladder.evaluate(snap(player(hp=hp, pos=pos)))
+        clock.advance(1.0)
+    assert decision is None, "travelling through chip damage is not standing in it"
+
+
+def test_reposition_is_paced_not_refired_every_tick():
+    ladder, clock = make_ladder(carried=empty_belt)
+    decision = bleed(ladder, clock, hp_steps=[1000, 990, 975])
+    assert decision.rung == "reposition"
+    decision.commit_attempted()  # pacing records even on a failed send
+    clock.advance(0.3)
+    assert ladder.evaluate(snap(player(hp=970))) is None
+    clock.advance(ReflexConfig().reposition_cooldown_s)
+    again = ladder.evaluate(snap(player(hp=950)))
+    assert again is not None and again.rung == "reposition"
+
+
+def test_emergencies_outrank_reposition():
+    # Same shape of history, but the drop crosses rung 3's threshold with a
+    # full belt: the rejuv wins the tick, not the sidestep.
+    ladder, clock = make_ladder()
+    decision = bleed(ladder, clock, hp_steps=[1000, 700, 450])
+    assert decision.rung == "rejuv"
+
+
+def test_reposition_never_fires_in_town():
+    ladder, clock = make_ladder(carried=empty_belt)
+    decision = None
+    for hp in [1000, 990, 975]:
+        decision = ladder.evaluate(snap(player(hp=hp), area=TOWN))
+        clock.advance(1.0)
+    assert decision is None
+
+
+def test_reposition_steps_away_from_visible_hostiles():
+    ladder, clock = make_ladder(carried=empty_belt)
+    decision = None
+    for hp in [1000, 990, 975]:
+        decision = ladder.evaluate(
+            snap(player(hp=hp), monsters=[hostile((1005, 1000))])
+        )
+        clock.advance(1.0)
+    assert decision is not None and decision.rung == "reposition"
+    # Away from the hostile at +x: the step lands on the -x side.
+    assert decision.action.target[0] < POS[0]
