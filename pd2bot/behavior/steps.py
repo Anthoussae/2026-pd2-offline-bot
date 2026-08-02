@@ -264,6 +264,17 @@ class RunServices:
     # again, so it is final for this game: re-queueing another cleanse for
     # it is the retry-that-cannot-differ this codebase keeps refusing.
     cleanse_retried: set[int] = field(default_factory=set)
+    # Hygiene-walk patience (review 2026-08-02, issue 001). The walk-away
+    # and step-off walks are the "acted but achieved nothing" shape the
+    # survey's fight gate had: a walk clamped at a wall ARRIVES (honest
+    # arrival) without gaining an inch, and an unbounded retry of it pins
+    # the bot with every watchdog blind — each tick sends real input.
+    # Progress = distance from the repel point growing; `patrol_attempts`
+    # progress-free walks spend the patience and the hygiene yields
+    # (drop anyway / accept the pile risk), which is the R173 trade again:
+    # one risky cleanse beats a pinned character.
+    hygiene_walk_best: int | None = None
+    hygiene_walk_attempts: int = 0
     # -- the survey step (R175/R176) ---------------------------------------
     #
     # Both closures are wired closures over the map store (wiring.py) so
@@ -690,6 +701,32 @@ class _PickupMixin:
             return False
         origin = snap.player.position
 
+        def walk_progressing(repel: tuple[int, int]) -> bool:
+            """Book one hygiene-walk tick; False when patience is spent.
+
+            A clamped walk ARRIVES without gaining ground, so 'the send
+            succeeded' cannot be the loop condition — distance from the
+            repel point growing is (review 2026-08-02, issue 001).
+            """
+            distance = _chebyshev(origin, repel)
+            if services.hygiene_walk_best is None or distance > services.hygiene_walk_best:
+                services.hygiene_walk_best = distance
+                services.hygiene_walk_attempts = 0
+                return True
+            services.hygiene_walk_attempts += 1
+            if services.hygiene_walk_attempts < services.patrol_attempts:
+                return True
+            self.services.log(
+                f"cleanse hygiene: {services.hygiene_walk_attempts} walks "
+                f"gained no distance from {repel}; accepting the risk "
+                "rather than looping"
+            )
+            return False
+
+        def walk_done() -> None:
+            services.hygiene_walk_best = None
+            services.hygiene_walk_attempts = 0
+
         # 1 — step off the drop pile before anything near it gets clicked.
         if services.cleanse_dropped_at is not None:
             if _chebyshev(origin, services.cleanse_dropped_at) < services.cleanse_standoff:
@@ -697,18 +734,21 @@ class _PickupMixin:
                     origin, services.cleanse_dropped_at,
                     services.cleanse_standoff + 4,
                 )
-                if self.send(ctx, MoveTo(away)):
+                if walk_progressing(services.cleanse_dropped_at) and self.send(
+                    ctx, MoveTo(away)
+                ):
                     self.services.log(
                         f"cleanse hygiene: stepping off the drop pile at "
                         f"{services.cleanse_dropped_at} toward {away}"
                     )
                     return True
-                # Boxed in: clear the marker rather than loop on a walk
-                # that cannot happen. One risky retry beats a hang.
+                # Boxed in (walk failed or patience spent): clear the
+                # marker rather than loop. One risky retry beats a hang.
                 self.services.log(
                     "cleanse hygiene: could not step off the drop pile; "
                     "accepting the risk rather than looping"
                 )
+            walk_done()
             services.cleanse_dropped_at = None
             # Clear of the pile (or accepting we cannot get clear): NOW the
             # retry differs — space was freed and the junk is out of the
@@ -740,7 +780,9 @@ class _PickupMixin:
             away = _point_away(
                 origin, nearest.position, services.cleanse_standoff + 4
             )
-            if self.send(ctx, MoveTo(away)):
+            if walk_progressing(nearest.position) and self.send(
+                ctx, MoveTo(away)
+            ):
                 self.services.log(
                     f"cleanse hygiene: walking clear of wanted item at "
                     f"{nearest.position} before dropping junk"
@@ -751,6 +793,7 @@ class _PickupMixin:
                 "dropping here rather than looping"
             )
 
+        walk_done()
         services.cleanse_queued = False
         dropped = services.cleanse()
         if dropped:

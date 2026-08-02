@@ -943,6 +943,36 @@ def test_a_different_item_still_earns_its_own_cleanse():
     assert svc.cleanse_queued, "601's exhaustion must not block 602's cleanse"
 
 
+def test_a_walk_away_that_gains_nothing_spends_its_patience():
+    """Review issue 001: a clamped walk ARRIVES without gaining ground,
+    so 'send succeeded' must not be the loop condition. A wanted item the
+    bot cannot get clear of (boxed in) costs patrol_attempts ticks, then
+    the cleanse drops anyway — one risky drop beats a pinned character
+    that every watchdog is blind to (each tick sends real input)."""
+    step, svc, executor, ctx, calls = hygiene_setup()
+    svc.cleanse_queued = True
+    rune = GroundItem(unit_id=601, kind=999, position=(1003, 1000), quality=RARE)
+    world = snap(items=[rune])  # the player never moves: walks are clamped
+    for _ in range(svc.patrol_attempts + 2):
+        if calls:
+            break
+        assert step.maybe_cleanse(world, ctx)
+    assert calls == [1], "patience spent: the cleanse must proceed, not loop"
+
+
+def test_a_step_off_that_gains_nothing_spends_its_patience():
+    step, svc, executor, ctx, calls = hygiene_setup()
+    svc.cleanse_dropped_at = HOME
+    svc.stuck.add(601)
+    svc.inventory_full = True
+    for _ in range(svc.patrol_attempts + 2):
+        if svc.cleanse_dropped_at is None:
+            break
+        step.maybe_cleanse(snap(), ctx)  # the player never leaves the pile
+    assert svc.cleanse_dropped_at is None, "patience spent: marker must clear"
+    assert not svc.inventory_full and 601 in svc.cleanse_retried
+
+
 def test_a_dry_cleanse_leaves_no_pile_to_avoid():
     step, svc, executor, ctx, calls = hygiene_setup(cleanse_result=0)
     svc.cleanse_queued = True

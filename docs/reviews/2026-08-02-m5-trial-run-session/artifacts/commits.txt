@@ -1,0 +1,21 @@
+﻿27be31d R181: route-aware legs added as P5 of the potions plan
+189b352 Close the survey + fixes plan: T53 PASS, _DONE.md, archive, teach step
+e2ff600 Issue R180: restock healing potions for T53 run 2
+0d08d13 T53 body fails honestly when no cycle ran clean
+c51bd14 Plan the potion overhaul + narrative log (R179); T53 wraps run 3 formally
+e147c53 Issue R179: assessment of the ALT, potion, and bot-log proposals
+cbe0a9e Sanity check PASS: automated survey no-ops cleanly on a finished area
+187d4fe Resolve R174: per-monster write-offs stand; no cluster inference
+d1a46f1 Clarify in the log: T52 run 2 was a route survey by design
+5e31cec T52 run 2 PASS: the Countess route surveyed end to end
+a531563 T52 run 1 PASS: Cold Plains manually surveyed to frontier zero
+6a1536c T52: the manual survey drill - the user walks, the atlas records
+42d4ddc Record the R177 run-2 stall analysis in the instruction log
+5b4b405 Survey stall fixes: fight patience, and a sticky frontier target
+be10160 Log R178 and the belt-robustness follow-up from the halted survey-town run
+af34d79 Issue R177: the live acceptance gate for the survey + fixes plan
+e1e5c1f The automated survey: frontier walks until the atlas is finished (P3+P4)
+a00a650 Cleanse drop hygiene, and stand somewhere else when bleeding (P1+P2)
+20c78c1 Record R172/R173 outcomes, the R173 run analysis, and the cube policy note
+90674cb Teach the last two cycles, and re-raise the R168 follow-ups as R172-R174
+db12114 Measure perception, walk the circles it cannot see, and formalize the live workflow
