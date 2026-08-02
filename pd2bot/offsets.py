@@ -595,6 +595,12 @@ GOLD_KIND = 538
 # below, and the town layer skips those items rather than trusting a
 # caller's keep-predicate to remember. Quest items are the obvious future
 # members; add them as they are met, with the reason.
+#
+# The Cube's membership is also POLICY, not just mechanics (user, R172):
+# the Horadric Cube is always protected — by the cleanse, the stash
+# deposit, everything — whatever else changes about item handling. If a
+# future change ever makes the cube movable again, it still must not be
+# droppable or depositable without a fresh user decision.
 CUBE_KIND = 564
 UNMOVABLE_KINDS = frozenset({CUBE_KIND})
 

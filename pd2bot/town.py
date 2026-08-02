@@ -1841,6 +1841,15 @@ class TownLayer:
         whitelisted items and the Horadric Cube stay, so the report names
         every kept item and WHY it was kept — that rule is checkable
         against this log, and was checkable against nothing before.
+
+        **The baseline policy is CONFIRMED as designed (user, R172):**
+        items that predate the current bot session are protected — for
+        the whole session, indefinitely if the user never clears them by
+        hand, and that is the intended outcome, not a leak. Within a
+        session the cleanse is ruthless. The Horadric Cube is always
+        protected regardless of any of this (offsets.UNMOVABLE_KINDS —
+        policy as well as mechanics). Do not "fix" pre-session survivors
+        by re-baselining per game without a fresh user decision.
         """
         if self._keep_item is None:
             report.log.append(

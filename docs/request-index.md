@@ -164,3 +164,4 @@ headings, noted in parentheses, say roughly where they fell).
 - M5 P6 R172 [decision] The two baseline-protected inventory items: hand-clear or policy change? · 2026-08-01 20:17
 - M5 P6 R173 [decision] Say go for the GOAL_EXEMPT_RADIUS confirmation run · 2026-08-01 20:17
 - M5 P6 R174 [decision] Eastern dead zone: sanction cluster-level write-off inference? · 2026-08-01 20:17
+- M5 P6 R175 [decision] Post-confirmation-run fixes and the survey question (Q1-Q3) · 2026-08-02 00:43
