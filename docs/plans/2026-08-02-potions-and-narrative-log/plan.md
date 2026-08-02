@@ -53,10 +53,12 @@ as its live test).
 | P1 | sm | Type-based belt: drink-any-column, refill by type minimums, halt only on real failure | none |
 | P2 | sm | Merc first aid: Alt+NUM chord + rung at 50% | none |
 | P3 | sm | The narrative log channel + per-run file | none |
+| P5 | sm-md | Route-aware legs: steps walk A*'s waypoints, no-path targets fail fast (R181) | none |
 | P4 | sm | Docs, cleanup, validation, live-gate report | end-of-phase stop |
 
 Phase files: 01-type-based-belt.md, 02-merc-first-aid.md,
-03-narrative-log.md, 04-docs-and-validation.md. Discovery record:
+03-narrative-log.md, 05-route-aware-legs.md (R181 addition; runs
+before the closing 04), 04-docs-and-validation.md. Discovery record:
 [notes.md](notes.md). ADR: none — extensions of existing patterns.
 
 ## Validation

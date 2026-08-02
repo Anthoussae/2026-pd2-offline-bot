@@ -174,3 +174,4 @@ headings, noted in parentheses, say roughly where they fell).
 
 - M5 P6 R180 [execute] Restock healing potions again (Tower walk drank them), then go for T53 run 2 · 2026-08-02 03:41
 
+- M5 P6 R181 [decision] Add route-aware legs to the approved plan? · 2026-08-02 03:55
