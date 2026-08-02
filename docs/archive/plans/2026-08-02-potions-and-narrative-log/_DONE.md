@@ -1,10 +1,10 @@
----
+﻿---
 kind: implementation-log
 status: done
 repo: 2026-pd2-offline-bot
 plan: plan.md
 completed: 2026-08-02
-commit: none
+commit: 26857c1
 adrs:
   - docs/adr/2026-07-29-behavior-architecture.md (amended, no new ADR)
 ---

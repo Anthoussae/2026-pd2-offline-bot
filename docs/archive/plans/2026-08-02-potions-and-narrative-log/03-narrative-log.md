@@ -1,4 +1,4 @@
-# P3 — The narrative log: broad actions, wall-clock stamps, waits that explain themselves
+﻿# P3 — The narrative log: broad actions, wall-clock stamps, waits that explain themselves
 
 Size: sm (wide but mechanical). Dependencies: none.
 
@@ -55,7 +55,7 @@ Done when: a sim run reads as a story; suite green; ruff clean.
 
 Status: done
 Completed: 2026-08-02
-Commit: pending
+Commit: 26857c1
 
 - Changed: new `pd2bot/narrate.py` (Narrator: per-run
   `logs/run-<stamp>.log`, lazy file creation, wall-clock stamps, `span`

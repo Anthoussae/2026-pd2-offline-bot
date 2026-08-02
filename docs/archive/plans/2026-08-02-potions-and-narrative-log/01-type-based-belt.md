@@ -1,4 +1,4 @@
-# P1 — Type-based belt: drink anywhere, refill by minimums, halt only for real failures
+﻿# P1 — Type-based belt: drink anywhere, refill by minimums, halt only for real failures
 
 Size: sm. Dependencies: none.
 
@@ -56,7 +56,7 @@ Done when: the R178 shape passes as a test, suite green, ruff clean.
 
 Status: done
 Completed: 2026-08-02
-Commit: pending
+Commit: 26857c1
 
 - Changed: `behavior/reflex.py` (`_potion_column` type search; rungs 3/5/6
   drink from whichever column holds the type, configured column preferred;

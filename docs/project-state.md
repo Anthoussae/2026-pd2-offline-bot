@@ -10,8 +10,8 @@ same commit as the transition itself.
 - **Next request ID:** R183 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
-- **Next test ID:** T54 (check `docs/drill-log.md`)
+- **Next test ID:** T55 (check `docs/drill-log.md`)
 
-Updated: 2026-08-02 (~05:15; potions + narrative-log + route-legs cycle
-implemented and archived, 823 tests green, UNCOMMITTED pending R182;
-PR #1 still open awaiting the user's merge decision)
+Updated: 2026-08-02 (~05:20; potions + narrative-log + route-legs cycle
+committed `26857c1` and pushed; T54 (potions acceptance, two stages)
+designed and armed; PR #1 still open awaiting the user's merge decision)

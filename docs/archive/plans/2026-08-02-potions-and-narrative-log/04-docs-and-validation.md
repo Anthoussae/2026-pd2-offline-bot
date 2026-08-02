@@ -1,4 +1,4 @@
-# P4 — Docs, cleanup, validation
+﻿# P4 — Docs, cleanup, validation
 
 Size: sm. Dependencies: P1-P3.
 
@@ -33,7 +33,7 @@ Done when: docs updated, sweep clean, suite green, report delivered.
 
 Status: done
 Completed: 2026-08-02
-Commit: pending
+Commit: 26857c1
 
 - Docs: belt contract + merc rung + narrative channel + route service
   recorded as an Amendments section in

@@ -1,4 +1,4 @@
-# Notes — potion overhaul + narrative log (M5 P6, R179)
+﻿# Notes — potion overhaul + narrative log (M5 P6, R179)
 
 ## Origin
 

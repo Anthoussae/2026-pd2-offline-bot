@@ -1,4 +1,4 @@
-# P5 — Route-aware legs: steps walk the map's answer, not the compass bearing
+﻿# P5 — Route-aware legs: steps walk the map's answer, not the compass bearing
 
 Size: sm-md. Dependencies: none hard; last feature phase (added by
 R181 after T53 run 2).
@@ -67,7 +67,7 @@ green, ruff clean.
 
 Status: done
 Completed: 2026-08-02
-Commit: pending
+Commit: 26857c1
 
 - Changed: `behavior/steps.py` (`RunServices.route_to` service slot;
   `_route_leg` + `_next_route_waypoint` helpers; patrol, survey, and the

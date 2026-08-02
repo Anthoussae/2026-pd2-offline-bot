@@ -1,4 +1,4 @@
-# P2 — Merc first aid: Alt+NUM below 50%
+﻿# P2 — Merc first aid: Alt+NUM below 50%
 
 Size: sm. Dependencies: P1 preferred first (uses its type-search).
 
@@ -46,7 +46,7 @@ Done when: the scripted scenarios pass, suite green, ruff clean.
 
 Status: done
 Completed: 2026-08-02
-Commit: pending
+Commit: 26857c1
 
 - Changed: `input.py` (`VK_MENU`, `press_key_with_alt` — gated chord, Alt
   settled down before the key, release in a `finally`), `skills.py`
