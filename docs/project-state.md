@@ -7,7 +7,8 @@ same commit as the transition itself.
 
 - **Milestone:** M5 — trial run (Cold Plains clearance)
 - **Phase:** P6 — staged live acceptance
-- **Next request ID:** R172 (overall counter; check
+- **Next request ID:** R175 (overall counter; R171 was never issued — a
+  handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
 - **Next test ID:** T52 (check `docs/drill-log.md`)
 

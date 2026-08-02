@@ -161,3 +161,6 @@ headings, noted in parentheses, say roughly where they fell).
 - R168 [decision] Three follow-ups from the first instrumented patrol run (M5 implementation — P6 stage B review fixes)
 - M5 P6 R169 [decision] Workflow overhaul: four confirmation questions · 2026-08-01 19:39
 - M5 P6 R170 [decision] Q3 clarified: does the done-alert fire on every terminal turn end? · 2026-08-01 19:39
+- M5 P6 R172 [decision] The two baseline-protected inventory items: hand-clear or policy change? · 2026-08-01 20:17
+- M5 P6 R173 [decision] Say go for the GOAL_EXEMPT_RADIUS confirmation run · 2026-08-01 20:17
+- M5 P6 R174 [decision] Eastern dead zone: sanction cluster-level write-off inference? · 2026-08-01 20:17

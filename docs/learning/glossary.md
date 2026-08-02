@@ -70,6 +70,19 @@ Pathfinding algorithms like A* operate on this grid. Our bot reads them
 from the live game's memory and remembers them in a per-seed atlas
 (single-player maps never change).
 
+**binding constraint** — when several limits apply at once, the one you
+actually hit first; the others are dead weight, and improving them buys
+nothing. Our perception filter (80 subtiles) never bound — the client's
+room-loading horizon (~46-67) always bit first. *(First seen:
+2026-08-01, measuring what the bot can see.)*
+
+**controlled experiment** — a measurement designed so that competing
+explanations are forced to produce different results, instead of one
+observation both could explain. T51 scanned every sample twice — filter
+on, filter off — so "our filter hides it" and "the client never loaded
+it" had to come apart. *(First seen: 2026-08-01, measuring what the bot
+can see.)*
+
 **blocking (call)** — a function that does not return until its work is
 finished, so nothing else in that thread runs meanwhile. Harmless where
 nothing else needs to happen, dangerous where something does: the bot
@@ -80,6 +93,11 @@ survival checks keep running between them. First seen in
 **flaky test** — a test that sometimes passes and sometimes fails with no code change in between. Usually a symptom of a race condition, a timing assumption, or a fragile selector in the test itself; professionals treat flakiness as a bug in the test harness to be fixed, not ignored. *(First seen: 2026-07-31, when the tools lie.)*
 
 **fragile selector** — locating something by where it happens to be (a pixel position, "the third element on the page") rather than by a stable identity. Breaks silently the moment the layout shifts. The cure is addressing by identity: an ID, a label, or an ordinal in a structure that cannot move. *(First seen: 2026-07-31, when the tools lie.)*
+
+**handshake** — an explicit two-way exchange before something risky
+begins, instead of one side just starting: announce, then wait for the
+other party's go-ahead. Our in-game tests wait for the user to type OK.
+*(First seen: 2026-08-01, building the workflow itself.)*
 
 **hang** — when a program stops making progress but does not exit: it sits
 there, using no CPU, waiting for something that will never happen. Different
@@ -97,6 +115,13 @@ when computing the exact answer up front would be too slow; "good guess
 math." In A*, the heuristic is the straight-line distance to the goal,
 used to decide which route to try extending next.
 
+**hook** — a defined point where a host program runs code *you*
+register when a named event happens, so you extend the host without
+modifying it. Claude Code's Stop hook runs our turn-end alert; git
+hooks can run tests before every commit; webhooks are the same idea
+between web services. *(First seen: 2026-08-01, building the workflow
+itself.)*
+
 **idempotent** — describes an operation where doing it twice has the same effect as doing it once, which makes retries and resumes safe. Achieved most simply by checking the world before acting ("is there anything to do?") rather than keeping a checklist. *(First seen: 2026-07-31, when the tools lie.)*
 
 **in-process vs out-of-process** — whether your code runs *inside* the
@@ -106,12 +131,25 @@ fragile; out-of-process is more limited and more robust. This project is
 out-of-process; kolbot is in-process, which is why a version mismatch
 stopped it dead.
 
+**instrumentation** — measurement code living inside a real system:
+probes, counters, and logs that observe behavior while changing none of
+it. The rule is that a broken probe must never break the system (our
+click audit swallows its own failures). Professionals instrument first
+and change code second. *(First seen: 2026-08-01, measuring what the
+bot can see.)*
+
 **interface / protocol** — a named shape of methods ("anything with
 `engage()` and `upkeep()`") that code can depend on without knowing the
 concrete thing behind it. Python's version is the `Protocol` class. The
 standard testing move follows directly: hand the code a *fake* that has
 the right shape and scripted answers, and it cannot tell the difference.
 First seen in [the behavior engine](2026-07-31-the-behavior-engine.md).
+
+**least privilege** — granting a component the minimum capability its
+job needs, so a bug or abuse of it is bounded. Our chat channel can
+trigger exactly two commands (a whitelist), only while a test is
+active; it cannot become a general remote control by accident. *(First
+seen: 2026-08-01, building the workflow itself.)*
 
 **linter / formatter** — a linter reads source code and flags likely mistakes and
 style violations; a formatter rewrites layout into one consistent shape so the
@@ -131,6 +169,13 @@ it — it hangs until someone notices. This is exactly how PD2's bundled
 display mod stopped our map generator.
 
 **modifier key** — Shift, Ctrl, or Alt held down to change what another input means. In automation, the modifier must provably be down before, during, and after the click it modifies — sending both in the same instant is a race condition. *(First seen: 2026-07-31, when the tools lie.)*
+
+**mutex (mutual exclusion)** — an operating-system object only one
+process can hold at a time; the standard way to enforce "exactly one of
+these may run". A second elevated bridge tries to take the named mutex,
+fails, and exits instead of racing the first for queue commands. Inside
+one program the same tool is called a lock. *(First seen: 2026-08-01,
+building the workflow itself.)*
 
 **package / module** — a module is a single `.py` file; a package is a directory
 of modules imported under one name (here, `pd2bot`). The boundaries you draw
@@ -221,6 +266,13 @@ repeats several times a second. One pass is a tick. Its virtue is that
 no decision is ever stale — plans that stopped making sense are
 abandoned within a tick. First seen in
 [the behavior engine](2026-07-31-the-behavior-engine.md).
+
+**toil** — repetitive manual work that automation could absorb (the
+term is Google SRE jargon). Step one is measuring it: our numbered
+request log types every human intervention, so clusters point at their
+own remedy — many "execute" requests → automate the step; many
+"verify" → build instrumentation. *(First seen: 2026-08-01, building
+the workflow itself.)*
 
 **test double (fake, stub, mock)** — a stand-in for a real dependency,
 used so code can be tested without it. The quality bar is whether it can
