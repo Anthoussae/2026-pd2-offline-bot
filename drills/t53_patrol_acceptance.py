@@ -108,10 +108,17 @@ def t53_body(run: DrillRun) -> str:
     if aborted[0]:
         raise DrillAborted("stopped by request mid-run")
     cycle_summary = report.summary() if hasattr(report, "summary") else str(report)
-    return (
+    result = (
         f"{duration:.0f}s; {cycle_summary}; "
         + "; ".join(f"game {i + 1}: {s}" for i, s in enumerate(game_lines))
     )
+    # An acceptance run that did not run to plan is a FAILED test, not a
+    # PASS with sad prose. Run 1 of this very drill logged PASS around a
+    # "LEFT EARLY: healing short 2" — the harness cannot see inside the
+    # cycle report, so the body must say it out loud.
+    if getattr(report, "completed", None) == 0:
+        raise RuntimeError(f"no clean cycle: {result}")
+    return result
 
 
 if __name__ == "__main__":
