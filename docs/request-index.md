@@ -167,3 +167,4 @@ headings, noted in parentheses, say roughly where they fell).
 - M5 P6 R175 [decision] Post-confirmation-run fixes and the survey question (Q1-Q3) Â· 2026-08-02 00:43
 - M5 P6 R176 [decision] Survey + fixes plan: phase table and Q1-Q4 confirmations Â· 2026-08-02 00:52
 
+- M5 P6 R177 [decision] Say go for the live acceptance runs (survey-town, survey-cold-plains, patrol re-run) · 2026-08-02 01:37
