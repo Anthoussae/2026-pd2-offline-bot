@@ -172,3 +172,5 @@ headings, noted in parentheses, say roughly where they fell).
 
 - M5 P6 R179 [decision] Three pre-run-3 proposals: ALT policy, the potion overhaul, the narrative bot log · 2026-08-02 03:29
 
+- M5 P6 R180 [execute] Restock healing potions again (Tower walk drank them), then go for T53 run 2 · 2026-08-02 03:41
+
