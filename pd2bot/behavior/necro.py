@@ -354,7 +354,13 @@ class NecroCombat:
                 snap, origin
             ):
                 return self._reposition(origin, hostiles)
-            return MoveTo(self._dash_target(origin, target.position))  # phase 3
+            # `toward` names the monster this dash is for, so a caller that
+            # absorbs a failed walk knows WHICH target to write off. Only
+            # the dash carries it: a retreat and a lateral drift are aimed
+            # at open ground, not at anything.
+            return MoveTo(  # phase 3
+                self._dash_target(origin, target.position), toward=target.unit_id
+            )
 
         self._last_strike[target.unit_id] = now  # phase 4
         self._retreat_after_strike = True

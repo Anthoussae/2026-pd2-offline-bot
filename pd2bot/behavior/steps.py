@@ -132,10 +132,12 @@ class RunServices:
     #
     # `clear_radius` decides the area is clear when no live monster is
     # within `radius` of the centre — and it can decide that from a
-    # STANDSTILL only while the radius fits inside perception, which is
-    # 80 subtiles (`units.PERCEPTION_RADIUS`, and `scan_units` drops
-    # everything past it). `runs/cold-plains.toml` asks for 150, so it has
-    # always been declaring clear a circle it can see about half of.
+    # STANDSTILL only while the radius fits inside perception. T51
+    # measured perception on 2026-08-01: items vanish at 46-67 subtiles,
+    # room-quantised, NOT the 80 `units.PERCEPTION_RADIUS` claims (that
+    # constant never binds; the client's loaded-room horizon does).
+    # `runs/cold-plains.toml` asks for 150, so it has always been
+    # declaring clear a circle it can see under a third of.
     #
     # The patrol walks the circle instead. Numbers live here rather than
     # in the run file because they are judgement calls nobody should have
@@ -163,6 +165,33 @@ class RunServices:
     # A budget that has to be re-derived whenever the ring or the leg
     # length changes is not a budget, it is a coincidence.
     patrol_attempts: int = 3
+    # -- writing off a monster we cannot get to ---------------------------
+    #
+    # The same idea as `stuck` for items and as `patrol_attempts` for ring
+    # points, arriving late because `clear_radius` only recently stopped
+    # ending the run over it. `send` absorbs `NavigationError` so one
+    # unreachable target cannot fail the cycle — correct, and incomplete on
+    # its own: nothing then wrote the monster off, so the step re-decided
+    # the identical approach every tick and the clearance could never
+    # finish. The user watched it "hesitate at great length when an enemy
+    # was behind a wall".
+    #
+    # Ticks of closing on one monster WITHOUT GETTING CLOSER before giving
+    # up on it. Progress rather than effort, the same correction the patrol
+    # needed: a budget counted in attempts has to be re-derived whenever
+    # anything about the geometry changes, and is a coincidence rather than
+    # a budget.
+    monster_attempts: int = 3
+    # How far a written-off monster must MOVE to earn another try.
+    #
+    # Monsters differ from ring points and from items in the one way that
+    # matters here: they walk. The write-off says "unreachable from where it
+    # was standing", and a monster that has since left that spot has
+    # invalidated the only evidence behind it — which is this codebase's own
+    # rule that a retry which cannot differ from the attempt it retries is
+    # not a retry. Without this, a monster that gives up on its own wall and
+    # walks into the open would be ignored for the rest of the game.
+    unreachable_forget: int = 10
     # How far to step off a waypoint after arriving on one (user request).
     # The character lands ON the waypoint with the cursor still over it,
     # which makes the next few clicks — and any ground-targeted cast — a
@@ -575,37 +604,31 @@ class _PickupMixin:
 
 
 @dataclass
-class ClearRadiusStep(_PickupMixin):
-    """Kill everything within `radius` of the centre, then settle.
+class _PatrolMixin:
+    """Walking a ring, so that a standstill reading means something.
 
-    Termination is deliberately not "no monsters right now": a pack can be
-    mid-spawn, a poisoned monster is still alive for a few seconds, and a
-    revive can drag something into range. So the step requires the radius to
-    read EMPTY continuously for `clear_settle_s` before it calls the job
-    done — the same "wait for it to stay true" discipline the town layer's
-    verifications use.
+    Shared by the clearance and the sweep because they have the identical
+    problem and it would be the identical code twice. That is not a style
+    preference here: `_PickupMixin` exists for the same reason and its
+    docstring records what the alternative cost — two steps doing the same
+    thing and differing in how robust they are is the shape that cost P3
+    three live runs, where the heal retried a missed click and the repair
+    did not.
 
-    **With `patrol` on, it walks the circle before believing it.** The
-    standstill version is only sound while the radius fits inside
-    perception (80 subtiles): past that, "no monster within `radius`"
-    means "no monster within 80", and the rest of the circle is being
-    declared clear unobserved. `runs/cold-plains.toml` has asked for 150
-    since it was written. Both 2026-08-01 runs also completed without
-    ever fighting, because nothing happened to be inside stage B's 50 —
-    a trial run that can pass without doing the thing it tests.
+    **The premise, measured.** A step that decides something about a circle
+    of `radius` from a standstill is only sound while perception reaches
+    that far, and T51 (2026-08-01) measured what it actually reaches: 12
+    potions dropped along a walk, seven of them watched vanishing, at
+    **46, 46, 54, 55, 61, 63 and 67 subtiles**. Every one far inside the
+    `PERCEPTION_RADIUS` of 80 we had been quoting, and five of the seven
+    lost at the same distance whether the radius filter was applied or
+    lifted entirely — so the bound is the CLIENT's loaded-room horizon, not
+    a constant we can raise. The spread rather than a crisp circle is what
+    room-quantised loading predicts.
 
-    The patrol is deliberately unclever (user: *we don't need this to
-    become enormously onerous*): a fixed ring of sample points, a visited
-    set, one short leg per tick. Fighting always wins the tick; the
-    patrol is only what happens when there is nothing to clear.
+    Worst case ~46 subtiles. Anything above that has to be walked.
     """
 
-    radius: int = 150
-    centre_note: str = "arrival"
-    patrol: bool = False
-    name: str = "clear_radius"
-    _empty_since: float | None = None
-    _centre: tuple[int, int] | None = None
     _points: list[tuple[int, int]] | None = None
     _visited: set[int] = field(default_factory=set)
     _index: int = 0
@@ -615,11 +638,11 @@ class ClearRadiusStep(_PickupMixin):
     def patrol_points(self, centre: tuple[int, int]) -> list[tuple[int, int]]:
         """The ring, computed once from the centre and the radius.
 
-        Sized as a fraction of `radius` so that changing the radius —
-        the one number the user tunes — moves the whole pattern with it.
-        At radius 96 the ring sits at ~63: adjacent points are ~49 apart
-        (well inside perception of each other) and the furthest edge of
-        the circle is ~33 from the nearest point.
+        Sized as a fraction of `radius` so that changing the radius — the
+        one number the user tunes — moves the whole pattern with it. At
+        radius 96 the ring sits at ~63: adjacent points are ~49 apart and
+        the furthest edge of the circle is ~33 from the nearest point,
+        which is inside even T51's worst-case 46.
         """
         if self._points is None:
             ring = max(1, round(self.radius * self.services.patrol_ring))
@@ -653,7 +676,7 @@ class ClearRadiusStep(_PickupMixin):
                 return
 
     def walk_the_circle(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
-        """One leg of the patrol. Only called with the radius reading clear.
+        """One leg of the patrol. Only called with nothing else to do.
 
         Every exit from here reports `acted`, because every one of them
         either sent a walk or made a decision that moved the patrol on —
@@ -682,7 +705,7 @@ class ClearRadiusStep(_PickupMixin):
         if self._attempts >= self.services.patrol_attempts:
             # Walkable in principle, unreachable in practice. Visited
             # means "dealt with", not "stood on" — otherwise one awkward
-            # corner holds the whole clearance open.
+            # corner holds the whole step open.
             self.services.log(
                 f"patrol: giving up on {target} after {self._attempts} legs "
                 f"that got no closer (still {distance} away)"
@@ -707,6 +730,107 @@ class ClearRadiusStep(_PickupMixin):
             return StepOutcome(done=False, acted=True, note=f"patrol skipped {target}")
         return StepOutcome(done=False, acted=True, note=f"patrol leg to {leg}")
 
+
+@dataclass
+class ClearRadiusStep(_PatrolMixin, _PickupMixin):
+    """Kill everything within `radius` of the centre, then settle.
+
+    Termination is deliberately not "no monsters right now": a pack can be
+    mid-spawn, a poisoned monster is still alive for a few seconds, and a
+    revive can drag something into range. So the step requires the radius to
+    read EMPTY continuously for `clear_settle_s` before it calls the job
+    done — the same "wait for it to stay true" discipline the town layer's
+    verifications use.
+
+    **With `patrol` on, it walks the circle before believing it.** The
+    standstill version is only sound while the radius fits inside
+    perception, and T51 measured perception at **46-67 subtiles** — not
+    the 80 the constant claims. Past that, "no monster within `radius`"
+    means "no monster within ~50", and the rest of the circle is being
+    declared clear unobserved. `runs/cold-plains.toml` has asked for 150
+    since it was written. Both 2026-08-01 runs also completed without
+    ever fighting, because nothing happened to be inside stage B's 50 —
+    a trial run that can pass without doing the thing it tests.
+
+    The patrol is deliberately unclever (user: *we don't need this to
+    become enormously onerous*): a fixed ring of sample points, a visited
+    set, one short leg per tick. Fighting always wins the tick; the
+    patrol is only what happens when there is nothing to clear.
+    """
+
+    radius: int = 150
+    centre_note: str = "arrival"
+    patrol: bool = False
+    name: str = "clear_radius"
+    _empty_since: float | None = None
+    _centre: tuple[int, int] | None = None
+    # Monsters inside the radius that we have given up reaching, and where
+    # each was standing when we did. The position is what allows the
+    # write-off to expire (see `_reachable`); a bare set could not.
+    _unreachable: dict[int, tuple[int, int]] = field(default_factory=dict)
+    # Per monster: the closest we have got, and how many closing ticks have
+    # achieved nothing since. Same shape as the patrol's own two fields.
+    _closest_to: dict[int, int] = field(default_factory=dict)
+    _no_progress: dict[int, int] = field(default_factory=dict)
+
+    # -- monsters we cannot get to -------------------------------------------
+
+    def _reachable(self, monster) -> bool:
+        """Does this monster still count toward the clearance?
+
+        False once it has been written off — and the write-off EXPIRES the
+        moment the monster leaves the spot it was written off at, because
+        the only evidence behind it was "we could not get there from here"
+        and it is no longer where "there" was.
+        """
+        where = self._unreachable.get(monster.unit_id)
+        if where is None:
+            return True
+        if _chebyshev(monster.position, where) <= self.services.unreachable_forget:
+            return False
+        self._unreachable.pop(monster.unit_id, None)
+        self._closest_to.pop(monster.unit_id, None)
+        self._no_progress.pop(monster.unit_id, None)
+        self.services.log(
+            f"clearance: monster {monster.unit_id} moved from {where} to "
+            f"{monster.position}, so it gets another try"
+        )
+        return True
+
+    def _write_off(self, unit_id: int, position: tuple[int, int], why: str) -> None:
+        if unit_id in self._unreachable:
+            return
+        self._unreachable[unit_id] = position
+        self.services.log(
+            f"clearance: writing off monster {unit_id} at {position} — {why}. "
+            "It stops counting toward the radius unless it moves."
+        )
+
+    def _closing_progress(self, monster, origin: tuple[int, int]) -> None:
+        """Book one closing tick against `monster`, and write it off at budget.
+
+        Only called on the ticks where the STEP decided to close on it, never
+        during a fight `engage` is running: the module's deliberate pauses —
+        a restrike cooldown, holding off for the revives — are not failures
+        to reach anything, and counting them here would write off the monster
+        we are in the middle of killing.
+        """
+        unit_id = monster.unit_id
+        distance = _chebyshev(monster.position, origin)
+        best = self._closest_to.get(unit_id)
+        if best is None or distance < best:
+            self._closest_to[unit_id] = distance
+            self._no_progress[unit_id] = 0
+            return
+        count = self._no_progress.get(unit_id, 0) + 1
+        self._no_progress[unit_id] = count
+        if count >= self.services.monster_attempts:
+            self._write_off(
+                unit_id,
+                monster.position,
+                f"{count} closing ticks got no closer than {best} subtiles",
+            )
+
     def centre(self, snap: GameSnapshot, ctx: EngineContext) -> tuple[int, int] | None:
         if self._centre is None:
             noted = ctx.notes.get(self.centre_note)
@@ -716,6 +840,21 @@ class ClearRadiusStep(_PickupMixin):
                 # No note (a run that starts mid-area): here is as good a
                 # centre as any, and saying so beats refusing to run.
                 self._centre = snap.player.position
+            if self._centre is not None:
+                # Publish the circle for whoever sweeps it afterwards.
+                #
+                # The sweep has to cover the same ground this step cleared,
+                # and the alternative — restating the radius in the run file
+                # under `pickup` — is two numbers that mean one thing and can
+                # drift apart silently. It would also quietly break the
+                # `--radius` override, which only rewrites `clear_radius`
+                # (the user's request was to make the radius easy to alter,
+                # and "alter it in two places" is not that).
+                ctx.notes["cleared"] = {
+                    "centre": self._centre,
+                    "radius": self.radius,
+                    "patrol": self.patrol,
+                }
         return self._centre
 
     def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
@@ -728,7 +867,7 @@ class ClearRadiusStep(_PickupMixin):
 
         in_radius = [
             m for m in snap.live_monsters
-            if _chebyshev(m.position, centre) <= self.radius
+            if _chebyshev(m.position, centre) <= self.radius and self._reachable(m)
         ]
         if in_radius:
             self._empty_since = None
@@ -744,7 +883,27 @@ class ClearRadiusStep(_PickupMixin):
             self._attempts = 0
             action = self.services.combat.engage(snap, ctx)
             if action is not None:
-                self.send(ctx, action)
+                if not self.send(ctx, action):
+                    # The walk failed. `MoveTo.toward` names the monster the
+                    # module was dashing at, which is the only honest way to
+                    # know — `_select_target` prefers never-struck over
+                    # nearest, so the step cannot recover it by guessing, and
+                    # blaming the wrong monster would write off a reachable
+                    # one. Nothing is blamed for a retreat or a drift, which
+                    # carry no `toward` because they aim at open ground.
+                    blamed = getattr(action, "toward", None)
+                    target = next(
+                        (m for m in in_radius if m.unit_id == blamed), None
+                    )
+                    if target is not None:
+                        # Straight to a write-off rather than onto the
+                        # no-progress budget: `walk_to` has already spent
+                        # five plan cycles and a shake-loose before raising,
+                        # so this is not one hopeful attempt, and the
+                        # expiry-on-movement rule is what keeps it honest.
+                        self._write_off(
+                            target.unit_id, target.position, "the walk to it failed"
+                        )
                 return StepOutcome(done=False, acted=True)
             # Nothing to do offensively this tick (everything freshly
             # poisoned, or waiting for the revives): pick up loot instead of
@@ -769,7 +928,15 @@ class ClearRadiusStep(_PickupMixin):
             )
             closing = self.services.combat.approach(snap, nearest.position)
             if closing is not None:
-                self.send(ctx, closing)
+                if self.send(ctx, closing):
+                    # Walked. Whether it ACHIEVED anything is the question,
+                    # and the silent version of the hang is the one where
+                    # every leg succeeds and none of them gets closer.
+                    self._closing_progress(nearest, snap.player.position)
+                else:
+                    self._write_off(
+                        nearest.unit_id, nearest.position, "the walk to it failed"
+                    )
                 return StepOutcome(
                     done=False, acted=True,
                     note=f"closing on monster {nearest.unit_id} at {nearest.position}",
@@ -797,9 +964,20 @@ class ClearRadiusStep(_PickupMixin):
             self._empty_since = now
             return StepOutcome(done=False, acted=True, note="radius reads clear")
         if now - self._empty_since >= self.services.clear_settle_s:
+            # Say when "clear" means "clear except for the ones we gave up
+            # on". A step that finishes with monsters still standing is the
+            # right outcome — finishing beats hanging — but it is not the
+            # same outcome as an empty field, and a note that reported both
+            # identically would hide the write-off working too hard.
+            written_off = (
+                f", {len(self._unreachable)} monster(s) written off as "
+                "unreachable"
+                if self._unreachable
+                else ""
+            )
             return StepOutcome(
                 done=True, acted=True,
-                note=f"clear for {self.services.clear_settle_s:.0f}s",
+                note=f"clear for {self.services.clear_settle_s:.0f}s{written_off}",
             )
         # Sweep loot while the settle timer runs; it is free time — and so
         # is a queued cleanse, with nothing alive to punish standing still.
@@ -816,23 +994,63 @@ class ClearRadiusStep(_PickupMixin):
 
 
 @dataclass
-class PickupStep(_PickupMixin):
-    """Sweep the cleared ground for anything the pickit wants."""
+class PickupStep(_PatrolMixin, _PickupMixin):
+    """Sweep the cleared ground for anything the pickit wants.
+
+    **It walks the same circle the clearance did.** Standing where the
+    clearance happened to finish and collecting what is visible was the
+    bug: visible means the client's loaded-room horizon, which T51 measured
+    at 46-67 subtiles (2026-08-01, seven dropped potions watched vanishing)
+    — so against a 96-radius circle the far side was not merely dim, it was
+    never in the bot's world at all. The user watched a whitelisted Tir
+    rune left behind on ground the sweep had no way to see. The pickit
+    rules were right the whole time; nothing ever asked them about that
+    rune.
+
+    This is the identical flaw the clearance had before it got a patrol,
+    and it gets the identical fix from the identical code (`_PatrolMixin`).
+
+    The circle comes from the clearance over the shared blackboard rather
+    than from this step's own parameters, so the radius stays ONE number
+    (user request) and the `--radius` override reaches the sweep too. A run
+    with no clearance falls back to the defaults below and does not patrol,
+    because there is no circle to walk.
+    """
 
     radius: int = 150
     centre_note: str = "arrival"
+    patrol: bool = False
     name: str = "pickup"
     _centre: tuple[int, int] | None = None
+    _resolved: bool = False
 
-    def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
-        if self.recover_panels(snap):
-            return StepOutcome(done=False, acted=True, note="closed a stray panel")
+    def resolve(self, snap: GameSnapshot, ctx: EngineContext) -> None:
+        """Adopt the clearance's circle, or fall back to our own."""
+        if self._resolved:
+            return
+        cleared = ctx.notes.get("cleared")
+        if isinstance(cleared, dict):
+            centre = cleared.get("centre")
+            if isinstance(centre, tuple):
+                self._centre = centre
+            self.radius = int(cleared.get("radius", self.radius))
+            self.patrol = bool(cleared.get("patrol", self.patrol))
+            self.services.log(
+                f"sweep: covering the cleared circle — centre {self._centre}, "
+                f"radius {self.radius}, patrol {'on' if self.patrol else 'off'}"
+            )
         if self._centre is None:
             noted = ctx.notes.get(self.centre_note)
             self._centre = (
                 noted if isinstance(noted, tuple)
                 else (snap.player.position if snap.player else None)
             )
+        self._resolved = self._centre is not None
+
+    def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
+        if self.recover_panels(snap):
+            return StepOutcome(done=False, acted=True, note="closed a stray panel")
+        self.resolve(snap, ctx)
         if self._centre is None:
             return StepOutcome(done=True, note="nowhere to sweep")
         if self.maybe_cleanse(snap, ctx):
@@ -840,12 +1058,20 @@ class PickupStep(_PickupMixin):
             # once the junk is gone.
             return StepOutcome(done=False, acted=True, note="inventory cleansed")
         items = self.wanted_items(snap, self._centre, self.radius)
-        if not items:
-            return StepOutcome(done=True, acted=True, note="nothing left to pick")
-        if snap.player is not None:
-            items.sort(key=lambda i: _chebyshev(i.position, snap.player.position))
-        acted = self.collect(snap, ctx, items[0])
-        return StepOutcome(done=False, acted=acted)
+        if items:
+            if snap.player is not None:
+                items.sort(key=lambda i: _chebyshev(i.position, snap.player.position))
+            acted = self.collect(snap, ctx, items[0])
+            return StepOutcome(done=False, acted=acted)
+        # Nothing WE CAN SEE is wanted — which is not the same as nothing
+        # left, and treating the two as one is what left the rune behind.
+        if not self.patrol_complete and snap.player is not None:
+            return self.walk_the_circle(snap, ctx)
+        return StepOutcome(
+            done=True, acted=True,
+            note="nothing left to pick"
+            + (f" (circle walked, {len(self._visited)} points)" if self.patrol else ""),
+        )
 
 
 # -- the registry ---------------------------------------------------------------

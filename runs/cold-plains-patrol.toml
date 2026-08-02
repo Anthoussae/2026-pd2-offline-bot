@@ -9,11 +9,18 @@
 #
 # So this file is the same run with a wider circle, and — the part that
 # matters — with the character walking it. `clear_radius` decides an area
-# is clear from what perception can see, which is 80 subtiles
-# (units.PERCEPTION_RADIUS); above that, standing at the arrival point
-# and declaring victory is a claim about ground nobody looked at.
+# is clear from what perception can see, and T51 MEASURED that on
+# 2026-08-01: twelve potions dropped along a walk, seven watched
+# vanishing, at 46, 46, 54, 55, 61, 63 and 67 subtiles. Not the 80 that
+# `units.PERCEPTION_RADIUS` claims — that constant never binds, because
+# the limit is the CLIENT's loaded-room horizon and no number of ours can
+# raise it. Above ~46, standing at the arrival point and declaring
+# victory is a claim about ground nobody looked at.
+#
 # `patrol = true` visits a ring of sample points so the whole circle
-# passes within perception at least once.
+# passes within perception at least once. The `pickup` sweep below
+# follows the same circle automatically — it had the identical blind spot
+# and left a whitelisted Tir rune on the far side.
 #
 # The radius is the one number here meant to be tuned. Change it and the
 # patrol ring moves with it (the ring is a fraction of the radius, not a
@@ -42,10 +49,16 @@ dest = 3
 [[step]]
 name = "clear_radius"
 center = "arrival" # recorded by the waypoint step on the shared blackboard
-radius = 96        # ~4 screens (a screen is ~24 subtiles) — tune freely
-patrol = true      # walk the circle; above ~80 the reading needs it
+# ~2.5 screens out (T50 measured a screen at 19-38 subtiles from the
+# player to the edge, direction-dependent — the old "~24 subtiles per
+# screen" figure was off by 2-3x). Tune freely; the ring moves with it.
+radius = 96
+patrol = true # walk the circle; above ~46 the reading needs it
 
 [[step]] # collect what the pickit rules want from the cleared ground
+# No parameters on purpose: the sweep adopts the circle above (centre,
+# radius, patrol) off the shared blackboard, so the radius stays ONE
+# number and `--radius` reaches both steps.
 name = "pickup"
 
 [[step]] # run complete; the cycle takes it from here (leave, next game)

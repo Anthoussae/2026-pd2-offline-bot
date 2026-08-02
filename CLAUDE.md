@@ -35,8 +35,11 @@ planning inputs (the survival toolkit, robustness-before-live-runs) are
 recorded in the archived M4 notes.md.
 
 **User request protocol**: every instruction to the user is issued as
-`🔶 R<n> [type]` and logged in `docs/instruction-log.md` — see the
-convention in the agent-toolkit skills; continue IDs from that log. Superseded kolbot roadmap:
+`🔶 M<m> P<p> R<n> — Title [type] · YYYY-MM-DD HH:MM` (M/P from
+`docs/project-state.md`; R is the overall counter, never reset), logged
+in `docs/instruction-log.md` and appended one-line to
+`docs/request-index.md` — full rules in the agent-toolkit skills'
+"User request protocol" section. Superseded kolbot roadmap:
 `docs/archive/plans/2026-07-28-pd2-offline-bot/`.
 
 Perception, navigation, and the game cycle are done and live-verified.

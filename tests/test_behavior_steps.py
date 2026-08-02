@@ -331,6 +331,126 @@ def test_an_unwalkable_fight_target_costs_the_target_not_the_game():
     assert not outcome.done  # survived; the engine gets another tick
 
 
+# -- writing off a monster we cannot get to -------------------------------------
+#
+# Surviving the unreachable target was only half of it, and shipping the
+# half was a regression: absorbing `NavigationError` stopped one monster
+# ending the run, and then nothing wrote that monster off, so the clearance
+# re-decided the identical approach every tick and could never finish. The
+# user watched it "hesitate at great length when an enemy was behind a
+# wall". These are the other half.
+
+
+def test_an_unreachable_monster_stops_holding_the_clearance_open():
+    clock = Clock()
+    combat = StubCombat([MoveTo((1100, 1000), toward=1)] * 10)
+    svc = services(clock, combat=combat)
+    step = make_step("clear_radius", svc, {"radius": 150, "center": "arrival"})
+
+    def refuse(action):
+        raise NavigationError("gave up after 5 plan cycles without progress")
+
+    executor = RecordingExecutor(clock=clock, on_execute=refuse)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    walled = monster(1, (1100, 1000))
+
+    step.step(snap(monsters=[walled]), ctx)
+    assert 1 in step._unreachable, "a monster we cannot walk to must be written off"
+
+    # And now the step can actually finish, with the monster still standing.
+    outcome = drive(step, {"pos": HOME}, ctx, clock, monsters=[walled])
+    assert outcome is not None and outcome.done
+    assert "written off" in outcome.note, "finishing that way must be said out loud"
+
+
+def test_a_dash_blames_only_the_monster_it_named():
+    """A retreat and a lateral drift aim at open ground, not at anything.
+
+    They carry no `toward`, and a failed one must write nothing off — the
+    monster the fight is about is not the reason a step sideways failed.
+    """
+    clock = Clock()
+    combat = StubCombat([MoveTo((1002, 1000))])  # no `toward`: a drift
+    svc = services(clock, combat=combat)
+    step = make_step("clear_radius", svc, {"radius": 150, "center": "arrival"})
+
+    def refuse(action):
+        raise NavigationError("nowhere to drift to")
+
+    ctx = context(RecordingExecutor(clock=clock, on_execute=refuse))
+    ctx.notes["arrival"] = HOME
+    step.step(snap(monsters=[monster(1, (1100, 1000))]), ctx)
+    assert not step._unreachable, "an unaimed walk must not cost a monster"
+
+
+def test_closing_that_gets_closer_is_never_written_off():
+    """Progress, not effort — the same correction the patrol needed.
+
+    A monster we are slowly walking toward earns as many ticks as it
+    takes; only ticks that achieve nothing count against it.
+    """
+    clock = Clock()
+    combat = StubCombat(approach_script=[MoveTo((1010, 1000))] * 20)
+    svc = services(clock, combat=combat)
+    step = make_step("clear_radius", svc, {"radius": 150, "center": "arrival"})
+    here = {"pos": HOME}
+
+    def react(action):
+        if isinstance(action, MoveTo):
+            here["pos"] = (here["pos"][0] + 10, here["pos"][1])  # 10 closer
+
+    ctx = context(RecordingExecutor(clock=clock, on_execute=react))
+    ctx.notes["arrival"] = HOME
+    target = monster(1, (1100, 1000))
+    for _ in range(6):
+        step.step(snap(pos=here["pos"], monsters=[target]), ctx)
+    assert not step._unreachable, "closing steadily must not be a write-off"
+
+
+def test_closing_that_never_gets_closer_is_written_off():
+    """The silent version of the hang: every walk succeeds, none arrives.
+
+    No `NavigationError` is ever raised here — the navigator is perfectly
+    happy — so the failed-walk path would never fire, and without this the
+    step closes on the same monster from the same distance forever.
+    """
+    clock = Clock()
+    combat = StubCombat(approach_script=[MoveTo((1010, 1000))] * 20)
+    svc = services(clock, combat=combat)
+    step = make_step("clear_radius", svc, {"radius": 150, "center": "arrival"})
+    ctx = context(RecordingExecutor(clock=clock))  # walks "succeed", nothing moves
+    ctx.notes["arrival"] = HOME
+    target = monster(1, (1100, 1000))
+    for _ in range(svc.monster_attempts + 1):
+        step.step(snap(monsters=[target]), ctx)
+    assert 1 in step._unreachable
+
+
+def test_a_written_off_monster_that_moves_gets_another_try():
+    """Monsters walk, which is how they differ from ring points and items.
+
+    The write-off says "unreachable from where it was standing", so a
+    monster that has left that spot has invalidated the only evidence
+    behind it. This repo's own rule: a retry that cannot differ from the
+    attempt it retries is not a retry — and one that CAN differ is owed.
+    """
+    clock = Clock()
+    combat = StubCombat(approach_script=[MoveTo((1010, 1000))] * 20)
+    svc = services(clock, combat=combat)
+    step = make_step("clear_radius", svc, {"radius": 150, "center": "arrival"})
+    ctx = context(RecordingExecutor(clock=clock))
+    ctx.notes["arrival"] = HOME
+    for _ in range(svc.monster_attempts + 1):
+        step.step(snap(monsters=[monster(1, (1100, 1000))]), ctx)
+    assert 1 in step._unreachable
+
+    # It gives up on its wall and walks toward us.
+    moved = monster(1, (1100 - svc.unreachable_forget - 1, 1000))
+    step.step(snap(monsters=[moved]), ctx)
+    assert 1 not in step._unreachable, "it moved; the write-off's evidence is gone"
+
+
 def test_an_unreachable_item_is_written_off_not_retried_forever():
     clock = Clock()
     svc = services(clock)
@@ -589,6 +709,101 @@ def test_pickup_finishes_when_nothing_is_wanted():
     ctx.notes["arrival"] = HOME
     junk = GroundItem(unit_id=61, kind=999, position=(1002, 1000), quality=4)
     assert step.step(snap(items=[junk]), ctx).done  # magic: no rule matches
+
+
+# -- the sweep walks the circle too ---------------------------------------------
+#
+# The user watched a whitelisted Tir rune left behind on the far side of a
+# 96-radius circle. The pickit rules were right; nothing ever asked them
+# about that rune, because the sweep stood where the clearance finished and
+# collected what it could see — and T51 measured what that is: 46-67
+# subtiles, room-quantised, not the 80 the constant claims.
+
+
+def cleared_circle(ctx, centre=HOME, radius=96, patrol=True):
+    """What `clear_radius` leaves on the blackboard for the sweep."""
+    ctx.notes["arrival"] = centre
+    ctx.notes["cleared"] = {"centre": centre, "radius": radius, "patrol": patrol}
+
+
+def sweeping(clock, **kw):
+    """A patrolling sweep plus an executor that actually moves the player."""
+    svc = services(clock, **kw)
+    step = make_step("pickup", svc)
+    here = {"pos": HOME}
+
+    def react(action):
+        if isinstance(action, MoveTo):
+            here["pos"] = action.target
+
+    executor = RecordingExecutor(clock=clock, on_execute=react)
+    ctx = context(executor)
+    cleared_circle(ctx)
+    return step, svc, here, executor, ctx
+
+
+def test_the_sweep_walks_the_circle_before_calling_it_empty():
+    clock = Clock()
+    step, svc, here, executor, ctx = sweeping(clock)
+    outcome = None
+    for _ in range(400):
+        outcome = step.step(snap(pos=here["pos"]), ctx)
+        clock.advance(0.5)
+        if outcome.done:
+            break
+    assert outcome is not None and outcome.done
+    assert len(step._visited) == svc.patrol_points, (
+        "the sweep finished without walking its circle — the exact bug that "
+        "left a whitelisted rune on the far side"
+    )
+    assert [a for a in executor.actions if isinstance(a, MoveTo)], "it never moved"
+
+
+def test_the_sweep_collects_something_only_reachable_by_patrolling():
+    """The rune on the far side. Visible only once the sweep gets there."""
+    clock = Clock()
+    step, svc, here, executor, ctx = sweeping(clock)
+    # 70 subtiles out: inside the 96 circle, outside anything the sweep can
+    # see from the arrival point.
+    rune = GroundItem(unit_id=77, kind=999, position=(1070, 1000), quality=RARE)
+
+    def visible(pos):
+        # Stand in for the client's horizon, which is what actually hides it.
+        return [rune] if _chebyshev(rune.position, pos) <= 50 else []
+
+    for _ in range(400):
+        outcome = step.step(snap(pos=here["pos"], items=visible(here["pos"])), ctx)
+        clock.advance(0.5)
+        if any(isinstance(a, PickUpItem) and a.unit_id == 77
+               for a in executor.actions):
+            break
+        if outcome.done:
+            break
+    assert [a for a in executor.actions if isinstance(a, PickUpItem)
+            and a.unit_id == 77], "the far-side item was never even attempted"
+
+
+def test_the_sweep_follows_the_clearance_rather_than_its_own_number():
+    """One radius, not two. The `--radius` override only rewrites
+    `clear_radius`, so a sweep with its own copy would silently ignore it."""
+    clock = Clock()
+    svc = services(clock)
+    step = make_step("pickup", svc)
+    ctx = context()
+    cleared_circle(ctx, centre=(2000, 2000), radius=120, patrol=True)
+    step.step(snap(pos=(2000, 2000)), ctx)
+    assert (step.radius, step.patrol, step._centre) == (120, True, (2000, 2000))
+
+
+def test_a_sweep_with_no_clearance_does_not_patrol():
+    """Nothing published a circle, so there is no circle to walk."""
+    clock = Clock()
+    svc = services(clock)
+    step = make_step("pickup", svc)
+    ctx = context()
+    ctx.notes["arrival"] = HOME  # a waypoint ran; no clearance did
+    assert step.step(snap(), ctx).done
+    assert not step.patrol
 
 
 def test_pickup_verifies_by_the_item_leaving_the_ground():

@@ -257,6 +257,23 @@ class LiveBot:
             hotkeys=self.class_config.hotkeys,
             clock=self.clock,
         )
+        def field_cleanse() -> int:
+            """The town cleanse, run in the field — and its report SURFACED.
+
+            The report used to be constructed here and thrown away with the
+            call (`lambda: self.town.cleanse_inventory(PreambleReport())`),
+            which meant the field cleanse was silent even about dropping
+            things. That is half of why the user could not tell a run where
+            junk reached the stash from one where the cleanse found nothing
+            to drop: in town the lines reach the preamble report, and out
+            here they reached nobody at all.
+            """
+            report = PreambleReport()
+            dropped = self.town.cleanse_inventory(report)
+            for line in report.log:
+                print(f"  field {line}", flush=True)
+            return dropped
+
         services = RunServices(
             run_preamble=self.town.run_preamble,
             travel_to=self.waypoint.take,
@@ -268,11 +285,7 @@ class LiveBot:
             # behind a closure so the step never learns what a TownLayer is.
             # None while the vocabulary is incomplete, and the step already
             # treats None as "unavailable" rather than as "nothing to do".
-            cleanse=(
-                (lambda: self.town.cleanse_inventory(PreambleReport()))
-                if self.cleanse_enabled
-                else None
-            ),
+            cleanse=(field_cleanse if self.cleanse_enabled else None),
             # The same retried ESC the town layer has used since R85, made
             # available in the field — where a panel is worse, because
             # nothing out there opens one deliberately and every send is
@@ -440,6 +453,13 @@ def describe(bot: LiveBot) -> list[str]:
         + (" (--radius override)" if bot.radius_override is not None else "")
         if radius is not None
         else "clearance  no clear_radius step in this run",
+        # The sweep takes no parameters of its own — it adopts the
+        # clearance's circle off the blackboard — so without this line the
+        # pre-flight would say nothing at all about how far it will look,
+        # and "radius 96" would read as applying only to the killing.
+        "sweep      follows the clearance (same centre, radius and patrol)"
+        if radius is not None
+        else "sweep      no clearance to follow; sweeps from where it stands",
         f"pickit     {len(bot.pickit.rules)} rules, "
         f"{len(bot.pickit.pending_names)} pending name(s)",
         f"cleanse    {'ENABLED' if bot.cleanse_enabled else 'disabled (pending names)'}",

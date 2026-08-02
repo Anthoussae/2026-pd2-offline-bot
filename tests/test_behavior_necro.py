@@ -152,7 +152,11 @@ def test_dash_then_strike_then_retreat():
 def test_dash_goes_straight_there_when_already_close():
     necro, _ = make(skirmishing())
     target = monster(1, (1006, 1000))  # 6 away, under dash_step 8
-    assert necro.engage(snap(allies=wall(), monsters=[target])) == MoveTo((1006, 1000))
+    # `toward` names the monster: a caller that absorbs a failed walk has to
+    # know which target to write off, and cannot recover it by guessing.
+    assert necro.engage(snap(allies=wall(), monsters=[target])) == MoveTo(
+        (1006, 1000), toward=1
+    )
 
 
 def test_a_struck_monster_is_not_restruck_immediately():
@@ -189,7 +193,7 @@ def test_offense_advances_once_a_single_tank_is_in_front():
     target = monster(1, (1020, 1000))
     assert necro.engage(
         snap(allies=[ally(900, (1018, 1000))], monsters=[target])
-    ) == MoveTo((1008, 1000))
+    ) == MoveTo((1008, 1000), toward=1)
 
 
 def test_offense_still_waits_with_no_tank_at_all():
@@ -366,7 +370,7 @@ def test_the_wall_gate_releases_when_the_wall_cannot_be_built():
     forever on ground where no corpse can be raised."""
     necro, _ = make(CombatConfig(wait_for_revives_s=0.0, desecrate_rounds=0))
     far = monster(1, (1020, 1000))
-    assert necro.engage(snap(monsters=[far])) == MoveTo((1008, 1000))
+    assert necro.engage(snap(monsters=[far])) == MoveTo((1008, 1000), toward=1)
 
 
 def test_a_new_pack_restarts_the_wait():
@@ -526,4 +530,4 @@ def test_every_number_is_config():
     assert necro.engage(snap(allies=wall(), monsters=[monster(1, (1010, 1000))])) is None
     assert necro.engage(
         snap(allies=wall(), monsters=[monster(1, (1004, 1000))])
-    ) == MoveTo((1002, 1000))
+    ) == MoveTo((1002, 1000), toward=1)

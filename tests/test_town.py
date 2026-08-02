@@ -978,8 +978,13 @@ def test_preamble_runs_in_the_agreed_order(town):
     # One "stash" line, not two: the materials/regular split went with the
     # tab inference (R134). Nothing toggles unless something refuses, so the
     # happy path reports a single deposit pass.
+    # The "cleanse" line is there even though this preamble drops nothing:
+    # the cleanse reports on every path now, because a run where junk
+    # reached the stash used to be indistinguishable from one where the
+    # cleanse looked and found none (user request, 2026-08-01).
     assert steps == [
-        "heal", "repair", "belt", "belt", "stash", "stash", "gold", "merc"
+        "heal", "repair", "belt", "cleanse", "belt",
+        "stash", "stash", "gold", "merc"
     ]  # two stash lines: the deposit, then the held-item count
 
 
@@ -1936,7 +1941,14 @@ def test_cleanse_drops_junk_and_stashes_the_rest(town):
     assert [i.kind for i in town.dropped] == [700]
     assert town.inventory == []
     assert report.deposited == 1  # the keeper, stashed as usual
-    assert any("cleanse: 1 junk" in line for line in report.log)
+    # The report names what went on the floor and what stayed, and why.
+    # "1 dropped" alone is not something the keep-rule can be checked
+    # against; a kind is.
+    assert any("1 judged junk" in line and "1 dropped" in line
+               for line in report.log), report.log
+    assert any("cleanse: DROP kind 700" in line for line in report.log), report.log
+    assert any("cleanse: KEEP kind 999" in line and "whitelisted" in line
+               for line in report.log), report.log
 
 
 def test_cleanse_disabled_without_a_whitelist(town):
@@ -1948,6 +1960,37 @@ def test_cleanse_disabled_without_a_whitelist(town):
     layer(town).manage_inventory(report)
     assert town.dropped == []
     assert report.deposited == 1
+    # And it SAYS SO. This was the worst of the three silent paths: a
+    # cleanse that examined nothing at all looked exactly like a cleanse
+    # that examined everything and approved of it.
+    assert any("DISABLED" in line for line in report.log), report.log
+
+
+def test_the_cleanse_says_why_each_item_survived(town):
+    """The user's rule is that only whitelisted items and the Cube stay.
+
+    That rule is only checkable if the report says which reason applied to
+    each survivor — and "protected: predates this bot session" is the one
+    worth surfacing, because it is the likeliest reason junk the user
+    wants gone survives a cleanse indefinitely: the baseline is captured
+    at the first cleanse and protects everything present then, for the
+    whole session.
+    """
+    town.inventory = [
+        loot(1, (0, 0), kind=999),  # whitelisted
+        loot(2, (1, 0), kind=700),  # junk, but predates the session
+    ]
+    full_belt(town)
+    report = PreambleReport()
+    layer(
+        town, keep_item=lambda item: item.kind == 999,
+        protected_ids=lambda: {2},
+    ).manage_inventory(report)
+    assert town.dropped == [], "a protected item must not be dropped"
+    reasons = [line for line in report.log if line.startswith("cleanse: KEEP")]
+    assert any("kind 700" in r and "predates" in r for r in reasons), reasons
+    assert any("kind 999" in r and "whitelisted" in r for r in reasons), reasons
+    assert any("0 judged junk" in line for line in report.log), report.log
 
 
 def test_cleanse_never_drops_potions_or_unmovables(town):

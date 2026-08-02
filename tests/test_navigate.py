@@ -84,7 +84,7 @@ class FakeInput:
         return (0, 0)
 
 
-def navigator(world, sim, fake_input, grid_provider=None, avoid=None):
+def navigator(world, sim, fake_input, grid_provider=None, avoid=None, audit=None):
     return Navigator(
         position_reader=world.position,
         gated_input=fake_input,
@@ -92,6 +92,7 @@ def navigator(world, sim, fake_input, grid_provider=None, avoid=None):
         clock=sim.clock,
         sleep=sim.sleep,
         avoid_provider=avoid,
+        audit=audit,
     )
 
 
@@ -456,6 +457,89 @@ def test_a_hazard_on_the_destination_does_not_block_arrival():
     result = navigator(world, sim, fake, avoid=lambda: (target,)).walk_to(target)
     assert abs(result.arrived_at[0] - 20) <= 3, "the walk must still arrive"
     assert not any("nudged" in line for line in result.log)
+
+
+def test_an_item_merely_NEAR_the_destination_is_still_avoided():
+    """The junk mechanism, measured on the first patrol run and fixed.
+
+    The goal exemption is for the item `collect` is deliberately walking
+    to — distance ZERO. Testing it against AVOID_RADIUS exempted anything
+    within 3 subtiles of any destination, so a rune lying beside a patrol
+    leg's endpoint stopped being avoided and the travel click scooped it.
+    Of 39 goal-exempt clicks in one run, 31 were this; 21 landed inside
+    the avoid radius and five landed exactly on an item.
+    """
+    from pd2bot.navigate import AVOID_MARGIN, AVOID_RADIUS
+
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    goal = (20, 0)
+    hazard = (22, 2)  # 2 from the goal: near it, emphatically not it
+    result = navigator(world, sim, fake, avoid=lambda: (hazard,)).walk_to(goal)
+
+    # Not one click near the item — that is the whole point.
+    for click in fake.clicks:
+        span = max(abs(click[0] - hazard[0]), abs(click[1] - hazard[1]))
+        assert span >= AVOID_RADIUS, (
+            f"click {click} landed {span} from an item beside the destination"
+        )
+    # And it STOPS SHORT rather than failing. Demanding arrival at a point
+    # we deliberately refused to click is a guaranteed stuck, and turning
+    # that into a NavigationError would cost the caller its target — which
+    # is how "avoid items properly" would have become "cannot reach
+    # anything near an item". Close enough is reported honestly; every
+    # caller re-checks distance for itself.
+    short = max(
+        abs(result.arrived_at[0] - goal[0]), abs(result.arrived_at[1] - goal[1])
+    )
+    assert short <= AVOID_RADIUS + AVOID_MARGIN + 3, (
+        f"stopped {short} short of {goal}, further than avoidance explains"
+    )
+
+
+def test_the_click_audit_sees_every_click_and_never_changes_one():
+    """The instrument for the junk question, and it must be inert.
+
+    Junk keeps arriving in the inventory behind ZERO deliberate pickups,
+    so travel clicks are scooping ground items — but nobody knows whether
+    AVOID_RADIUS is too tight or something bypasses it. The audit reports;
+    it must not decide.
+    """
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    seen = []
+    hazard = (10, 0)
+    result = navigator(
+        world, sim, fake, avoid=lambda: (hazard,),
+        audit=lambda point, goal, nudges: seen.append((point, goal, nudges)),
+    ).walk_to((20, 0))
+
+    assert len(seen) == len(fake.clicks), "every sent click must be audited"
+    assert all(goal == (20, 0) for _point, goal, _n in seen)
+    assert any(nudges > 0 for _p, _g, nudges in seen), "it saw the nudging"
+
+    # And the walk is byte-identical without it.
+    world2 = World()
+    sim2 = Sim(world2)
+    fake2 = FakeInput(world2)
+    plain = navigator(world2, sim2, fake2, avoid=lambda: (hazard,)).walk_to((20, 0))
+    assert fake2.clicks == fake.clicks
+    assert plain.arrived_at == result.arrived_at
+
+
+def test_a_failing_audit_cannot_break_a_walk():
+    """Measurement is never worth a run. A broken probe stays a broken probe."""
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+
+    def explode(point, goal, nudges):
+        raise RuntimeError("the probe is broken")
+
+    result = navigator(world, sim, fake, audit=explode).walk_to((20, 0))
+    assert abs(result.arrived_at[0] - 20) <= 3
 
 
 def test_a_hazard_short_of_the_destination_is_still_avoided():

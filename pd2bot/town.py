@@ -286,7 +286,9 @@ class TownConfig:
     # uipoints.py for what a point is and how each was measured.
     ui_points: dict[str, UIPoint] = field(default_factory=default_points)
     # Where to stand to find each NPC when they are beyond perception range
-    # (80 subtiles). T12 failed exactly here: the bot asked perception for
+    # (46-67 subtiles, measured by T51 — the 80 in `PERCEPTION_RADIUS` is a
+    # ceiling that never binds). T12 failed exactly here: the bot asked
+    # perception for
     # Akara while standing too far away and gave up rather than walking.
     # Single-player maps are fixed per character+difficulty (the atlas
     # premise, M3 ADR), so these are stable for this character; they are
@@ -325,6 +327,13 @@ class TownConfig:
     # ROOMS loaded at all, so a distant stash is not merely out of range —
     # it is absent from the unit table entirely. T13 failed here, standing
     # at Akara after the heal with the stash unloaded across town (R69).
+    #
+    # T51 later MEASURED that room horizon rather than inferring it, and
+    # this comment turned out to be the whole story: dropped items vanish
+    # from the unit table at 46-67 subtiles regardless of what radius we
+    # ask for, so the 80 cap never binds anywhere in this codebase. The
+    # knowledge was here since T13 and simply never reached the places
+    # that were still quoting 80 as if it were the reach.
     object_positions: dict[int, tuple[int, int]] = field(
         default_factory=lambda: {
             offsets.OBJ_STASH: (5856, 5734),
@@ -709,8 +718,8 @@ class TownLayer:
     def _approach_ally(self, kind: int, name: str) -> tuple[int, int]:
         """Get within clicking range of an NPC, walking blind if we must.
 
-        Perception only reaches 80 subtiles, and a town NPC is routinely
-        further than that from where a game drops you — T12's first live
+        Perception only reaches 46-67 subtiles (T51), and a town NPC is
+        routinely further than that from where a game drops you — T12's first live
         run died on exactly this, asking perception for Akara from across
         the camp and giving up. So: if she is not visible, walk to the
         configured approach position first, then look again.
@@ -1819,24 +1828,66 @@ class TownLayer:
         phases): failing to drop junk costs stash space, not correctness,
         and halting the whole preamble over garbage would invert the
         priorities.
+
+        **It reports on every path, including the ones where it does
+        nothing** (user request, 2026-08-01). It used to log only when it
+        actually dropped something, so the two silent returns below — no
+        whitelist wired at all, and nothing judged junk — were
+        indistinguishable from each other AND from the cleanse never
+        having run. A run where junk reached the stash could not be told
+        apart from one where the cleanse looked and found nothing, which
+        made the feature unfalsifiable: there was no observation that
+        could show it was broken. The user's rule is that only
+        whitelisted items and the Horadric Cube stay, so the report names
+        every kept item and WHY it was kept — that rule is checkable
+        against this log, and was checkable against nothing before.
         """
         if self._keep_item is None:
+            report.log.append(
+                "cleanse: DISABLED and nothing was examined — no whitelist is "
+                "wired, because the pickit vocabulary still has unverified "
+                "item ids (pickit.cleanse_keep returns None). A whitelist "
+                "that cannot recognise a quest item must not be allowed to "
+                "throw one away."
+            )
             return 0
         protected = self._protected()
-        junk = [
-            i
-            # The one place sockets are needed: `_keep_item` is the pickit's
-            # whitelist and several of its rules are socket-conditioned, so
-            # an item read without them has `sockets=None` — which reads as
-            # "keep" and would silently turn the cleanse into a no-op for
-            # exactly the bases it exists to protect (R132).
-            for i in self._carried_sockets(self.session).main_inventory
-            if i.is_movable
-            and i.kind not in offsets.RIGHT_CLICK_HAZARD_KINDS
-            and i.unit_id not in protected
-            and not self._keep_item(i)
-        ]
+        # The one place sockets are needed: `_keep_item` is the pickit's
+        # whitelist and several of its rules are socket-conditioned, so an
+        # item read without them has `sockets=None` — which reads as "keep"
+        # and would silently turn the cleanse into a no-op for exactly the
+        # bases it exists to protect (R132).
+        carried = self._carried_sockets(self.session).main_inventory
+        junk: list = []
+        kept: list[tuple[object, str]] = []
+        for item in carried:
+            if not item.is_movable:
+                kept.append((item, "unmovable (the Cube)"))
+            elif item.kind in offsets.RIGHT_CLICK_HAZARD_KINDS:
+                kept.append((item, "right-click hazard (potion/tome)"))
+            elif item.unit_id in protected:
+                # The likeliest reason junk survives, and it was invisible.
+                # The baseline is captured the first time the cleanse runs
+                # and protects everything present THEN, so anything already
+                # in the inventory when the bot started is protected for the
+                # whole session — including junk the user wanted gone.
+                kept.append((item, "protected: predates this bot session"))
+            elif self._keep_item(item):
+                kept.append((item, "whitelisted by the pickit"))
+            else:
+                junk.append(item)
+
+        summary = (
+            f"cleanse: {len(carried)} item(s) in the inventory, "
+            f"{len(junk)} judged junk, {len(kept)} kept"
+        )
+        for item, why in kept:
+            report.log.append(
+                f"cleanse: KEEP kind {item.kind} quality {item.quality} "
+                f"sockets {item.sockets} at {item.position} — {why}"
+            )
         if not junk:
+            report.log.append(f"{summary}; nothing to drop")
             return 0
         self._begin_step()
         self.press_inventory_open()
@@ -1860,7 +1911,22 @@ class TownLayer:
             )
             break
         self.close_panels()
-        report.log.append(f"cleanse: {dropped} junk item(s) dropped")
+        # Name what went on the floor, not just how many. "3 dropped" is
+        # not something the user can check the keep-rule against; a kind
+        # and a quality is.
+        for item in junk[:dropped]:
+            report.log.append(
+                f"cleanse: DROP kind {item.kind} quality {item.quality} "
+                f"sockets {item.sockets} at {item.position}"
+            )
+        report.log.append(
+            f"{summary}; {dropped} dropped"
+            + (
+                f", {len(junk) - dropped} left behind (a drop did not land)"
+                if dropped < len(junk)
+                else ""
+            )
+        )
         return dropped
 
     def _stash_held(self) -> int:

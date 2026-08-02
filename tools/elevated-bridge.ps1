@@ -42,6 +42,19 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     exit 1
 }
 
+# Single instance, enforced with a named mutex. Necessary since the bridge
+# auto-starts at logon (scheduled task, M5 P6 R169): a manual start on top
+# of the task's instance would give TWO loops racing on one queue — each
+# command grabbed by whichever polls first, answers interleaved, and the
+# audit trail split across two windows. Global\ scope so it holds across
+# sessions; the mutex dies with the process, so a crashed bridge never
+# blocks the next one.
+$script:bridgeMutex = New-Object System.Threading.Mutex($false, 'Global\pd2bot-elevated-bridge')
+if (-not $script:bridgeMutex.WaitOne(0)) {
+    Write-Host 'Another bridge is already running; this one is not needed.' -ForegroundColor Yellow
+    exit 0
+}
+
 New-Item -ItemType Directory -Force -Path $QueueDir | Out-Null
 Set-Location $WorkDir
 

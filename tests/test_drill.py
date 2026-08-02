@@ -65,7 +65,11 @@ DRILL = Drill(
 def test_protocol_messages_in_order(tmp_path):
     chat = FakeChat()
     run = make_run(chat)
-    run_drill(DRILL, lambda r: "all good", run=run, log_path=tmp_path / "log.md")
+    # scope="" pins the banner: the live default reads docs/project-state.md,
+    # and a test that tracked the repo's real phase would break at every
+    # transition. Scope presence has its own test below.
+    run_drill(DRILL, lambda r: "all good", run=run,
+              log_path=tmp_path / "log.md", scope="")
     texts = chat.delivered
     assert texts[0] == "[claude] TEST T99 — Fake drill [human calibration]"
     assert texts[1] == "[claude] Do the thing."
@@ -75,6 +79,131 @@ def test_protocol_messages_in_order(tmp_path):
     # The id is in the conclusion too (R85): several tests report into the
     # same chat window, so a bare status does not say which one concluded.
     assert texts[5] == "[claude] TEST T99 CONCLUDED — PASS"
+
+
+# -- the Drill Kit additions (M5 P6 R169): OK gate, chat abort, scope ---------
+
+
+class FakeListener:
+    """Scripted return channel: yields each line once, like the real one."""
+
+    def __init__(self, lines=()):
+        self.lines = list(lines)
+        self.remembered = []
+
+    def poll(self):
+        return self.lines.pop(0) if self.lines else None
+
+    def remember(self, text):
+        self.remembered.append(text)
+
+
+def gated_run(chat, lines):
+    """A run that reads as in-game, with a scripted chat channel."""
+    clock = FakeClock()
+    run = DrillRun(
+        session=object(),
+        chat=chat,
+        window=SimpleNamespace(client_rect=lambda: RECT),
+        ui_array=0,
+        cursor=lambda: (0, 0),
+        clock=clock,
+        sleep=clock.sleep,
+        listener=FakeListener(lines),
+    )
+    run.in_game = lambda: True
+    return run
+
+
+def test_an_in_game_test_waits_for_ok(tmp_path):
+    chat = FakeChat()
+    run = gated_run(chat, [None] * 10 + ["OK"])
+    body_ran = []
+    status = run_drill(DRILL, lambda r: (body_ran.append(1), "went")[1],
+                       run=run, log_path=tmp_path / "log.md", scope="")
+    assert status == "PASS" and body_ran == [1]
+    joined = " | ".join(chat.delivered)
+    assert "type OK" in joined, "the gate must announce itself"
+    # The gate question comes BEFORE TEST LIVE, and LIVE only after the OK.
+    assert joined.index("type OK") < joined.index("TEST LIVE")
+
+
+def test_no_ok_means_not_started(tmp_path):
+    chat = FakeChat()
+    run = gated_run(chat, [])  # nobody ever types anything
+    body_ran = []
+    status = run_drill(
+        Drill("T97", "Gated", "perception", (), start_patience_s=5.0),
+        lambda r: body_ran.append(1),
+        run=run, log_path=tmp_path / "log.md", scope="",
+    )
+    assert status == "NOT STARTED" and body_ran == []
+    assert "NOT STARTED" in (tmp_path / "log.md").read_text(encoding="utf-8")
+
+
+def test_menu_capable_tests_skip_the_gate(tmp_path):
+    chat = FakeChat()
+    run = gated_run(chat, [])  # in game, but menu_ok bypasses the gate
+    drill = Drill("T96", "Menus", "human calibration", (), menu_ok=True)
+    status = run_drill(drill, lambda r: "fine", run=run,
+                       log_path=tmp_path / "log.md", scope="")
+    assert status == "PASS"
+    assert not any("type OK" in t for t in chat.delivered)
+
+
+def test_typing_abort_in_chat_aborts(tmp_path):
+    chat = FakeChat()
+    run = gated_run(chat, [None, "OK", None, "Abort Test"])
+
+    def body(r):
+        for _ in range(50):
+            r.check_cancel()
+            r.sleep(0.2)
+        return "never aborted"
+
+    status = run_drill(DRILL, body, run=run,
+                       log_path=tmp_path / "log.md", scope="")
+    assert status == "ABORTED"
+    assert "aborted from in-game chat" in (
+        tmp_path / "log.md").read_text(encoding="utf-8")
+
+
+def test_abort_at_the_gate_refuses_the_test(tmp_path):
+    chat = FakeChat()
+    run = gated_run(chat, [None, "abort"])
+    body_ran = []
+    status = run_drill(DRILL, lambda r: body_ran.append(1), run=run,
+                       log_path=tmp_path / "log.md", scope="")
+    assert status == "ABORTED" and body_ran == []
+
+
+def test_a_nonsense_chat_line_neither_starts_nor_aborts(tmp_path):
+    chat = FakeChat()
+    run = gated_run(chat, ["nice weather", "OK"])
+    status = run_drill(DRILL, lambda r: "went", run=run,
+                       log_path=tmp_path / "log.md", scope="")
+    assert status == "PASS"  # the chatter was ignored, the OK still counted
+
+
+def test_scope_reaches_banner_and_log(tmp_path):
+    chat = FakeChat()
+    log = tmp_path / "log.md"
+    run_drill(DRILL, lambda r: "went", run=make_run(chat),
+              log_path=log, scope="M9 P2")
+    assert "(M9 P2)" in chat.delivered[0]
+    assert "| M9 P2 |" in log.read_text(encoding="utf-8")
+
+
+def test_project_state_reads_the_file(tmp_path):
+    from pd2bot.drill import project_state
+
+    state = tmp_path / "project-state.md"
+    state.write_text(
+        "- **Milestone:** M5 — trial run\n- **Phase:** P6 — acceptance\n",
+        encoding="utf-8",
+    )
+    assert project_state(state) == "M5 P6"
+    assert project_state(tmp_path / "absent.md") == ""
 
 
 def test_bot_control_drills_warn_hands_off(tmp_path):

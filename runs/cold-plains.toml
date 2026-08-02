@@ -23,13 +23,18 @@ center = "arrival" # recorded by the waypoint step on the shared blackboard
 radius = 150       # R46 Q2
 # `patrol` is what makes that 150 honest, so do not "simplify" it away.
 # The step decides an area is clear from what perception can see, and
-# perception is 80 subtiles (units.PERCEPTION_RADIUS) — so from the
-# arrival point this file was declaring clear a circle it could see
-# about half of, and had been since it was written. Walking the circle
-# is what turns the number into a statement about the ground.
+# T51 measured that at 46-67 subtiles (2026-08-01, seven dropped potions
+# watched vanishing) — NOT the 80 that `units.PERCEPTION_RADIUS` claims,
+# which never binds because the real limit is the client's loaded-room
+# horizon. So from the arrival point this file was declaring clear a
+# circle it could see under a third of, and had been since it was
+# written. Walking the circle is what turns the number into a statement
+# about the ground.
 patrol = true
 
 [[step]] # collect what the pickit rules want from the cleared ground
+# Takes no parameters: it adopts the circle above off the shared
+# blackboard, so there is one radius here rather than two that drift.
 name = "pickup"
 
 [[step]] # run complete; the cycle takes it from here (leave, next game)

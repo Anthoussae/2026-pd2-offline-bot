@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -File \"C:\\dev\\2026-pd2-bot\\2026-pd2-offline-bot\\tools\\notify-turn-end.ps1\"",
+            "timeout": 10,
+            "async": true,
+            "statusMessage": "Queueing in-game turn-end alert"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -8,9 +8,12 @@ Rows T1–T10 are a backfill of the live tests run before the harness
 existed (M5 P1–P3, bridge commands 030–049); dates and outcomes are
 exact, run details live in `docs/instruction-log.md` under the cited
 R-numbers.
+Rows before 2026-08-01 predate the Scope column (M5 P6 R169)
+and have one fewer cell; new rows carry milestone/phase.
 
-| Test | Run | Date | Title | Kind | Status | Result |
-|---|---|---|---|---|---|---|
+
+| Test | Run | Date | Scope | Title | Kind | Status | Result |
+|---|---|---|---|---|---|---|---|
 | T1 | 1 | 2026-07-29 | Skill-id capture, F1–F6 cycle | human calibration | PASS | All 7 ids captured incl. PD2's Blood Warp 367, Desecrate 83 (R52-A) |
 | T2 | 1 | 2026-07-29 | Bone Armor cast-and-diff | human calibration | PASS | Stats 132/133 confirmed, fixed-point, 866 at max (R52-B) |
 | T3 | 1 | 2026-07-29 | Potion shuffle, container classification | human calibration | PASS | mode/loc/node consistent at every hop; cursor items leave the chain (R52-C) |
@@ -86,3 +89,6 @@ R-numbers.
 | T47 | 1 | 2026-08-01 03:53 | which skill each hotkey actually selects | bot control | PASS | all six agree with the config; VK 0x70: selected 68 (bone_armor), expected 68 (bone_armor) — OK; VK 0x71: selected 367 (blood_warp), expected 367 (blood_warp) — OK; VK 0x72: selected 220 (tp_tome), expected 220 (tp_tome) — OK; VK 0x73: selected 78 (bone_wall), expected 78 (bone_wall) — OK; VK 0x74: selected 83 (desecrate), expected 83 (desecrate) — OK; VK 0x75: selected 95 (revive), expected 95 (revive) — OK |
 | T48 | 1 | 2026-08-01 04:12 | cast animation length, and when input is accepted again | bot control | PASS | idle mode reads 5; A1 cast: 125ms->10, 640ms->5 (back to idle after 640ms); A2 cast: 125ms->10, 625ms->5 (back to idle after 625ms); A3 cast: 110ms->10, 610ms->5 (back to idle after 610ms); B delay 0.0s (press at 110ms after the cast): LANDED after 62ms; B delay 0.1s (press at 219ms after the cast): LANDED after 62ms; B delay 0.2s (press at 328ms after the cast): LANDED after 47ms; B delay 0.3s (press at 422ms after the cast): LANDED after 62ms; B delay 0.5s (press at 625ms after the cast): LANDED after 62ms; B delay 0.8s (press at 922ms after the cast): LANDED after 47ms; verdict: every press landed at every delay — the cast does NOT eat following input, so SkillSwitchFailed is something else. Cast animation: 610-640ms |
 | T49 | 1 | 2026-08-01 16:02 | why the town waypoint does not open when clicked | bot control | PASS | waypoint at (5884, 5709), player at (5863, 5733), distance 24 (want 4-12); attempt 1 approach: player (5873, 5718), distance 11 — standoff OK; attempt 1 guard: passes; panels none; attempt 1 click: sent, projected to (1168, 452); attempt 1 result: panel OPENED; player now (5880, 5713) (distance 4); panel closed again |
+| T50 | 1 | 2026-08-01 17:27 | perception range — how far can the bot actually see? | perception | PASS | screen 19-38 subtiles to the edge; units at radius 80: 29, unlimited: 29 (our filter is NOT the bound) |
+| T50 | 2 | 2026-08-01 17:30 | perception range — how far can the bot actually see? | perception | PASS | armed with 12 monster(s) on screen at (5191, 5673); screen 19-38 subtiles to the edge; units at radius 80: 65, unlimited: 65 (our filter is NOT the bound) |
+| T51 | 1 | 2026-08-01 17:36 | visibility vs distance — the walk-away test | perception | ABORTED | Aborted on a design fault (no end condition the WALKER could see), but the telemetry survived in the bridge's stdout temp file and answers the question: 12 potions dropped along a walk, 7 of them observed vanishing. Losses at d=46, 46, 54, 55, 61, 63, 67 — every one far inside PERCEPTION_RADIUS 80, and 5 of the 7 lost at the SAME distance in the radius-80 and unlimited scans. VERDICT B, directly measured: the CLIENT's loaded-room horizon is the bound, not our constant. The 46-67 spread (rather than a crisp circle) is what a room-quantised horizon predicts. |

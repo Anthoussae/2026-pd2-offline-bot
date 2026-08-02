@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ from pathlib import Path
 
 from pd2bot import offsets, uistate
 from pd2bot.chat import Chat
+from pd2bot.chatread import ChatListener
 from pd2bot.items import CarriedItem, read_carried_items
 from pd2bot.memory import GameSession
 from pd2bot.menuinput import MenuInput
@@ -42,6 +44,33 @@ from pd2bot.player import read_player
 from pd2bot.window import GameWindow
 
 DEFAULT_LOG = Path("docs/drill-log.md")
+PROJECT_STATE = Path("docs/project-state.md")
+
+# The in-chat keywords (M5 P6 R169). Deliberately a WHITELIST of exact
+# tokens, not parsing: acting on read chat is a command channel, and the
+# recorded decision (chatread's docstring, deferred 2026-07-31) was that
+# a command channel gets a whitelist or it gets nothing. These two are
+# the whole vocabulary, matched against the stripped, lowercased line,
+# and only ever consulted while a test is running or waiting to start.
+ABORT_WORDS = frozenset({"abort", "abort test"})
+OK_WORDS = frozenset({"ok", "ok!", "okay"})
+
+
+def project_state(path: Path = PROJECT_STATE) -> str:
+    """The current 'M5 P6' scope, read from docs/project-state.md.
+
+    One file, read at run time, so the banner and the log row can never
+    disagree with each other or lag behind a phase transition the way a
+    hardcoded constant would. Absent or unparseable file = empty scope —
+    a drill run outside any project structure is still a drill run.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    milestone = re.search(r"\*\*Milestone:\*\*\s*(M\d+)", text)
+    phase = re.search(r"\*\*Phase:\*\*\s*(P\d+)", text)
+    return " ".join(m.group(1) for m in (milestone, phase) if m)
 
 # Cancelling a live drill used to be impossible: the bridge runs one
 # elevated child at a time, and the agent's own shell is not elevated, so
@@ -74,8 +103,8 @@ One row per live-test run (harness: `pd2bot/drill.py`). Statuses:
 PASS / FAILED / ABORTED / NOT STARTED. The instruction log carries the
 full request context; this file is the quick mechanical record.
 
-| Test | Run | Date | Title | Kind | Status | Result |
-|---|---|---|---|---|---|---|
+| Test | Run | Date | Scope | Title | Kind | Status | Result |
+|---|---|---|---|---|---|---|---|
 """
 
 
@@ -87,6 +116,12 @@ class Drill:
     instructions: tuple[str, ...]
     sends_input: bool = False  # True -> the hands-off warning is printed
     start_patience_s: float = 600.0  # how long to wait for the user to window in
+    # True for tests that can run from the menus (no character exposed):
+    # they begin immediately after the briefing. Everything else waits
+    # in-game for the user to type OK — an in-game test starts when the
+    # person whose character is standing there says so, not when the
+    # announcement happens to finish (M5 P6 R169).
+    menu_ok: bool = False
 
 
 class DrillAborted(RuntimeError):
@@ -118,6 +153,7 @@ class DrillRun:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         cancel_file: Path = CANCEL_FILE,
+        listener: ChatListener | None = None,
     ) -> None:
         self.session = session
         self.chat = chat if chat is not None else Chat(session)
@@ -130,18 +166,92 @@ class DrillRun:
         self.sleep = sleep
         self._cancel_file = cancel_file
         self.cancelled = False
+        self._unclaimed: str | None = None
+        # The return channel: how "abort" and "OK" typed in game reach the
+        # harness. Guarded at every use rather than trusted — the drill
+        # must keep working when chat cannot be read, because the cancel
+        # FILE is the fallback that always exists.
+        self._listener = listener
+        if listener is None:
+            try:
+                self._listener = ChatListener(
+                    session,
+                    console_open=lambda: uistate.read_ui_state(
+                        session, self.ui_array
+                    ).is_open(offsets.UI_CHAT_CONSOLE),
+                )
+            except Exception:  # noqa: BLE001 - no chat read: file cancel only
+                self._listener = None
 
     # -- cancellation -----------------------------------------------------------
+
+    def _chat_line(self) -> str | None:
+        """The newest unclaimed human chat line, normalized.
+
+        `ChatListener.poll` yields each line exactly ONCE, and two
+        different consumers watch the same channel: `check_cancel` (for
+        abort words, from every wait) and `await_ok` (for the start
+        gate). A naive poll in each would race — whichever asked first
+        would swallow the line the other was waiting for, and an "ok"
+        eaten by a cancel check is a test that never starts. So polled
+        lines are HELD here until a keyword consumer claims them; a line
+        that matches nothing simply waits to be replaced by the next.
+        """
+        if self._listener is not None:
+            try:
+                line = self._listener.poll()
+            except Exception:  # noqa: BLE001 - a torn read is not an abort
+                line = None
+            if line is not None:
+                self._unclaimed = line.strip().lower()
+        return self._unclaimed
+
+    def _claim_chat_line(self) -> None:
+        self._unclaimed = None
 
     def check_cancel(self) -> None:
         """Abort if a cancel has been requested. Called from every wait.
 
+        Two ways to ask, same result: the cancel FILE (works from any
+        terminal, survives everything) and typing "abort" / "abort test"
+        into the game's own chat — the user is watching the game, and
+        alt-tabbing to a terminal to stop a test that is misbehaving in
+        front of them was a round trip that aged badly (M5 P6 R169).
+
         Sticky once seen: a suite shares one DrillRun, and a cancel means
         "stop the testing", not "skip to the next test".
         """
+        if not self.cancelled and self._chat_line() in ABORT_WORDS:
+            self._claim_chat_line()
+            self.cancelled = True
+            raise DrillAborted("aborted from in-game chat")
         if self.cancelled or self._cancel_file.exists():
             self.cancelled = True
             raise DrillAborted("cancelled by request")
+
+    def await_ok(self, *, timeout_s: float) -> bool:
+        """Wait for the user to type OK in game chat. True when they do.
+
+        The abort words work here too (check_cancel runs every poll), so
+        a test can be refused at the gate, not just stopped mid-flight.
+        """
+        deadline = self.clock() + timeout_s
+        while self.clock() < deadline:
+            self.check_cancel()
+            if self._chat_line() in OK_WORDS:
+                self._claim_chat_line()
+                return True
+            self.sleep(0.2)
+        return False
+
+    def in_game(self) -> bool:
+        """Is a character standing in the world (not the menus)? Guarded:
+        an unreadable client counts as the menus, because the OK-gate this
+        feeds exists to protect a character that provably exists."""
+        try:
+            return bool(uistate.is_in_game(self.session))
+        except Exception:  # noqa: BLE001
+            return False
 
     # -- talking to the user ----------------------------------------------------
 
@@ -151,6 +261,15 @@ class DrillRun:
         complete record of what the user was told."""
         message = f"[claude] {text}"
         print(f"chat> {message}", flush=True)
+        # Remembered by the listener BEFORE sending, so the return channel
+        # can never hear this message as a human reply — the prefix check
+        # alone lost that bet once (S1: the buffer shifted two bytes and
+        # the bot answered its own question).
+        if self._listener is not None:
+            try:
+                self._listener.remember(message)
+            except Exception:  # noqa: BLE001
+                pass
         deadline = self.clock() + patience_s
         while self.clock() < deadline:
             self.check_cancel()
@@ -392,16 +511,18 @@ def append_log_row(
     result: str,
     *,
     date: str | None = None,
+    scope: str | None = None,
 ) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     if not log_path.exists():
         log_path.write_text(_LOG_HEADER, encoding="utf-8")
     run = _next_run_number(log_path, drill.test_id)
     stamp = date if date is not None else time.strftime("%Y-%m-%d %H:%M")
+    where = scope if scope is not None else project_state()
     clean = " ".join(result.split())  # keep the table one row tall
     row = (
-        f"| {drill.test_id} | {run} | {stamp} | {drill.title} | {drill.kind} "
-        f"| {status} | {clean} |\n"
+        f"| {drill.test_id} | {run} | {stamp} | {where or '-'} | {drill.title} "
+        f"| {drill.kind} | {status} | {clean} |\n"
     )
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(row)
@@ -417,6 +538,7 @@ def run_drill(
     session: GameSession | None = None,
     run: DrillRun | None = None,
     log_path: Path = DEFAULT_LOG,
+    scope: str | None = None,
 ) -> str:
     """Execute one drill under the standard protocol. Returns the status.
 
@@ -436,9 +558,12 @@ def run_drill(
     # The whole protocol sits inside the guard, not just the body: waiting
     # for the user to window in is exactly when a cancel is most likely,
     # and an abort there escaped the runner entirely in the first cut.
+    if scope is None:
+        scope = project_state()
     try:
         started = run.say(
-            f"TEST {drill.test_id} — {drill.title} [{drill.kind}]",
+            f"TEST {drill.test_id} — {drill.title} [{drill.kind}]"
+            + (f" ({scope})" if scope else ""),
             patience_s=drill.start_patience_s,
         )
         if started:
@@ -451,6 +576,24 @@ def run_drill(
                 )
             else:
                 run.say("Read-only: the bot sends nothing; you drive.")
+            # The start gate (M5 P6 R169): an IN-GAME test begins when the
+            # person whose character is standing there says so. Menu-capable
+            # tests (`menu_ok`) skip it, as does a client sitting in the
+            # menus — there is no exposed character for the gate to protect,
+            # and demanding chat that cannot be typed would deadlock.
+            if not drill.menu_ok and run.in_game():
+                run.say("Test ready — type OK in chat to begin.")
+                if not run.await_ok(timeout_s=drill.start_patience_s):
+                    run.say(f"TEST {drill.test_id} never began — no OK received.")
+                    append_log_row(
+                        log_path, drill, "NOT STARTED",
+                        "announced, but the user never typed OK", scope=scope,
+                    )
+                    print(
+                        f"\nTEST {drill.test_id} CONCLUDED — NOT STARTED: "
+                        "no OK received", flush=True,
+                    )
+                    return "NOT STARTED"
             run.say("TEST LIVE")
             result = body(run)
             status = "PASS"
@@ -487,5 +630,5 @@ def run_drill(
             print(f"(could not announce the conclusion in game: {exc})", flush=True)
 
     print(f"\nTEST {drill.test_id} CONCLUDED — {status}: {result}", flush=True)
-    append_log_row(log_path, drill, status, result)
+    append_log_row(log_path, drill, status, result, scope=scope)
     return status

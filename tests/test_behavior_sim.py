@@ -104,7 +104,17 @@ def test_the_patrol_reaches_its_points_rather_than_abandoning_them(patrol_sim):
         "points were abandoned: "
         + "; ".join(line for line in log if "giving up" in line)
     )
-    assert len([line for line in log if "patrol reached" in line]) == 8
+    # Per STEP, not across the run. Both the clearance and the sweep walk
+    # the ring now (the sweep could only ever see 46-67 subtiles of a
+    # 96-radius circle from a standstill — T51), so a bare count of 8
+    # across the whole run would pass with either one of them silently
+    # not patrolling at all.
+    for step in ("clear_radius", "pickup"):
+        reached = [
+            line for line in log
+            if "patrol reached" in line and f"step {step}:" in line
+        ]
+        assert len(reached) == 8, f"{step} reached {len(reached)} of 8 points"
 
 
 # -- the full run ---------------------------------------------------------------

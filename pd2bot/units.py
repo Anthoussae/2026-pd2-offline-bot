@@ -31,9 +31,29 @@ from pd2bot.memory import GameSession
 MAX_ROOMS = 64
 MAX_UNITS_PER_ROOM = 256
 
-# How far around the player counts as "nearby", in subtiles. Roughly what
-# the old room-neighbourhood covered, and comfortably beyond one screen
-# (~24 subtiles) so nothing the player can see is missed.
+# How far around the player counts as "nearby", in subtiles.
+#
+# **This is a ceiling, not the actual reach** — MEASURED, 2026-08-01 (T50,
+# read-only, in Cold Plains with 44 live monsters and 12 on screen). Scans
+# at 80, 120, 160, 240, 320 and an effectively unlimited radius all returned
+# the identical 65 units, with the furthest at 64 subtiles and **nothing
+# whatsoever between 64 and infinity**. So the binding constraint is the
+# CLIENT's own horizon, not this number: D2 only populates its unit hash
+# table for the rooms it has loaded, which is a ~3x3 room neighbourhood, and
+# 8x8-tile rooms make that ~60 subtiles of half-extent. Raising this
+# constant would buy nothing at all; covering more ground needs the
+# character to MOVE.
+#
+# The old comment here claimed this was "comfortably beyond one screen
+# (~24 subtiles)". T50 Part A measured the screen too, and that was wrong
+# in a way that mattered: the drawn region is a DIAMOND in world space, 19
+# to 38 subtiles from the player to the edge depending on direction — i.e.
+# 38 to 76 across, not 24. Every sizing figure derived from "~24" (R147,
+# and the patrol's whole radius table) understated a screen by 2-3x.
+#
+# Cost is not a reason to keep it small either: T50 timed the scan at ~7 ms
+# over 30 units and ~19 ms over 65, identically at every radius. The price
+# is the number of units, never the radius.
 PERCEPTION_RADIUS = 80
 MAX_STATS = 256
 

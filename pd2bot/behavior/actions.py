@@ -45,6 +45,19 @@ class MoveTo:
     """Walk toward a world position (disengage, retreat, repositioning)."""
 
     target: tuple[int, int]
+    # Which unit this walk is FOR, when it is for one. Purely informational
+    # — the executor ignores it and walks to `target` either way.
+    #
+    # It exists because a failed walk is information about a target, and the
+    # caller that has to act on that information is not the one that chose
+    # it. `clear_radius` absorbs `NavigationError` so one unreachable monster
+    # cannot end the run, and then needs to write that monster off or it
+    # re-decides the identical approach every tick forever. The combat module
+    # picked the target (`_select_target` prefers never-struck over nearest,
+    # so it is not recoverable by guessing), and this is the only honest way
+    # for it to say so. None means "not aimed at anything" — a retreat, a
+    # lateral drift, a patrol leg — and nothing gets blamed for those.
+    toward: int | None = None
 
 
 @dataclass(frozen=True)
