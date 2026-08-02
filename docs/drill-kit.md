@@ -81,7 +81,9 @@ powershell -File tools\drill-cancel.ps1
 The chat keywords are a **whitelist of exactly these tokens**, active
 only while a test is waiting or running — not a general command channel
 (that remains a separate, deferred trust decision; see
-`pd2bot/chatread.py`).
+`pd2bot/chatread.py`). A test may declare its own completion words the
+same way (`DrillRun.heard`, e.g. T52's **END**/**DONE**): still exact
+tokens, still test-scoped, never parsing.
 
 ## Logging
 

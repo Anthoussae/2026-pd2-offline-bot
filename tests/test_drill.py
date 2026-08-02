@@ -185,6 +185,18 @@ def test_a_nonsense_chat_line_neither_starts_nor_aborts(tmp_path):
     assert status == "PASS"  # the chatter was ignored, the OK still counted
 
 
+def test_heard_claims_only_its_own_words(tmp_path):
+    """Test-scoped vocabulary (T52's END): exact tokens, claimed once,
+    and never at the expense of the abort/OK words sharing the channel."""
+    chat = FakeChat()
+    run = gated_run(chat, ["nice weather", "Done", "ok"])
+    words = frozenset({"end", "done"})
+    assert not run.heard(words)  # chatter is not a completion word
+    assert run.heard(words)      # "Done" is, case-insensitively
+    assert not run.heard(words)  # claimed: it does not fire twice
+    assert run.await_ok(timeout_s=5.0)  # the "ok" was left unclaimed
+
+
 def test_scope_reaches_banner_and_log(tmp_path):
     chat = FakeChat()
     log = tmp_path / "log.md"

@@ -229,6 +229,20 @@ class DrillRun:
             self.cancelled = True
             raise DrillAborted("cancelled by request")
 
+    def heard(self, words: frozenset[str]) -> bool:
+        """Did the user just type one of `words` in chat? Claims the line.
+
+        For TEST-SCOPED vocabulary — a completion word like T52's END,
+        declared by the drill that needs it. Still a whitelist in the
+        chatread sense: exact lowercased tokens, consulted only while the
+        test runs, never parsing. The general command channel remains a
+        separate, deferred trust decision.
+        """
+        if self._chat_line() in words:
+            self._claim_chat_line()
+            return True
+        return False
+
     def await_ok(self, *, timeout_s: float) -> bool:
         """Wait for the user to type OK in game chat. True when they do.
 

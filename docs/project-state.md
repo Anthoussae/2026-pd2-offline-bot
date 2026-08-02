@@ -10,6 +10,6 @@ same commit as the transition itself.
 - **Next request ID:** R179 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
-- **Next test ID:** T52 (check `docs/drill-log.md`)
+- **Next test ID:** T53 (check `docs/drill-log.md`)
 
 Updated: 2026-08-01
