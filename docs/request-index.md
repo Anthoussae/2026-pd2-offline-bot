@@ -170,3 +170,5 @@ headings, noted in parentheses, say roughly where they fell).
 - M5 P6 R177 [decision] Say go for the live acceptance runs (survey-town, survey-cold-plains, patrol re-run) · 2026-08-02 01:37
 - M5 P6 R178 [execute] Restock healing potions (belt refill 2 short), then say go to relaunch · 2026-08-02 02:01
 
+- M5 P6 R179 [decision] Three pre-run-3 proposals: ALT policy, the potion overhaul, the narrative bot log · 2026-08-02 03:29
+
