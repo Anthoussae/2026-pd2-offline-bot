@@ -276,11 +276,20 @@ class RunServices:
     # survey is not a clearance, and the reflex ladder plus chicken stay
     # on above this either way.
     survey_engage_radius: int = 30
-    # Hard cap on survey walking, as legs. Not a tuning knob: a healthy
-    # survey of a Cold-Plains-sized area is well under this, so hitting
-    # it means something is wrong (a frontier that never closes, a
-    # target oscillation) and the game should end rather than stretch.
-    survey_max_legs: int = 200
+    # Hard cap on survey walking, as legs. A backstop against convergence
+    # bugs, not a tuning knob — but sized for a big Hell area with
+    # give-up retries included (~13 subtiles a leg, so this is several
+    # kilometres of walking). The first Cold Plains attempt showed the
+    # real risk is a LOOP that never sends survey legs at all, which this
+    # cannot catch; `survey_fight_patience` is what catches that.
+    survey_max_legs: int = 500
+    # Consecutive fighting ticks in which neither the distance to the
+    # gating monster nor its hp improves before the survey writes it off
+    # and walks on. ~10 s at the engine's tick rate: far longer than any
+    # deliberate combat pause (restrike 1 s, revives ~2 s), far shorter
+    # than the 14 minutes the first Cold Plains survey burned on a
+    # monster it could approach forever and reach never.
+    survey_fight_patience: int = 20
     # Whether this game has already alerted about a target on unsurveyed
     # ground (R176 Q2: no auto-survey mid-run — say it loudly, once, and
     # recommend the survey run instead). Once, because the same run will
@@ -1276,6 +1285,17 @@ class SurveyStep(_PickupMixin):
     # the clearance's rule (expiry on movement) in miniature, so a walled
     # monster cannot pin the survey the way one pinned the clearance.
     _unreachable: dict[int, tuple[int, int]] = field(default_factory=dict)
+    # Per-monster fight patience: (best distance, last hp, stale ticks).
+    # The first Cold Plains survey (2026-08-02) livelocked without this:
+    # a monster the bot could walk TOWARD but never reach — every dash
+    # succeeded, none arrived — kept winning the tick for 14 minutes, and
+    # only failed WALKS were being written off. Progress here is distance
+    # closing OR the monster's hp falling: a poison fight legitimately
+    # pauses (restrike cooldown, revives building) while the target dies,
+    # and counting those pauses as stalling would abandon kills mid-way.
+    _fight_progress: dict[int, tuple[int, int, int]] = field(
+        default_factory=dict
+    )
 
     def _fightable(self, m) -> bool:
         where = self._unreachable.get(m.unit_id)
@@ -1284,6 +1304,35 @@ class SurveyStep(_PickupMixin):
         if _chebyshev(m.position, where) <= self.services.unreachable_forget:
             return False
         del self._unreachable[m.unit_id]
+        self._fight_progress.pop(m.unit_id, None)
+        return True
+
+    def _fight_stalled(self, m, origin: tuple[int, int]) -> bool:
+        """Book one fighting tick against `m`; True when patience is spent.
+
+        Called once per tick for the monster gating the survey. Distance
+        closing or hp falling resets the count — only ticks in which the
+        fight moved neither needle count toward giving up.
+        """
+        distance = _chebyshev(m.position, origin)
+        best, last_hp, stale = self._fight_progress.get(
+            m.unit_id, (distance + 1, m.hp + 1, 0)
+        )
+        if distance < best or m.hp < last_hp:
+            self._fight_progress[m.unit_id] = (
+                min(distance, best), min(m.hp, last_hp), 0
+            )
+            return False
+        stale += 1
+        self._fight_progress[m.unit_id] = (best, last_hp, stale)
+        if stale < self.services.survey_fight_patience:
+            return False
+        self._unreachable[m.unit_id] = m.position
+        self.services.log(
+            f"survey: {stale} fighting ticks moved neither the distance to "
+            f"monster {m.unit_id} nor its hp — writing it off at "
+            f"{m.position} and surveying on (another look if it moves)"
+        )
         return True
 
     def _finish(self) -> StepOutcome:
@@ -1315,30 +1364,40 @@ class SurveyStep(_PickupMixin):
             return StepOutcome(done=False, waiting=True)
         origin = snap.player.position
 
-        # Fighting wins the tick, but only up close (R176 Q1).
+        # Fighting wins the tick, but only up close (R176 Q1) — and only
+        # while the fight is going somewhere. The first Cold Plains survey
+        # spent 14 minutes here on a monster every dash could walk toward
+        # and never reach: each walk SUCCEEDED, so the failed-walk
+        # write-off below never fired, and the survey starved.
+        # `_fight_stalled` is the other half, the same split the clearance
+        # learned (failed walks AND walks that succeed without arriving).
         near = [
             m for m in snap.live_monsters
             if _chebyshev(m.position, origin) <= self.services.survey_engage_radius
             and self._fightable(m)
         ]
         if near:
-            action = self.services.combat.engage(snap, ctx)
-            if action is not None:
-                if not self.send(ctx, action):
-                    blamed = getattr(action, "toward", None)
-                    target = next(
-                        (m for m in near if m.unit_id == blamed), None
-                    )
-                    if target is not None:
-                        self._unreachable[target.unit_id] = target.position
-                        self.services.log(
-                            f"survey: monster {target.unit_id} at "
-                            f"{target.position} is unreachable; walking on "
-                            "(it gets another look if it moves)"
+            gating = min(near, key=lambda m: _chebyshev(m.position, origin))
+            if self._fight_stalled(gating, origin):
+                pass  # written off: fall through and survey this tick
+            else:
+                action = self.services.combat.engage(snap, ctx)
+                if action is not None:
+                    if not self.send(ctx, action):
+                        blamed = getattr(action, "toward", None)
+                        target = next(
+                            (m for m in near if m.unit_id == blamed), None
                         )
-                return StepOutcome(done=False, acted=True, note="fighting")
-            # engage had nothing offensive to do this tick (poison
-            # settling, revives building): surveying on beats standing.
+                        if target is not None:
+                            self._unreachable[target.unit_id] = target.position
+                            self.services.log(
+                                f"survey: monster {target.unit_id} at "
+                                f"{target.position} is unreachable; walking on "
+                                "(it gets another look if it moves)"
+                            )
+                    return StepOutcome(done=False, acted=True, note="fighting")
+                # engage had nothing offensive to do this tick (poison
+                # settling, revives building): surveying on beats standing.
 
         if self._legs >= self.services.survey_max_legs:
             self.services.alert(
@@ -1354,7 +1413,16 @@ class SurveyStep(_PickupMixin):
         ]
         if not targets:
             return self._finish()
-        target = min(targets, key=lambda t: _chebyshev(t, origin))
+        # STICKY target choice: keep walking to the one we chose until it
+        # is reached, written off, or no longer frontier. Re-picking the
+        # nearest every tick let two near-equidistant frontiers trade
+        # "nearest" as the bot moved — each swap reset the progress
+        # counter, so the ping-pong could neither finish nor give up
+        # (the other half of the first Cold Plains survey's stall).
+        if self._current is not None and self._current in targets:
+            target = self._current
+        else:
+            target = min(targets, key=lambda t: _chebyshev(t, origin))
         distance = _chebyshev(target, origin)
 
         if distance <= self.services.patrol_reach:

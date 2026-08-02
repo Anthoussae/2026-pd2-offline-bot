@@ -1067,6 +1067,79 @@ def test_the_leg_budget_ends_a_survey_that_cannot_converge():
     assert any("leg budget" in a for a in alerts)
 
 
+def test_a_fight_going_nowhere_stops_gating_the_survey():
+    """The first Cold Plains survey's 14-minute stall, as a regression.
+
+    Every dash toward the monster SUCCEEDS (walkable ground) and none
+    arrives — so the failed-walk write-off never fires. Neither distance
+    nor the monster's hp moves; after `survey_fight_patience` such ticks
+    the monster is written off and the survey resumes.
+    """
+    clock = Clock()
+    combat = StubCombat([MoveTo((1015, 1000), toward=7)] * 100)
+    step, svc, world, here, executor, ctx = surveying(
+        clock, [(1060, 1000)], combat=combat
+    )
+    walled = monster(7, (1020, 1000))  # inside the engage radius, forever
+    fighting = 0
+    outcome = None
+    for _ in range(svc.survey_fight_patience + 60):
+        # The executor "moves" the player only for survey legs; combat
+        # dashes go nowhere, like a fence the path skirts endlessly.
+        outcome = step.step(snap(pos=here["pos"], monsters=[walled]), ctx)
+        if outcome.note == "fighting":
+            fighting += 1
+            here["pos"] = HOME  # dashes never actually move us
+        clock.advance(0.5)
+        if outcome.done:
+            break
+    assert outcome is not None and outcome.done, "the survey must escape the fight"
+    assert fighting <= svc.survey_fight_patience + 1
+    assert 7 in step._unreachable
+
+
+def test_a_fight_that_is_working_keeps_the_tick():
+    """Distance closing or hp falling is progress; patience never fires."""
+    clock = Clock()
+    combat = StubCombat([MoveTo((1015, 1000), toward=7)] * 100)
+    step, svc, world, here, executor, ctx = surveying(
+        clock, [(1060, 1000)], combat=combat
+    )
+    hp = 100
+    for _ in range(svc.survey_fight_patience * 2):
+        dying = monster(7, (1010, 1000))
+        dying = type(dying)(**{**dying.__dict__, "hp": hp})
+        outcome = step.step(snap(monsters=[dying]), ctx)
+        assert outcome.note == "fighting", "a dying monster keeps the tick"
+        hp = max(1, hp - 1)  # the poison is working
+        clock.advance(0.5)
+    assert 7 not in step._unreachable
+
+
+def test_the_survey_target_is_sticky_between_ticks():
+    """Two near-equidistant frontiers must not trade 'nearest' forever."""
+    clock = Clock()
+    step, svc, world, here, executor, ctx = surveying(
+        clock, [(1060, 1000), (940, 1000)]  # opposite sides, equal-ish
+    )
+    outcome = None
+    for _ in range(200):
+        outcome = step.step(snap(pos=here["pos"]), ctx)
+        clock.advance(0.5)
+        if outcome.done:
+            break
+    assert outcome is not None and outcome.done
+    assert world.points == [], "both sides must eventually be visited"
+    # The walk must not alternate directions: once a target is chosen the
+    # legs run monotonically toward it until it is dealt with.
+    moves = [a.target[0] for a in executor.actions if isinstance(a, MoveTo)]
+    switches = sum(
+        1 for a, b, c in zip(moves, moves[1:], moves[2:], strict=False)
+        if (b - a) * (c - b) < 0
+    )
+    assert switches <= 1, f"direction flapped {switches} times: {moves}"
+
+
 def test_a_survey_with_no_service_finishes_honestly():
     clock = Clock()
     svc = services(clock)  # survey_targets stays None
