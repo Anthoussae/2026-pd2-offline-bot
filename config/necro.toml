@@ -115,10 +115,11 @@ disengage_hp_pct = 70.0
 
 # Rung 7.5 — merc first aid (R179, the user's numbers): merc alive and
 # below merc_heal_below_pct of its hp, with a healing potion anywhere in
-# the belt -> Alt+<column key> feeds it one. Sits BELOW every
-# player-survival rung (the merc gets a potion only on a tick the player
-# needed nothing) and is paced by merc_heal_retry_s. Never in town — the
-# preamble's Akara visit heals the merc for free.
+# the belt -> Shift+<column key> feeds it one (the chord is SHIFT, not
+# Alt — corrected at R183 after T54 run 2 fed the player three times).
+# Sits BELOW every player-survival rung (the merc gets a potion only on
+# a tick the player needed nothing) and is paced by merc_heal_retry_s.
+# Never in town — the preamble's Akara visit heals the merc for free.
 merc_heal_below_pct = 50.0
 merc_heal_retry_s = 3.0
 

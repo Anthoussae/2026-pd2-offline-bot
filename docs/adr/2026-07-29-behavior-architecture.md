@@ -145,10 +145,13 @@ this ADR is where the superseded details were written down:
   column would take it. Merely missing potions is a loud notice and a
   run that continues; the R178 mixed-belt halt cannot recur.
 - **Rung 7.5, merc first aid (R179).** Merc alive and under 50% with a
-  healing potion anywhere in the belt → an Alt+key chord
-  (`GiveMercPotion`, `input.press_key_with_alt` — modifier settled down
-  before the key, released in a `finally`). Below every player-survival
-  rung, paced on attempt, never in town.
+  healing potion anywhere in the belt → a Shift+key chord
+  (`GiveMercPotion`, `input.press_key_with_shift` — modifier settled
+  down before the key, released in a `finally`). Below every
+  player-survival rung, paced on attempt, never in town. The chord was
+  first built on R179's assumed Alt; T54 run 2 proved the player drank
+  every "fed" potion, and R183's by-hand check corrected it to Shift —
+  a binding is verified against the game before it is automated.
 - **The narrative channel (`pd2bot/narrate.py`, R179).** A per-run,
   wall-clock-stamped `logs/run-<stamp>.log` of BROAD acts where waits
   explain themselves (each preamble station narrates its outcome with

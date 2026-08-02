@@ -152,7 +152,7 @@ class GameActionExecutor:
             # A keypress chord, same reasoning as DrinkPotion: T48 proved
             # keypresses land mid-animation, so no cast check queues it.
             belt_give_merc(self.gated, action.column)
-            self._record(action, f"alt+key {action.column + 1} (merc)")
+            self._record(action, f"shift+key {action.column + 1} (merc)")
             return
 
         # Everything below CLICKS, and a click inside a cast animation is the

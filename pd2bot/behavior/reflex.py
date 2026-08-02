@@ -21,9 +21,9 @@ is config, sourced from the class TOML):
     7  disengage  bone armor down AND on cooldown AND hp < 70%: retreat
                   from the pack; no attacking until rearmored.
     7.5 merc heal merc alive and hp < 50% with a healing potion in the
-                  belt: Alt+<column key> feeds it one (R179). Below every
-                  player rung, above the armor upkeep; paced, never in
-                  town.
+                  belt: Shift+<column key> feeds it one (R179; chord
+                  corrected at R183). Below every player rung, above the
+                  armor upkeep; paced, never in town.
     8  upkeep     bone armor off cooldown and absorb < 75% (fallback when
                   the stat is unreadable: after being hit): recast.
                   Revive raising is DELEGATED to the combat module's
@@ -129,9 +129,10 @@ class ReflexConfig:
     # Rung 7 — disengage.
     disengage_hp_pct: float = 70.0
     # Rung 7.5 — merc first aid (R179, the user's numbers): merc alive and
-    # below this hp%, with a healing potion anywhere in the belt -> Alt+key
-    # of the column that holds one. Upkeep-tier: below every player-survival
-    # rung on purpose, and paced on attempt like the armor recast.
+    # below this hp%, with a healing potion anywhere in the belt ->
+    # Shift+key of the column that holds one (chord corrected at R183).
+    # Upkeep-tier: below every player-survival rung on purpose, and paced
+    # on attempt like the armor recast.
     merc_heal_below_pct: float = 50.0
     merc_heal_retry_s: float = 3.0
     # Rung 8 — bone armor upkeep.
@@ -662,7 +663,7 @@ class ReflexLadder:
 
             # Rung 7.5 — merc first aid (R179). Below EVERY player-survival
             # rung on purpose: the merc gets a potion only on a tick the
-            # player needed nothing. Alt+key of a column that actually
+            # player needed nothing. Shift+key of a column that actually
             # holds a healing potion (the type search — a heal serves the
             # merc from the "wrong" column too). Paced on ATTEMPT, not
             # cooled down (the stage B run 9 rule): the proof it helped is

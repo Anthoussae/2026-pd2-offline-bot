@@ -27,7 +27,8 @@ class DrinkPotion:
 
 @dataclass(frozen=True)
 class GiveMercPotion:
-    """Alt + one belt column's key: feed the merc that potion (R179).
+    """Shift + one belt column's key: feed the merc that potion (R179;
+    chord corrected from Alt to Shift at R183, user-verified).
 
     Always a healing column in practice — the ladder's merc rung picks a
     column that actually holds one — but the action carries only the

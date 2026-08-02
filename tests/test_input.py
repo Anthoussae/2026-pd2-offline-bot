@@ -166,24 +166,24 @@ def test_refused_stand_still_click_sends_no_shift(sent):
     assert sent == []
 
 
-def test_alt_chord_holds_the_modifier_around_the_key(sent):
-    """The merc-feed chord (R179): Alt provably down before the belt key,
-    provably still down when the key releases — the R113 same-frame race,
-    applied to a keyboard modifier."""
-    gated(make_session()).press_key_with_alt(0x33)
-    assert sent.index(("key", 0x12, 0)) < sent.index(("key", 0x33, 0))
-    assert sent.index(("key", 0x33, 0x0002)) < sent.index(("key", 0x12, 0x0002))
+def test_shift_chord_holds_the_modifier_around_the_key(sent):
+    """The merc-feed chord (R179, corrected to Shift at R183): Shift
+    provably down before the belt key, provably still down when the key
+    releases — the R113 same-frame race, applied to a keyboard chord."""
+    gated(make_session()).press_key_with_shift(0x33)
+    assert sent.index(("key", 0x10, 0)) < sent.index(("key", 0x33, 0))
+    assert sent.index(("key", 0x33, 0x0002)) < sent.index(("key", 0x10, 0x0002))
 
 
-def test_alt_chord_is_gated(sent):
+def test_shift_chord_is_gated(sent):
     with pytest.raises(InputRefused):
-        gated(make_session(), foreground=False).press_key_with_alt(0x33)
+        gated(make_session(), foreground=False).press_key_with_shift(0x33)
     assert sent == []
 
 
-def test_alt_released_when_the_key_send_fails(sent, monkeypatch):
-    """A stuck Alt would reinterpret every later belt key as a merc feed;
-    the release must survive a mid-chord failure."""
+def test_shift_released_when_the_key_send_fails(sent, monkeypatch):
+    """A stuck Shift would silently reinterpret every later click and
+    belt key; the release must survive a mid-chord failure."""
 
     def explode(vk, flags):
         sent.append(("key", vk, flags))
@@ -192,5 +192,5 @@ def test_alt_released_when_the_key_send_fails(sent, monkeypatch):
 
     monkeypatch.setattr("pd2bot.input._send_key", explode)
     with pytest.raises(OSError):
-        gated(make_session()).press_key_with_alt(0x33)
-    assert ("key", 0x12, 0x0002) in sent
+        gated(make_session()).press_key_with_shift(0x33)
+    assert ("key", 0x10, 0x0002) in sent

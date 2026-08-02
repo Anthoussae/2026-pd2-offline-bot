@@ -69,8 +69,12 @@ without handing it the whole navigator.
 The belt refill got precise failure semantics (halt = stock + room +
 failed click; anything else continues loudly). A merc-heal rung was
 added at the bottom of the survival ladder, using the same
-modifier-key-race discipline as Shift-clicks (Alt provably down before
-the belt key). A `Narrator` writes one human-readable file per run,
+modifier-key-race discipline as Shift-clicks (the modifier provably
+down before the belt key). A postscript worth keeping: the chord was
+built on an assumed Alt binding, and the live test caught the player
+drinking every "fed" potion — the real chord is Shift (R183). Verify a
+binding against the system before automating it; an assumption about an
+interface is a bug that types at full speed. A `Narrator` writes one human-readable file per run,
 with the coarseness contract tested. And a cached, read-only route
 service lets patrol/survey/approach legs follow the map's answer, with
 "no route exists" becoming an instant, honest write-off instead of a

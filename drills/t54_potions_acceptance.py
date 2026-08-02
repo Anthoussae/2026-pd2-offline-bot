@@ -7,20 +7,26 @@ Run 1's stage 1 (aborted, user redesign): it required the merc injured
 below 50%, and reliably lowering merc hp proved impractical to stage.
 The rung's own trigger (<50%, paced, never in town) stays as shipped
 and sim-tested — the user trusts it. What needs LIVE proof is the
-DELIVERY: the Alt+key chord reaching the game as a merc feed rather
-than a player drink. The instrument for that is the user's ears.
+DELIVERY: the chord reaching the game as a merc feed rather than a
+player drink. The instrument for that is the user's ears.
+
+Run 2 (FAILED) is why the chord is now SHIFT: three Alt chords each
+consumed a potion and the merc never spoke — the player drank them all.
+R183's by-hand check found the real binding, Shift+(1-4). This run also
+bought the rule that every stage announces its own PASS/FAIL loudly in
+chat (user feedback: the end of a test must be unmistakable).
 
 ## Stage 1 — the feed, confirmed by ear (merc at any hp)
 
 Merc alive, sound on, a healing potion somewhere in the belt (the user
 has shuffled the columns — the type search picks the column, which is
-part of what is under test). The drill sends ONE Alt+chord through the
-executor, reports which key and the column's before/after count, and
-asks in chat: did she say "thank you"? **YES** = the feed landed
+part of what is under test). The drill sends ONE Shift+chord through
+the executor, reports which key and the column's before/after count,
+and asks in chat: did she say "thank you"? **YES** = the feed landed
 (pass); **NO** = up to 2 more attempts, then FAILED. A NO with the
 column count dropping is the telling failure: the key landed but the
-Alt did not, i.e. the player drank it — exactly the race the settled
-chord exists to prevent.
+modifier did not, i.e. the player drank it — exactly the race the
+settled chord exists to prevent.
 
 ## Stage 2 — mixed belt + full patrol game (T53's run, R178's belt)
 
@@ -67,6 +73,18 @@ from pd2bot.skills import SkillSwitchFailed  # noqa: E402
 from pd2bot.wiring import BotPaths, build_bot, describe  # noqa: E402
 
 SETUP_PATIENCE_S = 600.0  # how long each stage waits for the user's setup
+
+
+def _fail(run: DrillRun, stage: str, short: str, detail: str = "") -> None:
+    """End the test loudly and unmistakably (run 2's user feedback: the
+    end of a test must not be missable). One short chat line says the
+    test is OVER and whose hands the character is in; the detail goes to
+    the bridge transcript, where length costs nothing — a long reason in
+    chat truncates, and a truncated verdict reads like an ongoing test."""
+    if detail:
+        print(f"{stage} detail: {detail}", flush=True)
+    run.say(f"{stage} FAILED — TEST T54 OVER. Hands back to you.")
+    raise RuntimeError(f"{stage.lower()}: {short}")
 FEED_ATTEMPTS = 3  # chords offered before stage 1 calls itself FAILED
 ANSWER_PATIENCE_S = 120.0  # how long each YES/NO question waits
 # Test-scoped answer vocabulary (the T52 END/DONE pattern): exact tokens,
@@ -81,9 +99,9 @@ T54 = Drill(
     sends_input=True,
     instructions=(
         "TWO STAGES. Stage 1: merc alive, SOUND ON, healing somewhere in",
-        "the belt (shuffled is perfect). The drill sends ONE Alt+chord and",
-        "asks: did she say thank you? Answer YES or NO in chat (up to 3",
-        "tries). Any merc hp is fine - your ears are the instrument.",
+        "the belt (shuffled is perfect). The drill sends ONE Shift+chord",
+        "and asks: did she say thank you? Answer YES or NO in chat (up to",
+        "3 tries). Any merc hp is fine - your ears are the instrument.",
         "Stage 2: belt stays mixed (mana in a healing column; scarce",
         "healing reproduces R178 exactly), type OK again - THE BOT THEN",
         "PLAYS one full patrol game like T53 and must NOT halt on the belt.",
@@ -94,7 +112,7 @@ T54 = Drill(
 
 
 def _stage1_merc_feed(run: DrillRun, bot) -> str:
-    """One Alt+chord through the executor; the user's ears judge it.
+    """One Shift+chord through the executor; the user's ears judge it.
 
     The rung's <50% trigger stays as shipped and sim-tested (the user's
     call, run 1 redesign): what live must prove is the DELIVERY — the
@@ -141,18 +159,16 @@ def _stage1_merc_feed(run: DrillRun, bot) -> str:
         repeat_every_s=45.0,
         timeout_s=SETUP_PATIENCE_S,
     ):
-        raise RuntimeError(
-            "stage 1 preconditions never held (merc alive + healing in belt)"
-        )
+        _fail(run, "STAGE 1", "preconditions never held (merc + belt healing)")
 
     attempts = []
     for attempt in range(1, FEED_ATTEMPTS + 1):
         run.check_cancel()
         if run.player_is_dead():
-            raise RuntimeError("player reads dead — sending nothing")
+            _fail(run, "STAGE 1", "player reads dead — sending nothing")
         column = heal_column()
         if column is None:
-            raise RuntimeError("no healing potion left in the belt")
+            _fail(run, "STAGE 1", "no healing potion left in the belt")
         before = sum(
             1 for i in carried().belt if i.belt_column == column
         )
@@ -164,9 +180,9 @@ def _stage1_merc_feed(run: DrillRun, bot) -> str:
             continue
         time.sleep(1.0)  # let the belt read settle before counting
         after = sum(1 for i in carried().belt if i.belt_column == column)
-        attempts.append(f"Alt+key {column + 1} ({before}->{after})")
+        attempts.append(f"Shift+key {column + 1} ({before}->{after})")
         run.say(
-            f"Chord {attempt}: Alt+key {column + 1}, column count "
+            f"Chord {attempt}: Shift+key {column + 1}, column count "
             f"{before}->{after}. Did she say thank you? YES or NO."
         )
         answer = None
@@ -181,8 +197,9 @@ def _stage1_merc_feed(run: DrillRun, bot) -> str:
                 break
             time.sleep(0.2)
         if answer is None:
-            raise RuntimeError(
-                f"no YES/NO within {ANSWER_PATIENCE_S:.0f}s of chord {attempt}"
+            _fail(
+                run, "STAGE 1",
+                f"no YES/NO within {ANSWER_PATIENCE_S:.0f}s of chord {attempt}",
             )
         if answer:
             result = (
@@ -192,11 +209,14 @@ def _stage1_merc_feed(run: DrillRun, bot) -> str:
             print(result, flush=True)
             return result
         run.say("Noted. Trying again." if attempt < FEED_ATTEMPTS else "Noted.")
-    raise RuntimeError(
-        f"{len(attempts)} chord(s) sent ({'; '.join(attempts)}), none "
-        "earned a thank-you — a falling column count with NO means the "
-        "player drank it (the Alt did not land)"
+    _fail(
+        run, "STAGE 1",
+        f"{len(attempts)} chord(s), no thank-you — player drank them",
+        detail="; ".join(attempts)
+        + " — a falling column count with NO means the key landed without "
+        "its modifier (the player drank it)",
     )
+    raise AssertionError("unreachable")  # _fail always raises
 
 
 def _stage2_mixed_belt_run(run: DrillRun, stop_requested, aborted) -> str:
@@ -205,7 +225,7 @@ def _stage2_mixed_belt_run(run: DrillRun, stop_requested, aborted) -> str:
     run.say("healing (~2 reachable) reproduces R178 exactly; plenty is fine")
     run.say("too. Type OK when ready — the bot then takes over.")
     if not run.await_ok(timeout_s=SETUP_PATIENCE_S):
-        raise RuntimeError("stage 2 never got its OK")
+        _fail(run, "STAGE 2", "never got its OK")
 
     bot = build_bot(
         paths=replace(BotPaths(), run=REPO / "runs" / "cold-plains-patrol.toml"),
@@ -228,10 +248,11 @@ def _stage2_mixed_belt_run(run: DrillRun, stop_requested, aborted) -> str:
         game_lines.append(summary)
 
     if aborted[0]:
+        run.say("TEST T54 ABORTED — hands back to you.")
         raise DrillAborted("stopped by request mid-run")
     cycle_summary = report.summary() if hasattr(report, "summary") else str(report)
     if getattr(report, "completed", None) == 0:
-        raise RuntimeError(f"no clean cycle: {cycle_summary}")
+        _fail(run, "STAGE 2", "no clean cycle", detail=cycle_summary)
 
     # The narrative log (P3): the run must have left a readable story.
     logs = sorted(
@@ -239,7 +260,7 @@ def _stage2_mixed_belt_run(run: DrillRun, stop_requested, aborted) -> str:
         key=lambda p: p.stat().st_mtime,
     )
     if not logs:
-        raise RuntimeError("no narrative log was written under logs/")
+        _fail(run, "STAGE 2", "no narrative log was written under logs/")
     narrative = logs[-1]
     lines = narrative.read_text(encoding="utf-8").splitlines()
     belt_lines = [ln for ln in lines if "belt" in ln]
@@ -281,8 +302,9 @@ def t54_body(run: DrillRun) -> str:
         should_stop=stop_requested,
     )
     stage1 = _stage1_merc_feed(run, bot)
-    run.say("Stage 1 done: " + stage1)
+    run.say("STAGE 1 PASSED — she said thank you. On to stage 2.")
     stage2 = _stage2_mixed_belt_run(run, stop_requested, aborted)
+    run.say("TEST T54 COMPLETE — both stages passed. Hands back to you.")
     return f"{stage1} | {stage2}"
 
 

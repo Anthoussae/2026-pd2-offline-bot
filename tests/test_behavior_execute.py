@@ -40,8 +40,8 @@ class FakeGated:
     def press_key(self, vk):
         self.pressed.append(vk)
 
-    def press_key_with_alt(self, vk):
-        self.pressed.append(("alt", vk))
+    def press_key_with_shift(self, vk):
+        self.pressed.append(("shift", vk))
 
     def click_world(self, wx, wy, button="left", *, stand_still=False):
         self.world_clicks.append(((wx, wy), button, stand_still))
@@ -198,11 +198,11 @@ def test_drink_presses_the_column_key(monkeypatch):
     assert "key 1" in executor.trace[0].detail
 
 
-def test_give_merc_potion_presses_the_alt_chord(monkeypatch):
+def test_give_merc_potion_presses_the_shift_chord(monkeypatch):
     executor, gated, _, _ = make(monkeypatch)
     executor.execute(GiveMercPotion(2))
-    assert gated.pressed == [("alt", VK_3)]
-    assert "alt+key 3" in executor.trace[0].detail
+    assert gated.pressed == [("shift", VK_3)]
+    assert "shift+key 3" in executor.trace[0].detail
 
 
 def test_merc_feed_never_waits_for_a_cast(monkeypatch):
@@ -212,7 +212,7 @@ def test_merc_feed_never_waits_for_a_cast(monkeypatch):
     executor.execute(CastSelf(offsets.SKILL_BONE_ARMOR))
     world["mode"] = offsets.PLAYER_MODE_CASTING
     executor.execute(GiveMercPotion(2))
-    assert ("alt", VK_3) in gated.pressed
+    assert ("shift", VK_3) in gated.pressed
 
 
 def test_self_cast_verifies_the_switch_before_clicking(monkeypatch):

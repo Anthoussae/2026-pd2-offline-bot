@@ -68,6 +68,20 @@ status = run_drill(T99, t99_body, run=DrillRun(GameSession()))
 5. `TEST T99 CONCLUDED — PASS` (or FAILED / ABORTED / NOT STARTED), with
    a trimmed reason on failure.
 
+**Endings must be unmistakable** (user feedback, T54 run 2): a
+multi-stage body announces each stage's own PASS/FAIL in chat the
+moment it is decided — a short line naming the test as OVER and whose
+hands the character is in (`STAGE 1 FAILED — TEST T54 OVER. Hands back
+to you.`). Failure REASONS stay short in chat and long in the bridge
+transcript: a truncated verdict in chat reads like a test still
+running.
+
+**Bindings are verified before they are automated** (T54 run 2, R183):
+a chord or hotkey assumed from memory gets one by-hand check against
+the live game before any drill or rung sends it. The Alt-vs-Shift merc
+feed cost three potions to learn this; reading the game's own key
+bindings programmatically is an open follow-up.
+
 ## Aborting
 
 - **Type `abort` or `abort test` in game chat** (case-insensitive) — at
