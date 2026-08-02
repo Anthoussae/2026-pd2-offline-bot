@@ -115,6 +115,13 @@ when computing the exact answer up front would be too slow; "good guess
 math." In A*, the heuristic is the straight-line distance to the goal,
 used to decide which route to try extending next.
 
+**hysteresis** — deliberately making a system's choices sticky so tiny
+fluctuations cannot flip it back and forth: a thermostat heats to 21°
+then stays off until 19°, an autoscaler scales up at 80% and down at
+40%. Our survey keeps its chosen frontier target until it resolves,
+instead of re-picking "nearest" every tick and flapping between two
+equidistant ones. *(First seen: 2026-08-02, frontiers and livelocks.)*
+
 **hook** — a defined point where a host program runs code *you*
 register when a named event happens, so you extend the host without
 modifying it. Claude Code's Stop hook runs our turn-end alert; git
@@ -156,6 +163,14 @@ style violations; a formatter rewrites layout into one consistent shape so the
 team never argues about it. This project uses `ruff` for both. First seen in
 [from script to package](2026-07-28-from-script-to-package.md).
 
+**livelock** — the busy cousin of a hang: the program works furiously —
+sending, walking, fighting — while achieving nothing, forever. Worse
+than standing still, because activity defeats watchdogs that only ask
+"is anything happening?" The cure is a real progress definition (for
+our survey: distance closing or the target's hp falling) and a budget
+of progress-free effort before giving up. *(First seen: 2026-08-02,
+frontiers and livelocks.)*
+
 **memory offset** — the fixed distance, in bytes, from the start of a data
 structure to one of its fields. A table of offsets plus a starting address
 is enough to read another program's live data. Offsets are true for one
@@ -188,6 +203,12 @@ state left untouched for a human. The opposite pole is fail-recover;
 choosing between them per failure class is a real engineering decision.
 Our death latch is fail-stop by explicit user decision. First seen in
 [the game cycle](2026-07-29-the-game-cycle.md).
+
+**frontier (exploration)** — in mapping an unknown space: known ground
+that borders unknown ground. Walking to a frontier converts unknown to
+known and moves the frontier outward; "no frontier left" is the
+built-in definition of fully explored. *(First seen: 2026-08-02,
+frontiers and livelocks.)*
 
 **guard clause / gate** — a check placed *inside* the one function that
 performs a risky action, so no caller can skip it by forgetting. Our
