@@ -98,3 +98,4 @@ and have one fewer cell; new rows carry milestone/phase.
 | T53 | 2 | 2026-08-02 03:51 | M5 P6 | patrol acceptance — cleanse hygiene, reposition, full-atlas pathing | bot control | PASS | 464s; cycles: 1, clean: 1 #1: [CVRL]; game 1: ticks: 245, reflex fires: 13, steps done: town_preamble, waypoint, clear_radius, pickup, done |
 | T54 | 1 | 2026-08-02 16:32 | M5 P6 | potions acceptance — merc first aid, mixed-belt refill, run narrative | hybrid | ABORTED | cancelled by request |
 | T54 | 2 | 2026-08-02 16:36 | M5 P6 | potions acceptance — merc feed by ear, mixed-belt refill, run narrative | hybrid | FAILED | RuntimeError: 3 chord(s) sent (Alt+key 4 (3->2); Alt+key 4 (2->1); Alt+key 4 (1->0)), none earned a thank-you — a falling column count with NO means the player drank it (the Alt did not land) |
+| T54 | 3 | 2026-08-02 16:49 | M5 P6 | potions acceptance — merc feed by ear, mixed-belt refill, run narrative | hybrid | FAILED | RuntimeError: stage 2: no clean cycle |

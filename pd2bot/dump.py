@@ -83,9 +83,11 @@ def format_snapshot(snap: GameSnapshot, verbose: bool = False) -> str:
         alive = [a for a in snap.allies if a.is_alive]
         names = []
         for ally in alive:
-            fraction = ally.hp_fraction
-            health = f" {fraction:.0%}" if fraction is not None else ""
-            names.append(f"{ally.merc_kind or f'summon {ally.kind}'}{health}")
+            # life_pct, not hp/max_hp: an ally's current hp is on the
+            # 0-128 client scale (the full merc used to print "8%" here).
+            names.append(
+                f"{ally.merc_kind or f'summon {ally.kind}'} {ally.life_pct:.0f}%"
+            )
         lines.append(f"  yours: {len(alive)} — {', '.join(names) or 'none alive'}")
         if not snap.in_town:
             lines.append(

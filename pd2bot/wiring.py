@@ -409,6 +409,12 @@ class LiveBot:
             config=self.engine_config,
             clock=self.clock,
             narrate=narrator.narrate,
+            # The outside stop order (drill abort, operator request):
+            # polled at the top of every tick, so a chat abort takes
+            # effect within one tick wherever the run is — the town
+            # layer's waits were previously the ONLY place this was
+            # consulted (T54 run 3).
+            should_stop=self.should_stop,
         )
 
     def engines(self) -> list[BehaviorEngine]:

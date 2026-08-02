@@ -68,19 +68,42 @@ status = run_drill(T99, t99_body, run=DrillRun(GameSession()))
 5. `TEST T99 CONCLUDED — PASS` (or FAILED / ABORTED / NOT STARTED), with
    a trimmed reason on failure.
 
-**Endings must be unmistakable** (user feedback, T54 run 2): a
-multi-stage body announces each stage's own PASS/FAIL in chat the
-moment it is decided — a short line naming the test as OVER and whose
-hands the character is in (`STAGE 1 FAILED — TEST T54 OVER. Hands back
-to you.`). Failure REASONS stay short in chat and long in the bridge
-transcript: a truncated verdict in chat reads like a test still
-running.
+## The user's standing test preferences (2026-08-02, T54 runs 1-3)
 
-**Bindings are verified before they are automated** (T54 run 2, R183):
-a chord or hotkey assumed from memory gets one by-hand check against
-the live game before any drill or rung sends it. The Alt-vs-Shift merc
-feed cost three potions to learn this; reading the game's own key
-bindings programmatically is an open follow-up.
+These are the operator's own rules for every test, recorded at their
+request. They are conventions of this kit, not suggestions:
+
+1. **Endings must be unmistakable.** A multi-stage body announces each
+   stage's own PASS/FAIL in chat the moment it is decided — a short
+   line naming the test as OVER and whose hands the character is in
+   (`STAGE 1 FAILED — TEST T54 OVER. Hands back to you.`). Failure
+   REASONS stay short in chat and long in the bridge transcript: a
+   truncated verdict in chat reads like a test still running.
+2. **Abort is immediate, everywhere.** Typing `abort` (any casing) in
+   chat must stop the test within a tick — at a gate, mid-stage, or
+   mid-run — and must announce `TEST <id> ABORTED` out loud. Enforced
+   end-to-end since run 3: drill waits poll the channel, and the run
+   engine checks `should_stop` at the top of EVERY tick
+   (`engine.StopRequested`, which leaves the game the way `IdleBail`
+   does). Before that, the stop channel reached only town waits, and an
+   in-field abort went unheard until the refusal limit tripped.
+3. **Stages must not bleed.** A multi-stage test states each stage's
+   scope, announces its boundary, and leaves nothing running into the
+   next stage. Note the corollary from run 3: shipped AUTOMATIC
+   behavior (a reflex rung) firing during a later stage is not stage
+   bleed — but a test whose earlier stage changes state that ARMS such
+   behavior must say so in its instructions.
+4. **Bindings are verified before they are automated** (R183): a chord
+   or hotkey assumed from memory gets one by-hand check against the
+   live game before any drill or rung sends it. The Alt-vs-Shift merc
+   feed cost three potions to learn this; reading the game's own key
+   bindings programmatically is an open follow-up.
+5. **Mixed and foreign belts are normal.** Tests (and the shipped belt
+   logic) must anticipate columns holding a MIXTURE of potion types and
+   accidental non-standard potions (antidotes, thawing) anywhere in the
+   belt: the belt key consumes the column's BOTTOM item, so every
+   type check reads the bottom occupant, and no state of the belt is
+   ever an error — at worst it is a column the search skips.
 
 ## Aborting
 

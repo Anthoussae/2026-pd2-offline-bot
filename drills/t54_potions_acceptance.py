@@ -16,6 +16,16 @@ R183's by-hand check found the real binding, Shift+(1-4). This run also
 bought the rule that every stage announces its own PASS/FAIL loudly in
 chat (user feedback: the end of a test must be unmistakable).
 
+Run 3 (stage 1 PASSED, stage 2 FAILED) bought three more fixes, all in
+the shipped code rather than this drill: the merc's hp reads on the
+client's 0-128 scale (a full rogue read "8%" and was fed all game); a
+belt key consumes the column's BOTTOM potion, so type checks now look
+at the bottom occupant (a mana under healing was fed to the merc — "I
+can't use that" — and mixed columns/antidotes are normal states); and
+the engine now polls the stop channel every tick (`StopRequested`), so
+a chat abort lands within a tick anywhere in a run instead of only in
+town waits.
+
 ## Stage 1 — the feed, confirmed by ear (merc at any hp)
 
 Merc alive, sound on, a healing potion somewhere in the belt (the user
@@ -83,7 +93,9 @@ def _fail(run: DrillRun, stage: str, short: str, detail: str = "") -> None:
     chat truncates, and a truncated verdict reads like an ongoing test."""
     if detail:
         print(f"{stage} detail: {detail}", flush=True)
-    run.say(f"{stage} FAILED — TEST T54 OVER. Hands back to you.")
+    # Short patience: when chat is undeliverable (ESC menu, alt-tabbed),
+    # three 60 s retries kept run 3's ending hanging for minutes.
+    run.say(f"{stage} FAILED — TEST T54 OVER. Hands back to you.", patience_s=15.0)
     raise RuntimeError(f"{stage.lower()}: {short}")
 FEED_ATTEMPTS = 3  # chords offered before stage 1 calls itself FAILED
 ANSWER_PATIENCE_S = 120.0  # how long each YES/NO question waits
@@ -134,15 +146,18 @@ def _stage1_merc_feed(run: DrillRun, bot) -> str:
 
     def heal_column() -> int | None:
         """The rung's own search order: configured healing columns first,
-        then the rest — the type search under test, on a shuffled belt."""
+        then the rest — and only a column whose BOTTOM potion is healing,
+        because that is what the key will actually send (run 3: a mana
+        under healing went to the merc and she refused it)."""
         items = carried().belt
         others = tuple(
             c for c in range(offsets.BELT_COLUMNS) if c not in cfg.heal_columns
         )
         for column in (*cfg.heal_columns, *others):
-            if any(
-                i.belt_column == column and i.is_healing_potion for i in items
-            ):
+            occupants = [i for i in items if i.belt_column == column]
+            if occupants and min(
+                occupants, key=lambda i: i.belt_slot or 0
+            ).is_healing_potion:
                 return column
         return None
 

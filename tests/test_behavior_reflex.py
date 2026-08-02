@@ -79,8 +79,15 @@ def snap(pl=None, area=FIELD, monsters=(), allies=()):
     )
 
 
-def merc(hp=100, max_hp=100):
-    """The rogue hireling (kind 271), friendly, at the player's side."""
+def merc(hp=128, max_hp=1620):
+    """The rogue hireling (kind 271), friendly, at the player's side.
+
+    `hp` is on the client's 0-128 scale (full = 128) while `max_hp` is
+    the REAL maximum — exactly what the 2026-08-02 probe read from the
+    live full-health rogue (128/1620). Building the fixture any other
+    way is how the phantom "merc hp 8%" trigger stayed invisible to a
+    green suite (T54 run 3).
+    """
     return Monster(
         unit_id=900, kind=271, position=(1005, 1000), hp=hp, max_hp=max_hp,
         is_champion=False, is_boss=False, is_minion=False,
@@ -381,7 +388,7 @@ def test_mana_found_outside_its_configured_column():
 
 def test_merc_heal_fires_below_half():
     ladder, _ = make_ladder()
-    decision = ladder.evaluate(snap(allies=[merc(hp=49)]))
+    decision = ladder.evaluate(snap(allies=[merc(hp=63)]))  # 63/128 = 49%
     assert decision is not None and decision.rung == "merc_heal"
     assert decision.action == GiveMercPotion(2)  # the R53 primary heal column
     assert "merc hp 49%" in decision.reason
@@ -389,8 +396,16 @@ def test_merc_heal_fires_below_half():
 
 def test_merc_heal_holds_at_half_and_above():
     ladder, _ = make_ladder()
-    assert ladder.evaluate(snap(allies=[merc(hp=51)])) is None
-    assert ladder.evaluate(snap(allies=[merc(hp=50)])) is None  # strict <
+    assert ladder.evaluate(snap(allies=[merc(hp=65)])) is None  # 51%
+    assert ladder.evaluate(snap(allies=[merc(hp=64)])) is None  # 50%, strict <
+
+
+def test_a_full_merc_with_a_real_max_hp_is_never_fed():
+    """T54 run 3's phantom trigger, pinned: the FULL rogue reads hp 128
+    with max_hp 1620 — hp/max_hp says 8%, the client scale says 100%.
+    The rung fed her every 3 s for a whole game on the wrong fraction."""
+    ladder, _ = make_ladder()
+    assert ladder.evaluate(snap(allies=[merc(hp=128, max_hp=1620)])) is None
 
 
 def test_dead_merc_is_not_fed():
@@ -401,7 +416,7 @@ def test_dead_merc_is_not_fed():
 
 def test_merc_heal_never_fires_in_town():
     ladder, _ = make_ladder()
-    assert ladder.evaluate(snap(area=TOWN, allies=[merc(hp=30)])) is None
+    assert ladder.evaluate(snap(area=TOWN, allies=[merc(hp=38)])) is None
 
 
 def test_merc_heal_is_paced_across_failed_sends():
@@ -409,33 +424,79 @@ def test_merc_heal_is_paced_across_failed_sends():
     # tick rate. Pacing records on ATTEMPT, so even a refused chord waits
     # out merc_heal_retry_s.
     ladder, clock = make_ladder()
-    first = ladder.evaluate(snap(allies=[merc(hp=30)]))
+    first = ladder.evaluate(snap(allies=[merc(hp=38)]))
     assert first.rung == "merc_heal"
     first.commit_attempted()  # the send FAILED; pacing still recorded
     clock.advance(0.5)
-    assert ladder.evaluate(snap(allies=[merc(hp=30)])) is None
+    assert ladder.evaluate(snap(allies=[merc(hp=38)])) is None
     clock.advance(3.0)
-    assert ladder.evaluate(snap(allies=[merc(hp=30)])).rung == "merc_heal"
+    assert ladder.evaluate(snap(allies=[merc(hp=38)])).rung == "merc_heal"
 
 
 def test_merc_heal_needs_a_healing_potion_somewhere():
     ladder, _ = make_ladder(carried=lambda: belt(belt_potion(1, MANA, 0)))
-    assert ladder.evaluate(snap(allies=[merc(hp=30)])) is None
+    assert ladder.evaluate(snap(allies=[merc(hp=38)])) is None
 
 
 def test_merc_served_from_the_wrong_column():
     # P1 integration: healing only in the rejuv column still serves the merc.
     wrong = belt(belt_potion(9, HEAL, 1))
     ladder, _ = make_ladder(carried=lambda: wrong)
-    decision = ladder.evaluate(snap(allies=[merc(hp=30)]))
+    decision = ladder.evaluate(snap(allies=[merc(hp=38)]))
     assert decision is not None and decision.action == GiveMercPotion(1)
 
 
 def test_player_survival_outranks_the_merc():
     # Both trigger on the same tick: the player's rejuv wins, the merc waits.
     ladder, _ = make_ladder()
-    decision = ladder.evaluate(snap(player(hp=490), allies=[merc(hp=30)]))
+    decision = ladder.evaluate(snap(player(hp=490), allies=[merc(hp=38)]))
     assert decision.rung == "rejuv"
+
+
+# -- the bottom of the column is what the key sends (T54 run 3) ------------------
+#
+# Pressing key N consumes the LOWEST row of column N. Mixed columns and
+# foreign potions (antidotes) are NORMAL belt states (user, 2026-08-02),
+# so every type check reads the bottom occupant — "any of the type in the
+# column" fed a mana potion to the merc and would drink the wrong potion.
+
+ANTIDOTE = 999  # any kind outside the healing/mana/rejuv sets
+
+
+def test_a_squatter_under_the_healing_blocks_that_column():
+    # Column 2: mana at the bottom (slot 2), healing above (slot 6). The
+    # key would send the mana, so the heal rung must not press it.
+    mixed = belt(belt_potion(1, MANA, 2), belt_potion(2, HEAL, 6))
+    ladder, _ = make_ladder(carried=lambda: mixed)
+    assert ladder.evaluate(snap(player(hp=900))) is None
+
+
+def test_the_search_moves_on_to_a_column_with_a_healing_bottom():
+    mixed = belt(
+        belt_potion(1, MANA, 2), belt_potion(2, HEAL, 6),  # col 2: blocked
+        belt_potion(3, HEAL, 3),  # col 3: healing at the bottom
+    )
+    ladder, _ = make_ladder(carried=lambda: mixed)
+    decision = ladder.evaluate(snap(player(hp=900)))
+    assert decision is not None and decision.action == DrinkPotion(3, "healing")
+
+
+def test_an_antidote_at_the_bottom_is_never_pressed():
+    # An accidental antidote in the belt matches no type: its column is
+    # simply skipped, never an error.
+    foreign = belt(
+        belt_potion(1, ANTIDOTE, 2), belt_potion(2, HEAL, 6),
+    )
+    ladder, _ = make_ladder(carried=lambda: foreign)
+    assert ladder.evaluate(snap(player(hp=900))) is None
+
+
+def test_the_merc_is_never_fed_a_squatting_mana():
+    # Run 3 live: Shift+key on a healing column with mana at the bottom —
+    # "I can't use that", nothing consumed, refire every 3 s.
+    mixed = belt(belt_potion(1, MANA, 2), belt_potion(2, HEAL, 6))
+    ladder, _ = make_ladder(carried=lambda: mixed)
+    assert ladder.evaluate(snap(allies=[merc(hp=38)])) is None
 
 
 # -- rung 6: mana --------------------------------------------------------------

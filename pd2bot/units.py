@@ -220,7 +220,20 @@ class Monster:
 
     @property
     def hp_fraction(self) -> float | None:
+        """hp over the MAX-HP stat. Wrong for life-percent questions on
+        non-player units (see `life_pct`); kept for callers comparing
+        the two raw stats."""
         return self.hp / self.max_hp if self.max_hp else None
+
+    @property
+    def life_pct(self) -> float:
+        """Life as a percent, on the client's own scale for NON-PLAYER
+        units: current hp is stored 0-128 (full = 128) while max_hp is
+        the real maximum, so hp/max_hp lies. Probed live 2026-08-02: a
+        full-health rogue merc read hp 128 / max_hp 1620 — "8%" — and
+        the merc-heal rung fed her all game (T54 run 3). Clamped, so a
+        torn read above 128 says full rather than >100%."""
+        return min(100.0, 100.0 * self.hp / offsets.NONPLAYER_HP_SCALE)
 
 
 @dataclass(frozen=True)

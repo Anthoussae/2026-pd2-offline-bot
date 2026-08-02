@@ -16,6 +16,7 @@ from pd2bot.behavior.engine import (
     IdleBail,
     InputRefusedHalt,
     StepOutcome,
+    StopRequested,
 )
 from pd2bot.behavior.reflex import ReflexDecision
 from pd2bot.input import InputRefused
@@ -186,6 +187,32 @@ def test_engine_narrates_step_transitions_not_ticks():
     assert lines[1].startswith("walk: done after ")
     assert lines[2].startswith("fight: done after ")
     assert lines[3].startswith("run complete")
+
+
+def test_an_outside_stop_wins_the_tick_over_everything():
+    """The abort channel (T54 run 3): `should_stop` is polled at the top
+    of EVERY tick, before the monitor and the ladder — a chat abort must
+    land within a tick anywhere in a run, not only inside town waits."""
+    monitor = ScriptedMonitor()
+    step = FakeStep("s", ticks_to_done=5)
+    stop = {"now": False}
+    clock = Clock()
+    eng = BehaviorEngine(
+        snapshot=lambda: snap(),
+        monitor=monitor,
+        states=[step],
+        executor=RecordingExecutor(),
+        clock=clock,
+        sleep=lambda s: clock.advance(s),
+        should_stop=lambda: stop["now"],
+    )
+    eng.tick()  # not stopped: business as usual
+    assert step.calls == 1
+    stop["now"] = True
+    with pytest.raises(StopRequested):
+        eng.tick()
+    assert step.calls == 1 and monitor.ticks == 1  # nothing ran past the stop
+    assert issubclass(StopRequested, ChickenExit)  # the cycle leaves cleanly
 
 
 def test_tick_order_is_monitor_ladder_step():

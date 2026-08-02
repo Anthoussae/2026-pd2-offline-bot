@@ -93,6 +93,23 @@ class IdleBail(ChickenExit):
     is_vitals = False
 
 
+class StopRequested(ChickenExit):
+    """An OUTSIDE stop order: the user typed abort, or a drill's cancel
+    file appeared. Checked at the very top of every tick, before the
+    monitor and the ladder — an abort is a command, not a condition.
+
+    Rides `ChickenExit` the way `IdleBail` does, so the unmodified M4
+    cycle already does the right thing: stop sending, leave the game
+    cleanly, hand the character back. It exists because T54 run 3 had no
+    field-side stop at all — `should_stop` reached only the town layer's
+    waits, so the user's in-chat abort went unheard until 50 refused
+    sends piled into an `InputRefusedHalt` (user feedback, 2026-08-02:
+    abort must take effect immediately, wherever the run is).
+    """
+
+    is_vitals = False
+
+
 class _Monitor(Protocol):
     """SafetyMonitor's shape; tests substitute scripted ones."""
 
@@ -237,6 +254,7 @@ class BehaviorEngine:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         narrate: Callable[[str], None] = narrate_noop,
+        should_stop: Callable[[], bool] | None = None,
     ) -> None:
         if not states:
             raise BehaviorError("a run with no steps cannot do anything")
@@ -253,6 +271,9 @@ class BehaviorEngine:
         )
         self.report = EngineReport()
         self._index = 0
+        # The outside stop order (drill abort, operator request), polled
+        # every tick. None = no channel wired.
+        self._should_stop = should_stop
         # The narrative channel (R179): step transitions with durations —
         # the engine is the only thing that knows when a step began.
         self._narrate = narrate
@@ -435,6 +456,12 @@ class BehaviorEngine:
         Monitor exceptions (ChickenExit, DeathHalt) and IdleBail propagate
         to the caller untouched — the cycle owns what they mean.
         """
+        if self._should_stop is not None and self._should_stop():
+            # Before the snapshot, the monitor, everything: an abort is a
+            # command from the person at the machine, and the only thing
+            # it should race is nothing.
+            self._narrate("run aborted by request")
+            raise StopRequested("stopped by outside request (abort)")
         snap = self._snapshot()
         self._monitor.tick()
         now = self._clock()

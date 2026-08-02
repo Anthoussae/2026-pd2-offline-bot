@@ -385,16 +385,24 @@ class ReflexLadder:
     def _column_potion(
         self, carried: CarriedItems, column: int, type_check: Callable[[CarriedItem], bool]
     ) -> bool:
-        """Does this belt column hold a potion of the right type?
+        """Does this column's BOTTOM potion match the type?
 
-        Both halves matter: the column can be empty, and — because the belt
-        routes by column — a column can in principle hold something other
-        than what the layout says. Drinking key N swallows whatever sits at
-        the bottom of column N, so the ladder checks what is actually there.
+        Pressing key N consumes the LOWEST row of column N, so the bottom
+        occupant is the only one that matters. The R179 cut checked "any
+        of the type in the column", and T54 run 3 paid for it: a mana
+        potion sitting under healing was Shift+fed to the merc ("I can't
+        use that", nothing consumed, refire every 3 s) — and the same
+        press as a drink would swallow the wrong potion. Mixed columns
+        and foreign potions (antidotes, thawing — `type_check` False for
+        every type) are NORMAL belt states, not errors (user, 2026-08-02):
+        the search just moves on to a column whose bottom actually
+        matches, and stays quiet when none does.
         """
-        return any(
-            i.belt_column == column and type_check(i) for i in carried.belt
-        )
+        occupants = [i for i in carried.belt if i.belt_column == column]
+        if not occupants:
+            return False
+        bottom = min(occupants, key=lambda i: i.belt_slot or 0)
+        return type_check(bottom)
 
     def _potion_column(
         self,
@@ -671,11 +679,15 @@ class ReflexLadder:
             # not refire at tick rate. Never in town — the preamble heals
             # the merc there for free.
             merc = snap.merc
-            if merc is not None and merc.max_hp > 0 and (
+            if merc is not None and (
                 self._merc_heal_attempt is None
                 or now - self._merc_heal_attempt >= cfg.merc_heal_retry_s
             ):
-                merc_pct = 100.0 * merc.hp / merc.max_hp
+                # life_pct, NOT hp/max_hp: a non-player unit's current hp
+                # reads on the 0-128 client scale (probed 2026-08-02 —
+                # the full rogue read 128/1620, a phantom "8%" that fed
+                # her potions all of T54 run 3).
+                merc_pct = merc.life_pct
                 if merc_pct < cfg.merc_heal_below_pct:
                     heal_column = self._potion_column(
                         carried, cfg.heal_columns, lambda i: i.is_healing_potion

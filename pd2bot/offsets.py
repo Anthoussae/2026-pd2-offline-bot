@@ -206,6 +206,15 @@ MERC_CLASS_IDS = {
     561: "barbarian",
 }
 
+# NON-PLAYER units carry their CURRENT life on a 0-128 scale in STAT_HP,
+# while STAT_MAX_HP holds the real maximum — so hp/max_hp is the wrong
+# fraction for them. Probed live 2026-08-02 (T54 run 3's phantom merc
+# trigger): the full-health rogue read hp 128 with max_hp 1620, i.e. a
+# permanent "8%" that fed her potions all game. kolbot computes merc
+# life% as hp*100/128 for the same reason. The player is different:
+# player hp/max_hp are both real (chicken depends on it, live-proven).
+NONPLAYER_HP_SCALE = 128
+
 # Only these are stored fixed-point and need `>> 8`. Applying the shift to the
 # others (level, attributes, gold, experience) silently zeroes them. The bone
 # armor pair joined on live evidence: raw 221696 = 866 << 8 with a zero low
