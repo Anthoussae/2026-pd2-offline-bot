@@ -110,6 +110,35 @@ The seed in the file key is the staleness guard: any layout re-roll
 (difficulty swap, new character) changes the seed and misses the cache,
 so the bot starts blank instead of trusting a wrong map.
 
+## The automated survey (`survey.py` + the `survey` run step)
+
+M5 P6 (R175/R176) made the survey walk self-driving. `survey.py` finds
+the **frontier** — recorded walkable ground with unrecorded ground just
+beyond, computed from the stored room edges and clamped to the target
+area's own bounding box so it never chases the neighbouring areas'
+ground. The `survey` run step walks to the nearest frontier point, the
+client loads the rooms beyond (its ~3x3-room horizon — measured at
+46-67 subtiles, T51), the passive recorder stores them, and the
+frontier moves outward until none remains. Unreachable frontier (across
+a river) gets the patrol's no-progress give-up, and a hard leg budget
+backstops convergence bugs.
+
+Two shipped runs: `runs/survey-cold-plains.toml` (preamble → waypoint →
+survey) and `runs/survey-town.toml` (survey from the town spawn). They
+are normal engine runs — reflex ladder, chicken, death latch all in
+force — and fight only inside `survey_engage_radius` (~30 subtiles,
+R176 Q1): a survey is not a clearance. Re-running a finished area is a
+no-op by design: zero frontier, immediate completion.
+
+Mid-run auto-surveying was considered and rejected (R176 Q2): passive
+recording already grows the atlas on every walk, and a clearance that
+detours into a survey stops being a clearance. Instead, a run that
+gives up on a target because its ground was *never seen* (the
+NavigationError message distinguishes this from "solidly blocked") says
+so loudly once per game and names the survey run as the permanent fix.
+The manual `--survey` mode above remains valid — the user walking the
+area records exactly the same atlas.
+
 An offline generator (`mapdata.py` + a built d2mapapi_mod) exists as a
 dormant alternative for maps the bot has never walked; it is blocked on
 this machine by PD2's modified DLLs. History and unblock path: the

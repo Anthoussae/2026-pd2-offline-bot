@@ -89,6 +89,25 @@ def _default_log(line: str) -> None:  # pragma: no cover - exercised live
     print(f"  {line}", flush=True)
 
 
+def _note_unsurveyed(services: RunServices, exc: Exception) -> None:
+    """R176 Q2: a give-up caused by UNKNOWN ground gets said loudly, once.
+
+    The navigator's error message already distinguishes "solidly blocked"
+    from "never been seen"; only the second has a permanent fix the user
+    can order (a survey run), so only the second earns an alert. No
+    auto-survey here by decision: a clearance that detours into a survey
+    stops being a clearance.
+    """
+    if services.unsurveyed_alerted or "never been seen" not in str(exc):
+        return
+    services.unsurveyed_alerted = True
+    services.alert(
+        "a target sits on UNSURVEYED ground — this run walks around the "
+        "gap, but a survey run (runs/survey-*.toml) would map it once and "
+        "fix this permanently."
+    )
+
+
 @dataclass
 class RunServices:
     """Everything the steps need, bound once when the registry is built."""
@@ -245,6 +264,29 @@ class RunServices:
     # again, so it is final for this game: re-queueing another cleanse for
     # it is the retry-that-cannot-differ this codebase keeps refusing.
     cleanse_retried: set[int] = field(default_factory=set)
+    # -- the survey step (R175/R176) ---------------------------------------
+    #
+    # Both closures are wired closures over the map store (wiring.py) so
+    # the step never learns what a MapStore is — the same treatment
+    # `cleanse` gets. None = no survey service in this environment, and
+    # the step finishes immediately rather than guessing.
+    survey_targets: Callable[[], list[tuple[int, int]]] | None = None
+    survey_coverage: Callable[[], str] | None = None
+    # Fight only what comes this close while surveying (R176 Q1): a
+    # survey is not a clearance, and the reflex ladder plus chicken stay
+    # on above this either way.
+    survey_engage_radius: int = 30
+    # Hard cap on survey walking, as legs. Not a tuning knob: a healthy
+    # survey of a Cold-Plains-sized area is well under this, so hitting
+    # it means something is wrong (a frontier that never closes, a
+    # target oscillation) and the game should end rather than stretch.
+    survey_max_legs: int = 200
+    # Whether this game has already alerted about a target on unsurveyed
+    # ground (R176 Q2: no auto-survey mid-run — say it loudly, once, and
+    # recommend the survey run instead). Once, because the same run will
+    # often give up on several such targets and each repeat of the alert
+    # buys nothing.
+    unsurveyed_alerted: bool = False
 
 
 # -- blocking steps ------------------------------------------------------------
@@ -572,6 +614,7 @@ class _PickupMixin:
             ctx.executor.execute(action)
         except NavigationError as exc:
             self.services.log(f"could not walk: {exc}")
+            _note_unsurveyed(self.services, exc)
             return False
         return True
 
@@ -850,6 +893,7 @@ class _PatrolMixin:
             # — swallowing those would mark a point visited that we never
             # actually tried to walk to.
             self.services.log(f"patrol: skipping {target} ({exc})")
+            _note_unsurveyed(self.services, exc)
             self._advance()
             return StepOutcome(done=False, acted=True, note=f"patrol skipped {target}")
         return StepOutcome(done=False, acted=True, note=f"patrol leg to {leg}")
@@ -1198,6 +1242,164 @@ class PickupStep(_PatrolMixin, _PickupMixin):
         )
 
 
+@dataclass
+class SurveyStep(_PickupMixin):
+    """Walk an area until its reachable ground is all in the atlas.
+
+    The map store remembers every room ever loaded and every walk records
+    as a side effect (M3); route planning already refuses unknown ground.
+    This step supplies the missing piece: it keeps walking to the nearest
+    *frontier* — recorded walkable ground with unrecorded ground just
+    beyond (`pd2bot/survey.py`) — until none remains inside the area's
+    bounds. Single-player maps are fixed per character+difficulty, so a
+    finished area is finished forever (R175: "permanently reusable").
+
+    Not a clearance (R176 Q1): hostiles get fought only inside
+    `survey_engage_radius`; everything further is somebody the survey
+    walks politely around. The ladder and chicken stand above as always.
+
+    The frontier list is recomputed by the wiring's closure as the atlas
+    grows; written-off targets are remembered by exact position, which is
+    stable because the closure caches per room-count — the list only
+    changes when new ground was actually recorded, at which point stale
+    write-offs mostly stop being frontier at all.
+    """
+
+    name: str = "survey"
+    _done_targets: set[tuple[int, int]] = field(default_factory=set)
+    _written_off: int = 0
+    _legs: int = 0
+    _current: tuple[int, int] | None = None
+    _closest: int | None = None
+    _attempts: int = 0
+    # Monsters a failed walk proved unreachable, and where they stood —
+    # the clearance's rule (expiry on movement) in miniature, so a walled
+    # monster cannot pin the survey the way one pinned the clearance.
+    _unreachable: dict[int, tuple[int, int]] = field(default_factory=dict)
+
+    def _fightable(self, m) -> bool:
+        where = self._unreachable.get(m.unit_id)
+        if where is None:
+            return True
+        if _chebyshev(m.position, where) <= self.services.unreachable_forget:
+            return False
+        del self._unreachable[m.unit_id]
+        return True
+
+    def _finish(self) -> StepOutcome:
+        cov = (
+            self.services.survey_coverage()
+            if self.services.survey_coverage is not None
+            else "coverage unknown"
+        )
+        written = (
+            f", {self._written_off} frontier point(s) written off unreachable"
+            if self._written_off
+            else ""
+        )
+        note = f"survey complete: {cov}{written}"
+        self.services.log(note)
+        return StepOutcome(done=True, acted=True, note=note)
+
+    def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
+        if self.recover_panels(snap):
+            return StepOutcome(done=False, acted=True, note="closed a stray panel")
+        if self.services.survey_targets is None:
+            return StepOutcome(
+                done=True,
+                note="no survey service wired; nothing this step can do",
+            )
+        if self.maybe_cleanse(snap, ctx):
+            return StepOutcome(done=False, acted=True, note="inventory cleansed")
+        if snap.player is None:
+            return StepOutcome(done=False, waiting=True)
+        origin = snap.player.position
+
+        # Fighting wins the tick, but only up close (R176 Q1).
+        near = [
+            m for m in snap.live_monsters
+            if _chebyshev(m.position, origin) <= self.services.survey_engage_radius
+            and self._fightable(m)
+        ]
+        if near:
+            action = self.services.combat.engage(snap, ctx)
+            if action is not None:
+                if not self.send(ctx, action):
+                    blamed = getattr(action, "toward", None)
+                    target = next(
+                        (m for m in near if m.unit_id == blamed), None
+                    )
+                    if target is not None:
+                        self._unreachable[target.unit_id] = target.position
+                        self.services.log(
+                            f"survey: monster {target.unit_id} at "
+                            f"{target.position} is unreachable; walking on "
+                            "(it gets another look if it moves)"
+                        )
+                return StepOutcome(done=False, acted=True, note="fighting")
+            # engage had nothing offensive to do this tick (poison
+            # settling, revives building): surveying on beats standing.
+
+        if self._legs >= self.services.survey_max_legs:
+            self.services.alert(
+                f"survey stopped at the {self._legs}-leg budget. That is a "
+                "bug signal, not a big area — a healthy survey finishes "
+                "well under it."
+            )
+            return self._finish()
+
+        targets = [
+            t for t in self.services.survey_targets()
+            if t not in self._done_targets
+        ]
+        if not targets:
+            return self._finish()
+        target = min(targets, key=lambda t: _chebyshev(t, origin))
+        distance = _chebyshev(target, origin)
+
+        if distance <= self.services.patrol_reach:
+            # Standing here has loaded the rooms beyond; the recorder has
+            # them. The frontier list shrinks on its own recompute.
+            self._done_targets.add(target)
+            self._current = None
+            self.services.log(f"survey: reached frontier {target}")
+            return StepOutcome(
+                done=False, acted=True, note=f"survey reached {target}"
+            )
+
+        if target != self._current:
+            self._current, self._closest, self._attempts = target, None, 0
+        if self._closest is None or distance < self._closest:
+            self._closest, self._attempts = distance, 0
+        else:
+            self._attempts += 1
+        if self._attempts >= self.services.patrol_attempts:
+            self.services.log(
+                f"survey: giving up on frontier {target} after "
+                f"{self._attempts} legs that got no closer (still "
+                f"{distance} away)"
+            )
+            self._done_targets.add(target)
+            self._written_off += 1
+            self._current = None
+            return StepOutcome(
+                done=False, acted=True, note=f"survey gave up on {target}"
+            )
+
+        leg = _hop(origin, target, self.services.patrol_step)
+        self._legs += 1
+        if not self.send(ctx, MoveTo(leg)):
+            # Unknown/blocked ground on the way: this frontier is not
+            # approachable from here. Costs the point, never the run.
+            self._done_targets.add(target)
+            self._written_off += 1
+            self._current = None
+            return StepOutcome(
+                done=False, acted=True, note=f"survey skipped {target}"
+            )
+        return StepOutcome(done=False, acted=True, note=f"survey leg to {leg}")
+
+
 # -- the registry ---------------------------------------------------------------
 
 
@@ -1242,6 +1444,9 @@ def build_registry(services: RunServices) -> StepRegistry:
             "pickup",
             factory=lambda p: PickupStep(services),
         )
+    )
+    registry.register(
+        StepSpec("survey", factory=lambda p: SurveyStep(services))
     )
     registry.register(StepSpec("done", factory=lambda p: DoneStep(services)))
     return registry

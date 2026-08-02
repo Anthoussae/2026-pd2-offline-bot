@@ -35,7 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from pd2bot import offsets
+from pd2bot import offsets, survey
 from pd2bot.behavior.combat import ClassConfig, load_class_config
 from pd2bot.behavior.engine import BehaviorEngine, EngineConfig
 from pd2bot.behavior.execute import GameActionExecutor
@@ -60,6 +60,7 @@ from pd2bot.snapshot import Perception
 from pd2bot.town import PreambleReport, TownConfig, TownLayer
 from pd2bot.uistate import find_ui_array
 from pd2bot.waypoint import WaypointTravel
+from pd2bot.world import read_area, read_map_seed
 
 REPO = Path(__file__).resolve().parent.parent
 CONFIG = REPO / "config"
@@ -216,6 +217,10 @@ class LiveBot:
     gated: GatedInput
     baseline: SessionBaseline
     paths: BotPaths
+    # The atlas store and the difficulty it is keyed under — the survey
+    # service reads both; the navigator holds the same store instance.
+    store: MapStore = field(default_factory=MapStore)
+    difficulty: int = offsets.DIFFICULTY_HELL
     engine_config: EngineConfig = field(default_factory=EngineConfig)
     clock: Callable[[], float] = time.monotonic
     should_stop: Callable[[], bool] | None = None
@@ -274,6 +279,39 @@ class LiveBot:
                 print(f"  field {line}", flush=True)
             return dropped
 
+        # The survey service (R175/R176): frontier targets and coverage over
+        # the shared atlas, behind closures so the step never learns what a
+        # MapStore is. The target list is cached per (seed, area,
+        # room-count): frontier extraction walks every stored room edge,
+        # and recomputing that on a tick where nothing new was recorded
+        # would be pure heat.
+        survey_cache: dict = {"key": None, "targets": []}
+
+        def _survey_area():
+            area = read_area(session)
+            seed = read_map_seed(session)
+            if area is None or seed is None:
+                return None, None
+            return area, self.store.open(seed, self.difficulty, area.level_no)
+
+        def survey_targets() -> list[tuple[int, int]]:
+            area, explored = _survey_area()
+            if area is None:
+                return []  # mid-transition: nothing to walk toward yet
+            key = (explored.seed, explored.area_id, explored.room_count)
+            if survey_cache["key"] != key:
+                survey_cache["key"] = key
+                survey_cache["targets"] = survey.frontier_targets(
+                    explored, area.bounds_subtiles
+                )
+            return list(survey_cache["targets"])
+
+        def survey_coverage() -> str:
+            area, explored = _survey_area()
+            if area is None:
+                return "area unreadable"
+            return survey.coverage(explored, area.bounds_subtiles)
+
         services = RunServices(
             run_preamble=self.town.run_preamble,
             travel_to=self.waypoint.take,
@@ -281,6 +319,8 @@ class LiveBot:
             pickit=self.pickit,
             carried=lambda: read_carried_items(session, with_sockets=False),
             clock=self.clock,
+            survey_targets=survey_targets,
+            survey_coverage=survey_coverage,
             # The field cleanse: the same procedure the town preamble runs,
             # behind a closure so the step never learns what a TownLayer is.
             # None while the vocabulary is incomplete, and the step already
@@ -364,7 +404,11 @@ def build_bot(
     )
 
     gated = GatedInput(session, ui_array=ui_array)
-    navigator = live_navigator(session, MapStore(), difficulty)
+    # The store is kept on the bot (not just inside the navigator's
+    # closures) because the survey service reads coverage from it — one
+    # store, or the survey would report on an atlas nobody is writing to.
+    store = MapStore()
+    navigator = live_navigator(session, store, difficulty)
     perception = Perception(session)
     baseline = SessionBaseline(session)
 
@@ -414,6 +458,8 @@ def build_bot(
         gated=gated,
         baseline=baseline,
         paths=paths,
+        store=store,
+        difficulty=difficulty,
         engine_config=engine_config if engine_config is not None else EngineConfig(),
         should_stop=should_stop,
         radius_override=radius_override,
@@ -460,6 +506,15 @@ def describe(bot: LiveBot) -> list[str]:
         "sweep      follows the clearance (same centre, radius and patrol)"
         if radius is not None
         else "sweep      no clearance to follow; sweeps from where it stands",
+        # Atlas coverage matters exactly when a survey step is present:
+        # the run's whole product is that number moving.
+        *(
+            [f"survey     atlas root {bot.store.root} (d{bot.difficulty}); "
+             "fights only within "
+             "survey_engage_radius; coverage reported at the end"]
+            if "survey" in steps
+            else []
+        ),
         f"pickit     {len(bot.pickit.rules)} rules, "
         f"{len(bot.pickit.pending_names)} pending name(s)",
         f"cleanse    {'ENABLED' if bot.cleanse_enabled else 'disabled (pending names)'}",

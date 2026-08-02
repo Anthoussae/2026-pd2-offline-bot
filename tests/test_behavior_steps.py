@@ -951,6 +951,130 @@ def test_a_dry_cleanse_leaves_no_pile_to_avoid():
     assert svc.cleanse_dropped_at is None, "nothing dropped, nothing to flee"
 
 
+# -- the survey step (R175/R176) --------------------------------------------------
+
+
+class FrontierWorld:
+    """A scripted survey service: frontiers close when the player nears them.
+
+    Stands in for the wiring's closure over the atlas — the step's contract
+    is only "call me for the current list", and this answers it the way the
+    real one does: reaching a frontier removes it (the rooms beyond got
+    recorded), and nothing else changes the list.
+    """
+
+    def __init__(self, points):
+        self.points = list(points)
+        self.player = HOME
+
+    def targets(self):
+        self.points = [
+            p for p in self.points if _chebyshev(p, self.player) > 5
+        ]
+        return list(self.points)
+
+    def coverage(self):
+        return f"{len(self.points)} frontier point(s) open"
+
+
+def surveying(clock, points, *, monsters_react=None, **kw):
+    world = FrontierWorld(points)
+    svc = services(
+        clock,
+        survey_targets=world.targets,
+        survey_coverage=world.coverage,
+        **kw,
+    )
+    step = make_step("survey", svc)
+    here = {"pos": HOME}
+
+    def react(action):
+        if isinstance(action, MoveTo):
+            here["pos"] = action.target
+            world.player = action.target
+
+    executor = RecordingExecutor(clock=clock, on_execute=react)
+    return step, svc, world, here, executor, context(executor)
+
+
+def test_the_survey_walks_frontiers_until_none_remain():
+    clock = Clock()
+    step, svc, world, here, executor, ctx = surveying(
+        clock, [(1060, 1000), (1000, 1060)]
+    )
+    outcome = None
+    for _ in range(200):
+        outcome = step.step(snap(pos=here["pos"]), ctx)
+        clock.advance(0.5)
+        if outcome.done:
+            break
+    assert outcome is not None and outcome.done
+    assert "survey complete" in outcome.note
+    assert world.points == [], "every frontier must be visited"
+    assert [a for a in executor.actions if isinstance(a, MoveTo)]
+
+
+def test_an_unreachable_frontier_is_written_off_not_looped_on():
+    clock = Clock()
+    step, svc, world, here, executor, ctx = surveying(clock, [(1060, 1000)])
+    # Walks "succeed" but nobody moves: the far bank of a river.
+    executor_still = RecordingExecutor(clock=clock)
+    ctx = context(executor_still)
+    outcome = None
+    for _ in range(50):
+        outcome = step.step(snap(), ctx)
+        clock.advance(0.5)
+        if outcome.done:
+            break
+    assert outcome is not None and outcome.done
+    assert "written off" in outcome.note
+    legs = [a for a in executor_still.actions if isinstance(a, MoveTo)]
+    assert len(legs) <= svc.patrol_attempts + 1, "give up, do not orbit"
+
+
+def test_hostiles_close_by_divert_the_survey_tick_to_combat():
+    clock = Clock()
+    combat = StubCombat([AttackUnit(9, (1010, 1000))])
+    step, svc, world, here, executor, ctx = surveying(
+        clock, [(1060, 1000)], combat=combat
+    )
+    near = monster(9, (1010, 1000))  # inside survey_engage_radius (30)
+    outcome = step.step(snap(monsters=[near]), ctx)
+    assert combat.calls == 1
+    assert outcome.note == "fighting"
+    # A distant one is walked around, not hunted (R176 Q1).
+    far = monster(10, (1200, 1000))
+    step.step(snap(monsters=[far]), ctx)
+    assert combat.calls == 1, "beyond the radius, surveying continues"
+
+
+def test_the_leg_budget_ends_a_survey_that_cannot_converge():
+    clock = Clock()
+    alerts = []
+    step, svc, world, here, executor, ctx = surveying(
+        clock, [(9000, 9000)], alerts=alerts, survey_max_legs=5,
+    )
+    # The frontier is absurdly far and the walker teleports each leg but
+    # the service never closes it (FrontierWorld only closes within 5):
+    # the budget, not patience, must end this.
+    outcome = None
+    for _ in range(200):
+        outcome = step.step(snap(pos=here["pos"]), ctx)
+        clock.advance(0.5)
+        if outcome.done:
+            break
+    assert outcome is not None and outcome.done
+    assert any("leg budget" in a for a in alerts)
+
+
+def test_a_survey_with_no_service_finishes_honestly():
+    clock = Clock()
+    svc = services(clock)  # survey_targets stays None
+    step = make_step("survey", svc)
+    outcome = step.step(snap(), context())
+    assert outcome.done and "no survey service" in outcome.note
+
+
 # -- blocking steps and the registry ---------------------------------------------
 
 

@@ -1,0 +1,31 @@
+# Survey Cold Plains: walk until the whole area is in the atlas.
+#
+# The map store (maps/) remembers every room the client ever loads, keyed
+# by map seed — and single-player maps are fixed per character+difficulty,
+# so this run's product is PERMANENT: once the frontier is exhausted,
+# every later run plans over the full area and stops walking into fences
+# it could not see (M5 P6 R175/R176).
+#
+# Re-runnable by design: a finished area yields zero frontier points and
+# the survey step completes immediately. Run it again after a difficulty
+# change (new seed = honestly blank atlas) or if maps/ is ever deleted.
+#
+# Not a clearance: the survey fights only what comes within
+# survey_engage_radius (~30 subtiles) and walks around everything else.
+# The reflex ladder, chicken, and the death latch stand above it as in
+# every run.
+
+name = "survey-cold-plains"
+
+[[step]]
+name = "town_preamble"
+
+[[step]] # Cold Plains waypoint (dest 3), same as the clearance runs
+name = "waypoint"
+dest = 3
+
+[[step]]
+name = "survey"
+
+[[step]] # run complete; the cycle takes it from here (leave, next game)
+name = "done"

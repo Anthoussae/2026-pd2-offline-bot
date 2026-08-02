@@ -173,6 +173,16 @@ def test_build_states_uses_factories_in_order(tmp_path):
     assert states[0].params == {"where": "north"}
 
 
+def test_the_shipped_survey_runs_validate():
+    field = load_run(REPO / "runs" / "survey-cold-plains.toml", default_registry())
+    assert [s.name for s in field.steps] == [
+        "town_preamble", "waypoint", "survey", "done",
+    ]
+    assert field.steps[1].params == {"dest": 3}
+    town = load_run(REPO / "runs" / "survey-town.toml", default_registry())
+    assert [s.name for s in town.steps] == ["town_preamble", "survey", "done"]
+
+
 def test_declared_but_unimplemented_step_refuses_to_build():
     # The default registry declares the M5 vocabulary; the handlers are
     # P5's. Building a run over them must fail loudly, not skip silently.
@@ -184,5 +194,5 @@ def test_declared_but_unimplemented_step_refuses_to_build():
 
 def test_default_registry_vocabulary():
     assert default_registry().names() == [
-        "clear_radius", "done", "pickup", "town_preamble", "waypoint",
+        "clear_radius", "done", "pickup", "survey", "town_preamble", "waypoint",
     ]

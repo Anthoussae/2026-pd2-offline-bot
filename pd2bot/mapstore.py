@@ -72,6 +72,13 @@ class ExploredArea:
     def room_count(self) -> int:
         return len(self._rooms)
 
+    @property
+    def rooms(self) -> tuple[RoomCollision, ...]:
+        """The stored rooms, read-only. Insertion-ordered (dict order), so
+        consumers that derive stable lists from them — the survey's
+        frontier clustering — get the same answer for the same atlas."""
+        return tuple(self._rooms.values())
+
     # -- growing the atlas ------------------------------------------------------
 
     def record(self, local: LocalCollision, stats: dict | None = None) -> int:

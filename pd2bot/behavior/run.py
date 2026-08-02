@@ -146,6 +146,11 @@ def default_registry() -> StepRegistry:
         )
     )
     registry.register(StepSpec("pickup"))
+    # Must stay in step with build_registry's copy (same rule as
+    # clear_radius's params above): this schema is what the run linter
+    # validates against, and a survey run that lints here but is unknown
+    # to the live registry would refuse to start in Hell.
+    registry.register(StepSpec("survey"))
     registry.register(StepSpec("done"))
     return registry
 

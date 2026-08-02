@@ -140,6 +140,14 @@ accidental exemptions).
   self-driving coverage walk does not. Scope narrowed to exactly that
   gap (no changes to mapstore format needed).
 
+## Implementation status (2026-08-02)
+
+- P1 committed `a00a650`; P2 committed `a00a650`; P3+P4 committed with
+  this note. 775 tests, ruff clean throughout.
+- P4's exit gate (live acceptance: survey-town, then survey-cold-plains,
+  then a fresh patrol run for the cleanse fix) is OPEN — the plan stays
+  `active` and `_DONE.md` unwritten until those runs pass.
+
 ## Future work (out of scope)
 
 - Difficulty still not readable from memory (M4 leftover); callers
