@@ -150,6 +150,20 @@ accidental exemptions).
 
 ## Future work (out of scope)
 
+- **Potion-belt robustness (user request, 2026-08-02, during R177 run
+  1):** the belt refill halted the survey-town run because mana potions
+  sat in a healing column — the refill counted the column as occupied
+  and came up "healing short 2", and the town layer's
+  halt-for-a-human fired. The guard worked; the diagnosis was wrong in
+  a way a human had to untangle at 2 AM. Wanted: belt logic that
+  handles accidental potion-type mixing and wrong-slot potions —
+  detect a column whose contents disagree with the R53 layout, report
+  it precisely ("mana potion in healing column 3"), and ideally repair
+  it (drink it, move it, or re-slot around it) instead of halting.
+- **Vendor purchasing** (surfaced by the same halt): the bot cannot
+  restock its own potions; every shortage is a manual `execute`
+  interruption. A buy-from-Akara step would remove the whole class.
+
 - Difficulty still not readable from memory (M4 leftover); callers
   state it (CLI default Hell). Unchanged here.
 - Cross-area room bleed: `_record_visible_rooms` records all loaded
