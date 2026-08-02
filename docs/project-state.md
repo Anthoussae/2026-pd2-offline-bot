@@ -12,4 +12,5 @@ same commit as the transition itself.
   `docs/request-index.md` for the highest issued)
 - **Next test ID:** T54 (check `docs/drill-log.md`)
 
-Updated: 2026-08-01
+Updated: 2026-08-02 (session end ~04:00; branch pushed, PR #1 open;
+next work: docs/plans/2026-08-02-potions-and-narrative-log/)
