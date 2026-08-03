@@ -8,6 +8,7 @@ skipped.
 
 import pytest
 
+from pd2bot import offsets
 from pd2bot.behavior.actions import CastSelf, DrinkPotion
 from pd2bot.behavior.engine import (
     BehaviorEngine,
@@ -23,6 +24,7 @@ from pd2bot.input import InputRefused
 from pd2bot.player import Player
 from pd2bot.safety import ChickenExit, DeathHalt
 from pd2bot.snapshot import GameSnapshot
+from pd2bot.uistate import UIState
 from pd2bot.units import Monster
 from pd2bot.world import Area
 
@@ -49,11 +51,11 @@ def player(pos=(100, 100)):
     )
 
 
-def snap(area=FIELD, pos=(100, 100), monsters=()):
+def snap(area=FIELD, pos=(100, 100), monsters=(), ui=None):
     return GameSnapshot(
         in_game=True, taken_at=0.0, player=player(pos),
         area=Area(level_no=area, position=(0, 0), size=(500, 500)),
-        monsters=tuple(monsters),
+        monsters=tuple(monsters), ui=ui,
     )
 
 
@@ -213,6 +215,91 @@ def test_an_outside_stop_wins_the_tick_over_everything():
         eng.tick()
     assert step.calls == 1 and monitor.ticks == 1  # nothing ran past the stop
     assert issubclass(StopRequested, ChickenExit)  # the cycle leaves cleanly
+
+
+def test_the_operator_pressing_esc_stops_the_run():
+    """The Enter/ESC kill switch (R189, the user's rule): out of town,
+    an esc menu or chat console the BOT did not open can only be the
+    operator taking the character — stop within a tick."""
+    escaped_at = {"at": None}
+    clock = Clock()
+    step = FakeStep("s", ticks_to_done=9)
+    eng = BehaviorEngine(
+        snapshot=lambda: snap(
+            ui=UIState(open_panels=frozenset({offsets.UI_ESCMENU_MAIN}))
+        ),
+        monitor=ScriptedMonitor(),
+        states=[step],
+        executor=RecordingExecutor(),
+        clock=clock,
+        sleep=lambda s: clock.advance(s),
+        bot_escape_at=lambda: escaped_at["at"],
+    )
+    with pytest.raises(StopRequested):
+        eng.tick()
+    assert step.calls == 0
+
+
+def test_the_bots_own_escape_is_not_the_operators():
+    # The one real race: the bot's ESC landing just after a panel closed
+    # OPENS the menu. Correlated away inside the grace window.
+    escaped_at = {"at": None}
+    clock = Clock()
+    step = FakeStep("s", ticks_to_done=9)
+    eng = BehaviorEngine(
+        snapshot=lambda: snap(
+            ui=UIState(open_panels=frozenset({offsets.UI_ESCMENU_MAIN}))
+        ),
+        monitor=ScriptedMonitor(),
+        states=[step],
+        executor=RecordingExecutor(),
+        clock=clock,
+        sleep=lambda s: clock.advance(s),
+        bot_escape_at=lambda: escaped_at["at"],
+    )
+    escaped_at["at"] = clock()  # the bot just sent an ESC itself
+    eng.tick()  # inside the grace window: not the operator's
+    assert step.calls == 1
+    clock.advance(2.0)  # past the grace: still open = the operator's
+    with pytest.raises(StopRequested):
+        eng.tick()
+
+
+def test_a_chat_console_in_the_field_stops_the_run():
+    # Opening chat IS the abort now — no typing needed (R189).
+    clock = Clock()
+    eng = BehaviorEngine(
+        snapshot=lambda: snap(
+            ui=UIState(open_panels=frozenset({offsets.UI_CHAT_CONSOLE}))
+        ),
+        monitor=ScriptedMonitor(),
+        states=[FakeStep("s")],
+        executor=RecordingExecutor(),
+        clock=clock,
+        sleep=lambda s: clock.advance(s),
+    )
+    with pytest.raises(StopRequested):
+        eng.tick()
+
+
+def test_the_kill_switch_stays_out_of_town():
+    # Town chores press ESC and Enter constantly; the switch is a FIELD
+    # rule (abort-in-chat and drill-cancel still cover town).
+    clock = Clock()
+    step = FakeStep("s", ticks_to_done=3)
+    eng = BehaviorEngine(
+        snapshot=lambda: snap(
+            area=TOWN,
+            ui=UIState(open_panels=frozenset({offsets.UI_ESCMENU_MAIN})),
+        ),
+        monitor=ScriptedMonitor(),
+        states=[step],
+        executor=RecordingExecutor(),
+        clock=clock,
+        sleep=lambda s: clock.advance(s),
+    )
+    eng.tick()
+    assert step.calls == 1
 
 
 def test_tick_order_is_monitor_ladder_step():

@@ -87,6 +87,16 @@ request. They are conventions of this kit, not suggestions:
    (`engine.StopRequested`, which leaves the game the way `IdleBail`
    does). Before that, the stop channel reached only town waits, and an
    in-field abort went unheard until the refusal limit tripped.
+   **Since R189, the keys themselves are the switch:** out of town, the
+   operator pressing ESC (esc menu) or Enter (chat console) stops the
+   run within a tick — no typing needed; opening chat IS the abort. The
+   bot's own field-side ESC is correlated away by timestamp
+   (`clear_panels` stamps it; grace 1.5 s), misclick-opened NPC and
+   waypoint dialogs are different panels and still auto-recovered, and
+   bridge-delivered chat (Partyline) cannot collide because the bridge
+   runs one command at a time. Town stays excluded — the chores press
+   both keys constantly; `abort` in chat and drill-cancel still cover
+   town.
 3. **Stages must not bleed.** A multi-stage test states each stage's
    scope, announces its boundary, and leaves nothing running into the
    next stage. Note the corollary from run 3: shipped AUTOMATIC

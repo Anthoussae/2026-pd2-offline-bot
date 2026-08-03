@@ -381,6 +381,15 @@ class LiveBot:
                 return "area unreadable"
             return survey.coverage(explored, area.bounds_subtiles)
 
+        # The kill-switch correlation (R189): field-side, the bot's ONE
+        # ESC sender is this closure; stamping it lets the engine tell
+        # the bot's own escape from the operator's.
+        escape_stamp: dict = {"at": None}
+
+        def clear_panels_tracked() -> None:
+            escape_stamp["at"] = self.clock()
+            self.town.close_panels()
+
         services = RunServices(
             run_preamble=self.town.run_preamble,
             travel_to=self.waypoint.take,
@@ -399,7 +408,7 @@ class LiveBot:
             # available in the field — where a panel is worse, because
             # nothing out there opens one deliberately and every send is
             # refused until it closes.
-            clear_panels=self.town.close_panels,
+            clear_panels=clear_panels_tracked,
             narrate=narrator.narrate,
             route_to=route_service(self.navigator),
         )
@@ -423,6 +432,9 @@ class LiveBot:
             # layer's waits were previously the ONLY place this was
             # consulted (T54 run 3).
             should_stop=self.should_stop,
+            # The Enter/ESC kill switch (R189): the operator's own keys
+            # stop the run, correlated against the stamp above.
+            bot_escape_at=lambda: escape_stamp["at"],
         )
 
     def engines(self) -> list[BehaviorEngine]:

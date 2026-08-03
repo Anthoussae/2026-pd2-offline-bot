@@ -543,6 +543,90 @@ def test_fighting_suspends_the_patrol():
     assert not step._visited, "it walked while something was alive in the radius"
 
 
+# -- the border livelock's three fixes (R189, T55 run 2) ---------------------------
+
+
+def test_a_collect_walk_that_lands_short_is_written_off():
+    """T55 run 2: the walk to the seam item ARRIVED 5 subtiles short of
+    pickup reach (4) every time, clicked nothing, and cost nothing —
+    collect's only budget counted clicks. Walks that get no closer now
+    pay the same budget as every other mover."""
+    clock = Clock()
+    svc = services(clock)
+    step = make_step("pickup", svc)
+    item = GroundItem(unit_id=88, kind=999, position=(1040, 1000), quality=RARE)
+    here = {"pos": HOME}
+
+    def react(action):
+        if isinstance(action, MoveTo):
+            here["pos"] = (1035, 1000)  # honest arrival, 5 short, forever
+
+    executor = RecordingExecutor(clock=clock, on_execute=react)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    for _ in range(12):
+        step.step(snap(pos=here["pos"], items=[item]), ctx)
+        clock.advance(2.0)
+    assert 88 in svc.stuck, "the short-arriving walk never spent a budget"
+    moves = [a for a in executor.actions if isinstance(a, MoveTo)]
+    assert len(moves) <= 1 + svc.pickup_attempts
+
+
+def test_subtile_wobble_does_not_reset_the_patrol_budget():
+    """R189 b: the run-2 ping-pong landed a subtile closer now and then,
+    and that hair kept the no-progress budget resetting forever. Progress
+    now needs to beat the best by `patrol_progress_margin`."""
+    clock = Clock()
+    svc = services(clock)
+    step = make_step(
+        "clear_radius", svc, {"radius": 96, "center": "arrival", "patrol": True}
+    )
+    here = {"pos": HOME}
+    target_point = step.patrol_points(HOME)[0]
+    legs = {"n": 0}
+
+    def react(action):
+        if isinstance(action, MoveTo):
+            # Land alternately 7 and 6 subtiles short of the ring point:
+            # a 1-subtile "improvement" every other leg, never arriving.
+            legs["n"] += 1
+            offset = 6 if legs["n"] % 2 else 7
+            here["pos"] = (target_point[0] - offset, target_point[1])
+
+    executor = RecordingExecutor(clock=clock, on_execute=react)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    gave_up = None
+    for _ in range(30):
+        outcome = step.step(snap(pos=here["pos"]), ctx)
+        clock.advance(0.5)
+        if outcome.note and "gave up" in outcome.note:
+            gave_up = outcome.note
+            break
+    assert gave_up is not None, (
+        "the wobble kept the budget resetting — the T55 run 2 loop"
+    )
+
+
+def test_ring_points_outside_the_area_are_dropped_at_birth():
+    """R189 c: 'clear Cold Plains' must never chase ground that belongs
+    to Blood Moor — a seam point stops existing as a target."""
+    clock = Clock()
+    svc = services(clock)
+    step = make_step(
+        "clear_radius", svc, {"radius": 96, "center": "arrival", "patrol": True}
+    )
+    # An area whose right edge sits at x = 1050 (210 tiles x 5): the east
+    # ring point (~1063) is beyond it; most of the ring is inside.
+    narrow = Area(level_no=FIELD, position=(0, 0), size=(210, 500))
+    points = step.patrol_points(HOME, narrow)
+    assert points, "the filter emptied a mostly-inside ring"
+    left, top, right, bottom = narrow.bounds_subtiles
+    for x, y in points:
+        assert left + 4 <= x < right - 4, f"seam point {x, y} survived"
+    assert len(points) < svc.patrol_points  # the east point is gone
+
+
 # -- the chat console belongs to the operator (T54 run 4) --------------------------
 
 

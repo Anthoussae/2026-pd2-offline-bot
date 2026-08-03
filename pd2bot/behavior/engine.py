@@ -37,6 +37,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from pd2bot import offsets
 from pd2bot.behavior.actions import ActionExecutor
 from pd2bot.behavior.reflex import ReflexLadder
 from pd2bot.input import InputRefused
@@ -221,6 +222,11 @@ class EngineConfig:
     # it, the step is hung and gets treated as an idle loop, which is what
     # it is.
     wait_bail_s: float = 30.0
+    # The Enter/ESC kill switch's correlation window (R189): an esc menu
+    # appearing within this long of the BOT's own ESC send is the bot's
+    # (the one real race — an ESC landing just after a panel closed opens
+    # the menu instead); beyond it, the menu is the operator's.
+    operator_escape_grace_s: float = 1.5
 
 
 @dataclass
@@ -255,6 +261,7 @@ class BehaviorEngine:
         sleep: Callable[[float], None] = time.sleep,
         narrate: Callable[[str], None] = narrate_noop,
         should_stop: Callable[[], bool] | None = None,
+        bot_escape_at: Callable[[], float | None] | None = None,
     ) -> None:
         if not states:
             raise BehaviorError("a run with no steps cannot do anything")
@@ -274,6 +281,11 @@ class BehaviorEngine:
         # The outside stop order (drill abort, operator request), polled
         # every tick. None = no channel wired.
         self._should_stop = should_stop
+        # When the bot itself last sent an ESC (the wiring's tracked
+        # clear_panels closure) — the kill switch's correlation input.
+        # None = no kill switch in this environment (sims, drills that
+        # build the engine bare).
+        self._bot_escape_at = bot_escape_at
         # The narrative channel (R179): step transitions with durations —
         # the engine is the only thing that knows when a step began.
         self._narrate = narrate
@@ -331,6 +343,36 @@ class BehaviorEngine:
                 "the game rather than standing in Hell (R47.9, review 001)"
                 f"\n{self._context(snap)}"
             )
+
+    def _operator_took_the_controls(self, snap: GameSnapshot) -> bool:
+        """The Enter/ESC kill switch (R189, the user's rule): out of
+        town, the esc menu and the chat console can only be opened by a
+        HUMAN — no world misclick opens either (misclicks open NPC and
+        waypoint dialogs, different panels, still auto-recovered) — with
+        one exception: the bot's own field-side ESC (`clear_panels`)
+        landing just after a panel closed opens the menu instead. That
+        race is correlated away by timestamp; past the grace window, the
+        panel is the operator's, and operator input means the operator
+        wants the character. Chat sent by the agent's other processes
+        (Partyline) cannot collide: the elevated bridge runs one command
+        at a time, so its chat waits until the run's command exits. Town
+        is excluded — the chores legitimately press both keys constantly.
+        """
+        if snap.ui is None or not snap.in_game or snap.in_town:
+            return False
+        if not (
+            snap.ui.is_open(offsets.UI_ESCMENU_MAIN)
+            or snap.ui.is_open(offsets.UI_CHAT_CONSOLE)
+        ):
+            return False
+        if self._bot_escape_at is not None:
+            stamp = self._bot_escape_at()
+            if (
+                stamp is not None
+                and self._clock() - stamp < self.config.operator_escape_grace_s
+            ):
+                return False
+        return True
 
     def _check_idle(self, snap: GameSnapshot, now: float) -> None:
         if not snap.in_game or snap.in_town:
@@ -469,6 +511,11 @@ class BehaviorEngine:
             self._narrate("run aborted by request")
             raise StopRequested("stopped by outside request (abort)")
         snap = self._snapshot()
+        if self._operator_took_the_controls(snap):
+            self._narrate("operator input (ESC/Enter) — standing down")
+            raise StopRequested(
+                "the operator pressed ESC or opened chat — standing down"
+            )
         self._monitor.tick()
         now = self._clock()
         self.report.ticks += 1

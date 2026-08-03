@@ -70,6 +70,12 @@ def _hop(
 # owning the walking.
 _ROUTE_WAYPOINT_REACH = 3
 
+# How far inside its own area's bounds a patrol ring point must sit
+# (R189 c): a point ON the seam has the T55 run 2 problem — reaching it
+# crosses the border, and the crossing flips which area's grid plans
+# the next walk.
+_SEAM_INSET = 4
+
 
 def _next_route_waypoint(
     route: list[tuple[int, int]], origin: tuple[int, int]
@@ -333,6 +339,21 @@ class RunServices:
     # one risky cleanse beats a pinned character.
     hygiene_walk_best: int | None = None
     hygiene_walk_attempts: int = 0
+    # Collect-walk patience (R189, T55 run 2's border livelock): per item,
+    # the closest a collect walk has gotten and how many walks have gained
+    # nothing since. The walk to the seam item ARRIVED 5 subtiles short of
+    # pickup reach every time, clicked nothing, and therefore spent
+    # nothing — collect's only budget counted CLICKS. Walks that get no
+    # closer now pay the same budget every other mover pays
+    # (`pickup_attempts`), and the item is written off as stuck.
+    collect_closest: dict[int, int] = field(default_factory=dict)
+    collect_stalls: dict[int, int] = field(default_factory=dict)
+    # Progress must beat the best distance by this margin to reset a
+    # no-progress budget (R189): T55 run 2's ping-pong occasionally
+    # landed a single subtile closer, and that hair of "progress" kept
+    # the patrol budget resetting forever. Slow-but-real closing still
+    # survives — two subtiles over a few legs re-earns the budget.
+    patrol_progress_margin: int = 2
     # The sightings memo (T3, R186 — the user's per-run scratch-note
     # idea, verbatim): every wanted item the CLEARANCE saw, by unit id,
     # at the position it was seen. Entries are reaped once the spot is
@@ -659,7 +680,31 @@ class _PickupMixin:
         player = snap.player
         if player is None:
             return False
-        if _chebyshev(item.position, player.position) > self.services.pickup_reach:
+        distance = _chebyshev(item.position, player.position)
+        if distance > self.services.pickup_reach:
+            # The R189 budget: a walk that SUCCEEDS without getting closer
+            # is not progress (T55 run 2: the seam item's walk arrived 5
+            # subtiles short of reach 4 forever, and clicked nothing, so
+            # the per-click budget below never spent a cent).
+            best = self.services.collect_closest.get(item.unit_id)
+            if best is None or distance < best:
+                self.services.collect_closest[item.unit_id] = distance
+                self.services.collect_stalls[item.unit_id] = 0
+            else:
+                stalls = self.services.collect_stalls.get(item.unit_id, 0) + 1
+                self.services.collect_stalls[item.unit_id] = stalls
+                if stalls >= self.services.pickup_attempts:
+                    self.services.stuck.add(item.unit_id)
+                    self.services.log(
+                        f"pickup: item {item.unit_id} at {item.position} "
+                        f"written off — {stalls} walks got no closer than "
+                        f"{best} (reach is {self.services.pickup_reach})"
+                    )
+                    self.services.narrate(
+                        f"pickup: gave up on the item at {item.position} "
+                        "(walks keep arriving short)"
+                    )
+                    return True
             if not self.send(ctx, MoveTo(item.position)):
                 # Unreachable ground: give up on this item rather than the
                 # game, the same way the patrol gives up on a point.
@@ -997,7 +1042,9 @@ class _PatrolMixin:
     # no-routes still die in two ticks with zero legs spent.
     _route_denied: dict[tuple[int, int], int] = field(default_factory=dict)
 
-    def patrol_points(self, centre: tuple[int, int]) -> list[tuple[int, int]]:
+    def patrol_points(
+        self, centre: tuple[int, int], area=None
+    ) -> list[tuple[int, int]]:
         """The ring, computed once from the centre and the radius.
 
         Sized as a fraction of `radius` so that changing the radius — the
@@ -1005,17 +1052,39 @@ class _PatrolMixin:
         radius 96 the ring sits at ~63: adjacent points are ~49 apart and
         the furthest edge of the circle is ~33 from the nearest point,
         which is inside even T51's worst-case 46.
+
+        Points outside the AREA's own bounds (with a small seam inset)
+        are dropped at birth (R189 c): "clear Cold Plains" must never
+        chase ground that belongs to Blood Moor — the seam is where T55
+        run 2 livelocked, with each border crossing flipping which
+        area's grid planned the next walk.
         """
         if self._points is None:
             ring = max(1, round(self.radius * self.services.patrol_ring))
             count = max(1, self.services.patrol_points)
-            self._points = [
+            points = [
                 (
                     centre[0] + round(ring * math.cos(2 * math.pi * i / count)),
                     centre[1] + round(ring * math.sin(2 * math.pi * i / count)),
                 )
                 for i in range(count)
             ]
+            if area is not None:
+                inset = _SEAM_INSET
+                left, top, right, bottom = area.bounds_subtiles
+                kept = [
+                    (x, y)
+                    for x, y in points
+                    if left + inset <= x < right - inset
+                    and top + inset <= y < bottom - inset
+                ]
+                if len(kept) < len(points):
+                    self.services.log(
+                        f"patrol: dropped {len(points) - len(kept)} ring "
+                        "point(s) outside the area's bounds"
+                    )
+                points = kept
+            self._points = points
         return self._points
 
     @property
@@ -1045,7 +1114,12 @@ class _PatrolMixin:
         which is what keeps both watchdogs fed without either of them
         needing to know a patrol exists.
         """
-        points = self.patrol_points(self._centre)  # type: ignore[arg-type]
+        points = self.patrol_points(self._centre, snap.area)  # type: ignore[arg-type]
+        if not points:
+            return StepOutcome(
+                done=False, acted=True,
+                note="patrol ring empty (every point outside the area)",
+            )
         target = points[self._index]
         here = snap.player.position  # type: ignore[union-attr]
 
@@ -1055,10 +1129,13 @@ class _PatrolMixin:
             self._advance()
             return StepOutcome(done=False, acted=True, note=f"patrol reached {target}")
 
-        # Progress, not effort: a leg that closed the gap earns another,
-        # however many it takes. Only legs that achieve nothing count
-        # against the point.
-        if self._closest is None or distance < self._closest:
+        # Progress, not effort — and progress must beat the best by a
+        # MARGIN (R189 b): T55 run 2's ping-pong landed a subtile closer
+        # now and then, and that hair kept this budget resetting forever.
+        if (
+            self._closest is None
+            or distance <= self._closest - self.services.patrol_progress_margin
+        ):
             self._closest = distance
             self._attempts = 0
         else:
@@ -1695,7 +1772,12 @@ class SurveyStep(_PickupMixin):
 
         if target != self._current:
             self._current, self._closest, self._attempts = target, None, 0
-        if self._closest is None or distance < self._closest:
+        if (
+            self._closest is None
+            or distance <= self._closest - self.services.patrol_progress_margin
+        ):
+            # The same margin rule as the patrol (R189 b): subtile wobble
+            # is not progress.
             self._closest, self._attempts = distance, 0
         else:
             self._attempts += 1
