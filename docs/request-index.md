@@ -187,3 +187,7 @@ headings, noted in parentheses, say roughly where they fell).
 - M5 P6 R186 [decision] Dilly-dally review: which of T1-T4 to implement? · 2026-08-02 17:52
 
 - M5 P6 R187 [execute] T55 run 1: OK the gate — the timed patrol · 2026-08-02 18:42
+
+- M5 P6 R188 [execute] T55 run 2: OK the gate — more data after the armor/no-route fixes · 2026-08-02 19:06
+
+- M5 P6 R189 [decision] The border livelock: approve the three fixes; Enter/ESC kill switch design · 2026-08-02 19:40
