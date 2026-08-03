@@ -191,3 +191,5 @@ headings, noted in parentheses, say roughly where they fell).
 - M5 P6 R188 [execute] T55 run 2: OK the gate — more data after the armor/no-route fixes · 2026-08-02 19:06
 
 - M5 P6 R189 [decision] The border livelock: approve the three fixes; Enter/ESC kill switch design · 2026-08-02 19:40
+
+- M5 P6 R190 [execute] T55 run 3: OK the gate — livelock fixes and kill switch, live · 2026-08-02 20:07
