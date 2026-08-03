@@ -543,6 +543,50 @@ def test_fighting_suspends_the_patrol():
     assert not step._visited, "it walked while something was alive in the radius"
 
 
+# -- the chat console belongs to the operator (T54 run 4) --------------------------
+
+
+def test_a_lone_chat_console_is_left_for_the_operator():
+    """The field panel-recovery ESC'd the chat console over and over
+    while the user typed `abort`, wiping the half-typed line each time —
+    the abort never reached chat. Nothing in the field opens the console
+    but a human, so a lone console is theirs, not a stray."""
+    clock = Clock()
+    cleared = []
+    svc = services(clock, clear_panels=lambda: cleared.append(1))
+    step = make_step("clear_radius", svc, {"radius": 96, "center": "arrival"})
+    ctx = context()
+    ctx.notes["arrival"] = HOME
+    step.step(snap(ui=panels(offsets.UI_CHAT_CONSOLE)), ctx)
+    assert cleared == [], "the operator's chat console was closed"
+
+
+def test_a_stray_esc_menu_is_still_cleared():
+    clock = Clock()
+    cleared = []
+    svc = services(clock, clear_panels=lambda: cleared.append(1))
+    step = make_step("clear_radius", svc, {"radius": 96, "center": "arrival"})
+    ctx = context()
+    ctx.notes["arrival"] = HOME
+    outcome = step.step(snap(ui=panels(offsets.UI_ESCMENU_MAIN)), ctx)
+    assert cleared == [1] and outcome.note == "closed a stray panel"
+
+
+def test_console_alongside_another_blocking_panel_is_fair_game():
+    # A console AND an ESC menu: something is genuinely stuck; recovery
+    # proceeds (ESC closes one panel per press, whichever it is).
+    clock = Clock()
+    cleared = []
+    svc = services(clock, clear_panels=lambda: cleared.append(1))
+    step = make_step("clear_radius", svc, {"radius": 96, "center": "arrival"})
+    ctx = context()
+    ctx.notes["arrival"] = HOME
+    step.step(
+        snap(ui=panels(offsets.UI_CHAT_CONSOLE, offsets.UI_ESCMENU_MAIN)), ctx
+    )
+    assert cleared == [1]
+
+
 # -- route-aware legs (R181) ------------------------------------------------------
 #
 # The atlas answered every NAVIGATOR question and no STEP ever asked it:

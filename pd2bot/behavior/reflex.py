@@ -24,6 +24,11 @@ is config, sourced from the class TOML):
                   belt: Shift+<column key> feeds it one (R179; chord
                   corrected at R183). Below every player rung, above the
                   armor upkeep; paced, never in town.
+    7.6 mana glut two or more MANA potions at column bottoms: drink one
+                  (a squatting column first) until only one bottom slot
+                  holds mana (user rule, 2026-08-02). Belt hygiene: a
+                  mana glut blocks columns the refill and the heal
+                  search both want.
     8  upkeep     bone armor off cooldown and absorb < 75% (fallback when
                   the stat is unreadable: after being hit): recast.
                   Revive raising is DELEGATED to the combat module's
@@ -135,6 +140,12 @@ class ReflexConfig:
     # on attempt like the armor recast.
     merc_heal_below_pct: float = 50.0
     merc_heal_retry_s: float = 3.0
+    # Rung 7.6 — mana-glut hygiene (user rule, 2026-08-02): more than
+    # this many columns with a MANA potion at the bottom -> drink the
+    # excess (squatting columns first), so mana cannot clog slots the
+    # heal search and the town refill both want.
+    mana_glut_bottom_max: int = 1
+    mana_glut_retry_s: float = 2.0
     # Rung 8 — bone armor upkeep.
     armor_skill_id: int = offsets.SKILL_BONE_ARMOR
     armor_recast_below_pct: float = 75.0
@@ -320,6 +331,7 @@ class ReflexLadder:
         self._armor_attempt: float | None = None
         self._reposition_attempt: float | None = None
         self._merc_heal_attempt: float | None = None
+        self._mana_glut_attempt: float | None = None
 
     # -- shared bookkeeping ----------------------------------------------------
 
@@ -403,6 +415,19 @@ class ReflexLadder:
             return False
         bottom = min(occupants, key=lambda i: i.belt_slot or 0)
         return type_check(bottom)
+
+    def _bottom_potions(self, carried: CarriedItems) -> dict[int, CarriedItem]:
+        """The bottom occupant of every non-empty column — exactly the
+        four potions the belt keys would send."""
+        bottoms: dict[int, CarriedItem] = {}
+        for item in carried.belt:
+            column = item.belt_column
+            if column is None:
+                continue
+            held = bottoms.get(column)
+            if held is None or (item.belt_slot or 0) < (held.belt_slot or 0):
+                bottoms[column] = item
+        return bottoms
 
     def _potion_column(
         self,
@@ -704,6 +729,40 @@ class ReflexLadder:
                                 self, "_merc_heal_attempt", now
                             ),
                         )
+
+            # Rung 7.6 — mana-glut hygiene (user rule, 2026-08-02): more
+            # than mana_glut_bottom_max columns with MANA at the bottom
+            # means mana is clogging slots the heal search and the town
+            # refill both want, so drink the excess down. A squatting
+            # column first — the configured mana column's bottom is the
+            # one worth keeping. Paced on attempt like every send that
+            # can fail (stage B run 9).
+            if (
+                self._mana_glut_attempt is None
+                or now - self._mana_glut_attempt >= cfg.mana_glut_retry_s
+            ):
+                mana_bottoms = [
+                    column
+                    for column, item in self._bottom_potions(carried).items()
+                    if item.is_mana_potion
+                ]
+                if len(mana_bottoms) > cfg.mana_glut_bottom_max:
+                    glut_column = next(
+                        (c for c in sorted(mana_bottoms) if c != cfg.mana_column),
+                        mana_bottoms[0],
+                    )
+                    return ReflexDecision(
+                        rung="mana_glut",
+                        action=DrinkPotion(glut_column, "mana"),
+                        reason=(
+                            f"{len(mana_bottoms)} mana potions at column "
+                            f"bottoms > {cfg.mana_glut_bottom_max} — "
+                            "drinking the glut down"
+                        ),
+                        on_attempt=lambda: setattr(
+                            self, "_mana_glut_attempt", now
+                        ),
+                    )
 
         # Rung 8 — upkeep. The armor half runs in town too (castable there,
         # proven in P2's live drill; arriving armored is strictly better);

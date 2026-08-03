@@ -499,6 +499,65 @@ def test_the_merc_is_never_fed_a_squatting_mana():
     assert ladder.evaluate(snap(allies=[merc(hp=38)])) is None
 
 
+# -- rung 7.6: mana-glut hygiene (user rule, 2026-08-02) -------------------------
+
+
+def test_two_bottom_manas_drink_the_squatter_first():
+    # Mana at the bottom of its own column AND squatting in a healing
+    # column: drink the squatter, keep the home column's bottom.
+    glut = belt(
+        belt_potion(1, MANA, 0),  # the configured mana column — keep
+        belt_potion(2, MANA, 2), belt_potion(3, HEAL, 6),  # the squatter
+    )
+    ladder, _ = make_ladder(carried=lambda: glut)
+    decision = ladder.evaluate(snap())
+    assert decision is not None and decision.rung == "mana_glut"
+    assert decision.action == DrinkPotion(2, "mana")
+
+
+def test_one_bottom_mana_is_no_glut():
+    ladder, _ = make_ladder()  # full_belt: exactly one mana, in its column
+    assert ladder.evaluate(snap()) is None
+
+
+def test_mana_above_a_healing_bottom_does_not_count():
+    # The glut rule reads BOTTOMS: a mana stacked above healing is not
+    # clogging anything the keys can reach yet.
+    stacked = belt(
+        belt_potion(1, MANA, 0),
+        belt_potion(2, HEAL, 2), belt_potion(3, MANA, 6),
+    )
+    ladder, _ = make_ladder(carried=lambda: stacked)
+    assert ladder.evaluate(snap()) is None
+
+
+def test_glut_drinking_is_paced_across_failed_sends():
+    glut = belt(belt_potion(1, MANA, 0), belt_potion(2, MANA, 2))
+    ladder, clock = make_ladder(carried=lambda: glut)
+    first = ladder.evaluate(snap())
+    assert first.rung == "mana_glut"
+    first.commit_attempted()  # the send FAILED; pacing still recorded
+    clock.advance(0.5)
+    assert ladder.evaluate(snap()) is None
+    clock.advance(2.0)
+    assert ladder.evaluate(snap()).rung == "mana_glut"
+
+
+def test_glut_never_fires_in_town():
+    glut = belt(belt_potion(1, MANA, 0), belt_potion(2, MANA, 2))
+    ladder, _ = make_ladder(carried=lambda: glut)
+    assert ladder.evaluate(snap(area=TOWN)) is None
+
+
+def test_survival_outranks_the_glut():
+    glut = belt(
+        belt_potion(1, MANA, 0), belt_potion(2, MANA, 2),
+        belt_potion(3, REJUV, 1),
+    )
+    ladder, _ = make_ladder(carried=lambda: glut)
+    assert ladder.evaluate(snap(player(hp=490))).rung == "rejuv"
+
+
 # -- rung 6: mana --------------------------------------------------------------
 
 

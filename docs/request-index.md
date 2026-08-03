@@ -179,3 +179,5 @@ headings, noted in parentheses, say roughly where they fell).
 - M5 P6 R182 [decision] Potions + narrative-log cycle: approve commit and say go for live · 2026-08-02 05:13
 
 - M5 P6 R183 [verify] Which chord actually feeds the merc? Test by hand · 2026-08-02 16:37
+
+- M5 P6 R184 [execute] T54 run 4: OK the gates in-game after the run-3 fixes · 2026-08-02 17:00

@@ -123,6 +123,13 @@ disengage_hp_pct = 70.0
 merc_heal_below_pct = 50.0
 merc_heal_retry_s = 3.0
 
+# Rung 7.6 — mana-glut hygiene (user rule, 2026-08-02): with more than
+# mana_glut_bottom_max columns holding a MANA potion at the BOTTOM (the
+# slot the key sends), drink the excess — squatting columns first — so
+# mana cannot clog slots the heal search and the town refill both want.
+mana_glut_bottom_max = 1
+mana_glut_retry_s = 2.0
+
 # Rung 8 — upkeep: recast bone armor when its remaining absorb falls
 # below armor_recast_below_pct (fallback when the stat is unreadable:
 # recast after being hit, R47.2). armor_retry_s paces attempts, since the

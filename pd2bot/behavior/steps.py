@@ -38,6 +38,7 @@ from pd2bot.narrate import noop as narrate_noop
 from pd2bot.navigate import NavigationError
 from pd2bot.pickit import Pickit, potion_type_of
 from pd2bot.snapshot import GameSnapshot
+from pd2bot.uistate import blocking_panels
 from pd2bot.units import GroundItem
 
 
@@ -724,8 +725,22 @@ class _PickupMixin:
 
         Checked before anything else a step does, because until it is true
         nothing else a step does can land.
+
+        THE CHAT CONSOLE IS EXEMPT. Nothing in the field opens it but a
+        human — and the human opening it mid-run is most likely typing
+        `abort` (T54 run 4: this method ESC'd the console over and over
+        while the user typed, wiping the half-typed abort each time, so
+        the abort never reached chat at all). Left open it costs refused
+        sends for a few seconds; the engine keeps polling the stop
+        channel, and the submitted line lands within a tick. A console
+        that stays open past the refusal limit still ends the game
+        safely — which is also an acceptable outcome of someone trying
+        to stop the bot.
         """
         if snap.ui is None or not snap.ui.blocks_input or snap.in_town:
+            return False
+        blocking_open = snap.ui.open_panels & frozenset(blocking_panels())
+        if blocking_open == {offsets.UI_CHAT_CONSOLE}:
             return False
         if self.services.clear_panels is None:
             return False

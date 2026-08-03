@@ -207,6 +207,8 @@ _REFLEX_NUMBERS: dict[str, type] = {
     "disengage_hp_pct": float,
     "merc_heal_below_pct": float,
     "merc_heal_retry_s": float,
+    "mana_glut_bottom_max": int,
+    "mana_glut_retry_s": float,
     "armor_recast_below_pct": float,
     "armor_retry_s": float,
 }
