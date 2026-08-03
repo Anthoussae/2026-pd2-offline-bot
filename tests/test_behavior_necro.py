@@ -388,30 +388,73 @@ def test_a_new_pack_restarts_the_wait():
 
 
 # -- desecrate -> revive maintenance -------------------------------------------
+#
+# Since R185 A the upkeep only runs with a live hostile IN PERCEPTION: an
+# empty field needs no revive wall, and maintaining one anyway is the churn
+# that ate ~10 minutes of T54 run 4. The tests stage a distant threat.
+
+
+def threat(pos=(1060, 1000)):
+    """A live hostile far from the fight: enough to justify upkeep."""
+    return monster(990, pos)
+
+
+def test_upkeep_stands_down_in_a_quiet_field():
+    """R185 A: nothing hostile in perception = nothing for a wall to tank.
+    Not even free corpses tempt it — the wall rebuilds at next contact."""
+    necro, _ = make()
+    assert necro.upkeep(snap()) is None
+    assert necro.upkeep(snap(corpses=[corpse(5, (1004, 1000))])) is None
 
 
 def test_upkeep_quiet_when_the_wall_is_up():
     necro, _ = make()
     allies = [ally(i, (1001, 1000)) for i in range(3)]
-    assert necro.upkeep(snap(allies=allies)) is None
+    assert necro.upkeep(snap(allies=allies, monsters=[threat()])) is None
 
 
 def test_upkeep_never_runs_in_town():
     necro, _ = make()
-    assert necro.upkeep(snap(area=TOWN)) is None
+    assert necro.upkeep(snap(area=TOWN, monsters=[threat()])) is None
 
 
 def test_upkeep_revives_an_available_corpse():
     necro, _ = make()
-    action = necro.upkeep(snap(corpses=[corpse(5, (1004, 1000))]))
+    action = necro.upkeep(
+        snap(corpses=[corpse(5, (1004, 1000))], monsters=[threat()])
+    )
     assert action == CastAtPoint(offsets.SKILL_REVIVE, (1004, 1000))
 
 
 def test_upkeep_desecrates_when_there_are_no_corpses():
     necro, _ = make()
-    action = necro.upkeep(snap())
+    action = necro.upkeep(snap(monsters=[threat()]))
     assert isinstance(action, CastAtPoint)
     assert action.skill_id == offsets.SKILL_DESECRATE
+
+
+def test_corpses_alone_no_longer_refill_the_desecrate_budget():
+    """R185 B, run 4's self-feeding loop: desecrate makes corpses, and
+    'corpses exist' used to refill the desecrate budget — so the bound
+    never bound while revive casts failed to stick. Now only a GROWING
+    revive count earns a refill."""
+    necro, clock = make()
+    desecrates = 0
+    for round_no in range(6):
+        action = necro.upkeep(snap(monsters=[threat()]))
+        if action is not None and action.skill_id == offsets.SKILL_DESECRATE:
+            desecrates += 1
+        clock.advance(1.5)
+        # A corpse appears (desecrate's own product); the revive cast
+        # never sticks — the revive count stays 0 throughout.
+        necro.upkeep(
+            snap(
+                monsters=[threat()],
+                corpses=[corpse(50 + round_no, (1004, 1000))],
+            )
+        )
+        clock.advance(1.5)
+    assert desecrates == 2  # the budget, spent once, stays spent
 
 
 def test_desecrate_avoids_ground_occupied_by_units():
@@ -439,7 +482,9 @@ def test_desecrate_never_lands_on_a_clickable_object():
     gave up 10 s later and the run chickened out with the area untouched.
     """
     necro, _ = make()
-    action = necro.upkeep(snap(objects=[waypoint((1000, 1000))]))
+    action = necro.upkeep(
+        snap(objects=[waypoint((1000, 1000))], monsters=[threat()])
+    )
     if action is not None:
         assert _chebyshev(action.target, (1000, 1000)) > CombatConfig().object_clearance
 
@@ -449,7 +494,7 @@ def test_scenery_is_not_treated_as_a_hazard():
     # scenery once made the area unwalkable. Only INTERACTIVE kinds count.
     necro, _ = make()
     scenery = GameObject(unit_id=12, kind=9999, position=(1004, 1000), mode=0)
-    action = necro.upkeep(snap(objects=[scenery]))
+    action = necro.upkeep(snap(objects=[scenery], monsters=[threat()]))
     assert action is not None, "decoration must not stop a cast"
 
 
@@ -470,7 +515,7 @@ def test_offense_is_released_when_there_is_nowhere_to_desecrate():
 
 def test_desecrate_is_bounded_when_it_produces_nothing():
     necro, clock = make()
-    empty = snap()
+    empty = snap(monsters=[threat()])
     casts = 0
     for _ in range(10):
         if necro.upkeep(empty) is not None:
@@ -482,42 +527,47 @@ def test_desecrate_is_bounded_when_it_produces_nothing():
 def test_the_round_budget_resets_once_the_wall_is_back_up():
     necro, clock = make()
     for _ in range(3):
-        necro.upkeep(snap())
+        necro.upkeep(snap(monsters=[threat()]))
         clock.advance(1.5)
-    assert necro.upkeep(snap()) is None  # budget spent
+    assert necro.upkeep(snap(monsters=[threat()])) is None  # budget spent
     # Revives come up, then expire later: the next shortfall gets a fresh
     # budget rather than inheriting the spent one.
-    necro.upkeep(snap(allies=[ally(i, (1001, 1000)) for i in range(3)]))
+    necro.upkeep(
+        snap(
+            allies=[ally(i, (1001, 1000)) for i in range(3)],
+            monsters=[threat()],
+        )
+    )
     clock.advance(1.5)
-    assert necro.upkeep(snap()) is not None
+    assert necro.upkeep(snap(monsters=[threat()])) is not None
 
 
 def test_settle_delays_stop_double_casting():
     necro, clock = make()
-    assert necro.upkeep(snap()) is not None
+    assert necro.upkeep(snap(monsters=[threat()])) is not None
     clock.advance(0.2)  # inside desecrate_settle_s
-    assert necro.upkeep(snap()) is None
+    assert necro.upkeep(snap(monsters=[threat()])) is None
 
     necro2, clock2 = make()
     bodies = [corpse(5, (1004, 1000)), corpse(6, (1005, 1001))]
-    assert necro2.upkeep(snap(corpses=bodies)) is not None
+    assert necro2.upkeep(snap(corpses=bodies, monsters=[threat()])) is not None
     clock2.advance(0.2)  # inside revive_settle_s
-    assert necro2.upkeep(snap(corpses=bodies)) is None
+    assert necro2.upkeep(snap(corpses=bodies, monsters=[threat()])) is None
 
 
 def test_revives_move_to_the_next_corpse():
     necro, clock = make()
     bodies = [corpse(5, (1004, 1000)), corpse(6, (1005, 1001))]
-    first = necro.upkeep(snap(corpses=bodies))
+    first = necro.upkeep(snap(corpses=bodies, monsters=[threat()]))
     clock.advance(1.0)
-    second = necro.upkeep(snap(corpses=bodies))
+    second = necro.upkeep(snap(corpses=bodies, monsters=[threat()]))
     assert first.target != second.target
 
 
 def test_distant_corpses_are_not_revive_fuel():
     necro, _ = make()
     far = corpse(5, (1000 + 40, 1000))  # beyond revive_search_radius 15
-    action = necro.upkeep(snap(corpses=[far]))
+    action = necro.upkeep(snap(corpses=[far], monsters=[threat()]))
     assert action.skill_id == offsets.SKILL_DESECRATE  # desecrates instead
 
 

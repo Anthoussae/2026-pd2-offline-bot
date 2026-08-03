@@ -120,6 +120,9 @@ class NecroCombat:
     _last_desecrate: float | None = None
     _last_revive: float | None = None
     _last_revive_target: int | None = None
+    # How many revives stood at the last upkeep look. The desecrate budget
+    # refills only when this GROWS (R185 B) — see `upkeep`.
+    _revive_count_seen: int = 0
 
     # -- engagement ------------------------------------------------------------
 
@@ -439,7 +442,23 @@ class NecroCombat:
         """
         if snap.player is None or snap.in_town:
             return None
-        if len(snap.revives) >= self.config.revive_target:
+        if not snap.live_monsters:
+            # The quiet-field gate (R185 A, run 4's 854 s clearance): with
+            # nothing hostile in perception there is nothing for a revive
+            # wall to tank, and maintaining one anyway churned casts for
+            # ~10 minutes while the patrol inched between them. The wall
+            # rebuilds at the next contact — `wait_for_revives_s` already
+            # holds offense while it does.
+            return None
+        revives = len(snap.revives)
+        if revives > self._revive_count_seen:
+            # The wall actually GREW: the desecrate budget earned its
+            # refill (R185 B). The old reset — "corpses exist" — was
+            # self-feeding: desecrate is what CREATES corpses, so the
+            # budget refilled itself and the bound never bound.
+            self._desecrate_rounds = 0
+        self._revive_count_seen = revives
+        if revives >= self.config.revive_target:
             # The wall is up. Reset the bounded-round counter so the NEXT
             # shortfall gets a full budget rather than inheriting this one's.
             self._desecrate_rounds = 0
@@ -465,7 +484,9 @@ class NecroCombat:
             )
             self._last_revive = now
             self._last_revive_target = corpse.unit_id
-            self._desecrate_rounds = 0  # corpses exist; the budget is unspent
+            # Deliberately NO budget reset here (R185 B): corpses existing
+            # is what desecrate manufactures, and refilling the budget on
+            # its own product is how run 4 churned for 10 minutes.
             return CastAtPoint(self.config.revive_skill_id, corpse.position)
 
         # No corpses: make some. Bounded, because a desecrate that produces

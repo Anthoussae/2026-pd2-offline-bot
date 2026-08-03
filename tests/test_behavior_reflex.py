@@ -481,14 +481,18 @@ def test_the_search_moves_on_to_a_column_with_a_healing_bottom():
     assert decision is not None and decision.action == DrinkPotion(3, "healing")
 
 
-def test_an_antidote_at_the_bottom_is_never_pressed():
-    # An accidental antidote in the belt matches no type: its column is
-    # simply skipped, never an error.
+def test_an_antidote_at_the_bottom_is_never_pressed_as_a_heal():
+    # An accidental antidote in the belt matches no type: the heal search
+    # skips its column — and the hygiene rung (7.6) then drinks it CLEAR,
+    # which is the fix rather than the mistake: the healing above becomes
+    # the new bottom.
     foreign = belt(
         belt_potion(1, ANTIDOTE, 2), belt_potion(2, HEAL, 6),
     )
     ladder, _ = make_ladder(carried=lambda: foreign)
-    assert ladder.evaluate(snap(player(hp=900))) is None
+    decision = ladder.evaluate(snap(player(hp=900)))
+    assert decision is not None and decision.rung == "belt_hygiene"
+    assert decision.action == DrinkPotion(2, "hygiene")
 
 
 def test_the_merc_is_never_fed_a_squatting_mana():
@@ -499,7 +503,11 @@ def test_the_merc_is_never_fed_a_squatting_mana():
     assert ladder.evaluate(snap(allies=[merc(hp=38)])) is None
 
 
-# -- rung 7.6: mana-glut hygiene (user rule, 2026-08-02) -------------------------
+# -- rung 7.6: belt-bottom hygiene (user rules, 2026-08-02) ----------------------
+#
+# The keys only reach the BOTTOM row, so the contract is: one of each
+# type at column bottoms when the contents allow, foreign potions drunk
+# clear, and never a mana glut. Rejuv bottoms are never spent.
 
 
 def test_two_bottom_manas_drink_the_squatter_first():
@@ -508,48 +516,102 @@ def test_two_bottom_manas_drink_the_squatter_first():
     glut = belt(
         belt_potion(1, MANA, 0),  # the configured mana column — keep
         belt_potion(2, MANA, 2), belt_potion(3, HEAL, 6),  # the squatter
+        belt_potion(4, HEAL, 3), belt_potion(5, REJUV, 1),
     )
     ladder, _ = make_ladder(carried=lambda: glut)
     decision = ladder.evaluate(snap())
-    assert decision is not None and decision.rung == "mana_glut"
-    assert decision.action == DrinkPotion(2, "mana")
+    assert decision is not None and decision.rung == "belt_hygiene"
+    assert decision.action == DrinkPotion(2, "hygiene")
+    assert "glut" in decision.reason
 
 
 def test_one_bottom_mana_is_no_glut():
-    ladder, _ = make_ladder()  # full_belt: exactly one mana, in its column
+    ladder, _ = make_ladder()  # full_belt: one of each type at bottoms
+    assert ladder.evaluate(snap()) is None
+
+
+def test_a_foreign_bottom_is_drunk_clear():
+    # An antidote picked into an empty column blocks it for every rung:
+    # drinking it is harmless and frees the slot.
+    foreign = belt(
+        belt_potion(1, MANA, 0), belt_potion(2, REJUV, 1),
+        belt_potion(3, ANTIDOTE, 2), belt_potion(4, HEAL, 6),
+        belt_potion(5, HEAL, 3),
+    )
+    ladder, _ = make_ladder(carried=lambda: foreign)
+    decision = ladder.evaluate(snap())
+    assert decision is not None and decision.rung == "belt_hygiene"
+    assert decision.action == DrinkPotion(2, "hygiene")
+    assert "foreign" in decision.reason
+
+
+def test_a_missing_type_is_worked_down_through_a_duplicate_bottom():
+    # No rejuv on the bottom row, but one buried above a DUPLICATE
+    # healing bottom: drink that healing, the rejuv falls a row closer.
+    buried = belt(
+        belt_potion(1, MANA, 0),
+        belt_potion(2, HEAL, 2), belt_potion(3, REJUV, 6),  # rejuv buried
+        belt_potion(4, HEAL, 3),  # the duplicate that makes col 2 spendable
+    )
+    ladder, _ = make_ladder(carried=lambda: buried)
+    decision = ladder.evaluate(snap())
+    assert decision is not None and decision.rung == "belt_hygiene"
+    assert decision.action == DrinkPotion(2, "hygiene")
+    assert "rejuv" in decision.reason
+
+
+def test_the_last_bottom_of_a_type_is_never_spent():
+    # Rejuv missing and buried — but above the ONLY healing bottom.
+    # Diversity already achieved outranks diversity sought: stay quiet.
+    buried = belt(
+        belt_potion(1, MANA, 0),
+        belt_potion(2, HEAL, 2), belt_potion(3, REJUV, 6),
+    )
+    ladder, _ = make_ladder(carried=lambda: buried)
+    assert ladder.evaluate(snap()) is None
+
+
+def test_rejuv_bottoms_are_never_drunk_for_tidiness():
+    # Two rejuv bottoms with healing buried: rejuvs are unbuyable
+    # emergency stock, and a hygiene drink would waste one entirely.
+    rejuvs = belt(
+        belt_potion(1, REJUV, 1), belt_potion(2, REJUV, 2),
+        belt_potion(3, HEAL, 6), belt_potion(4, MANA, 0),
+    )
+    ladder, _ = make_ladder(carried=lambda: rejuvs)
     assert ladder.evaluate(snap()) is None
 
 
 def test_mana_above_a_healing_bottom_does_not_count():
-    # The glut rule reads BOTTOMS: a mana stacked above healing is not
+    # The rules read BOTTOMS: a mana stacked above healing is not
     # clogging anything the keys can reach yet.
     stacked = belt(
-        belt_potion(1, MANA, 0),
-        belt_potion(2, HEAL, 2), belt_potion(3, MANA, 6),
+        belt_potion(1, MANA, 0), belt_potion(2, REJUV, 1),
+        belt_potion(3, HEAL, 2), belt_potion(4, MANA, 6),
     )
     ladder, _ = make_ladder(carried=lambda: stacked)
     assert ladder.evaluate(snap()) is None
 
 
-def test_glut_drinking_is_paced_across_failed_sends():
+def test_hygiene_is_paced_across_failed_sends():
     glut = belt(belt_potion(1, MANA, 0), belt_potion(2, MANA, 2))
     ladder, clock = make_ladder(carried=lambda: glut)
     first = ladder.evaluate(snap())
-    assert first.rung == "mana_glut"
+    assert first.rung == "belt_hygiene"
     first.commit_attempted()  # the send FAILED; pacing still recorded
     clock.advance(0.5)
     assert ladder.evaluate(snap()) is None
     clock.advance(2.0)
-    assert ladder.evaluate(snap()).rung == "mana_glut"
+    assert ladder.evaluate(snap()).rung == "belt_hygiene"
 
 
-def test_glut_never_fires_in_town():
+def test_hygiene_never_fires_in_town():
     glut = belt(belt_potion(1, MANA, 0), belt_potion(2, MANA, 2))
     ladder, _ = make_ladder(carried=lambda: glut)
     assert ladder.evaluate(snap(area=TOWN)) is None
 
 
-def test_survival_outranks_the_glut():
+def test_survival_outranks_hygiene():
     glut = belt(
         belt_potion(1, MANA, 0), belt_potion(2, MANA, 2),
         belt_potion(3, REJUV, 1),

@@ -98,13 +98,7 @@ def _potion_type(item: CarriedItem) -> str | None:
     the belt fills by COLUMN: whether a potion fits depends on its type, not
     on which tier of that type it happens to be (R53).
     """
-    if item.is_healing_potion:
-        return "healing"
-    if item.is_mana_potion:
-        return "mana"
-    if item.is_rejuv_potion:
-        return "rejuv"
-    return None
+    return item.potion_type
 
 
 def _carried_for_polling(session: GameSession) -> CarriedItems:

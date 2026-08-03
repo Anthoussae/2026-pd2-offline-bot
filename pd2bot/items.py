@@ -121,6 +121,19 @@ class CarriedItem:
     def is_rejuv_potion(self) -> bool:
         return self.kind in offsets.REJUV_POTION_KINDS
 
+    @property
+    def potion_type(self) -> str | None:
+        """"healing" / "mana" / "rejuv", or None for everything else —
+        including FOREIGN potions (antidote, thawing, stamina), which can
+        sit in the belt and block a column but serve no rung."""
+        if self.is_healing_potion:
+            return "healing"
+        if self.is_mana_potion:
+            return "mana"
+        if self.is_rejuv_potion:
+            return "rejuv"
+        return None
+
 
 @dataclass(frozen=True)
 class CarriedItems:

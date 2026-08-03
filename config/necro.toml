@@ -123,10 +123,13 @@ disengage_hp_pct = 70.0
 merc_heal_below_pct = 50.0
 merc_heal_retry_s = 3.0
 
-# Rung 7.6 — mana-glut hygiene (user rule, 2026-08-02): with more than
-# mana_glut_bottom_max columns holding a MANA potion at the BOTTOM (the
-# slot the key sends), drink the excess — squatting columns first — so
-# mana cannot clog slots the heal search and the town refill both want.
+# Rung 7.6 — belt-bottom hygiene (user rules, 2026-08-02). The keys only
+# reach the BOTTOM row, so the contract is: when the belt's contents
+# allow, one healing + one mana + one rejuv at column bottoms; foreign
+# potions (antidotes, thawing) drunk clear; and at most
+# mana_glut_bottom_max columns with mana at the bottom (squatting columns
+# drunk first). Rejuv bottoms are never spent on tidiness. One pacing
+# (mana_glut_retry_s) serves all three repairs.
 mana_glut_bottom_max = 1
 mana_glut_retry_s = 2.0
 

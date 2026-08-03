@@ -278,6 +278,12 @@ class BehaviorEngine:
         # the engine is the only thing that knows when a step began.
         self._narrate = narrate
         self._step_started = self._clock()
+        # Per-rung fire counts, narrated at every 25th fire (R185 C): run
+        # 4's clearance spent ~10 silent minutes on combat-module upkeep,
+        # and a wait that big must explain itself. Per-fire lines would
+        # break the coarseness contract; every 25th keeps the story short
+        # and still surfaces any churn within ~a minute of it starting.
+        self._rung_fires: dict[str, int] = {}
         self._last_activity = self._clock()
         self._last_position: tuple[int, int] | None = None
         self._refusal_streak = 0
@@ -502,6 +508,13 @@ class BehaviorEngine:
             decision.commit_sent()
             self._refusal_streak = 0
             self._waiting_since = None  # something happened: not a wait
+            fires = self._rung_fires.get(decision.rung, 0) + 1
+            self._rung_fires[decision.rung] = fires
+            if fires % 25 == 0:
+                self._narrate(
+                    f"reflex {decision.rung} has fired {fires}x this run "
+                    f"— the run step is being outbid for these ticks"
+                )
             self._mark_activity(self._clock())
             return self.complete
 
