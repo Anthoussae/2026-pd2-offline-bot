@@ -333,6 +333,16 @@ class RunServices:
     # one risky cleanse beats a pinned character.
     hygiene_walk_best: int | None = None
     hygiene_walk_attempts: int = 0
+    # The sightings memo (T3, R186 — the user's per-run scratch-note
+    # idea, verbatim): every wanted item the CLEARANCE saw, by unit id,
+    # at the position it was seen. Entries are reaped once the spot is
+    # back in view and the item is gone (collected or despawned), and
+    # `stuck` items do not count as pending. The sweep re-walks the ring
+    # ONLY while this holds something unaccounted for — the full re-walk
+    # of ground the clearance just patrolled was ~60-120 s of the run,
+    # spent mostly confirming emptiness. Dies with the run, like every
+    # RunServices field: a memo, not a memory.
+    wanted_seen: dict[int, tuple[int, int]] = field(default_factory=dict)
     # -- the survey step (R175/R176) ---------------------------------------
     #
     # Both closures are wired closures over the map store (wiring.py) so
@@ -599,6 +609,42 @@ class _PickupMixin:
                 continue
             found.append(item)
         return found
+
+    def note_wanted_sightings(
+        self, snap: GameSnapshot, centre: tuple[int, int], radius: int
+    ) -> None:
+        """Book wanted items into the sightings memo, and reap the dead.
+
+        Two halves of one bookkeeping (T3, R186). RECORD: every wanted
+        item currently visible inside the circle. REAP: a remembered spot
+        that is comfortably back inside perception with no such item on
+        the ground means collected (or despawned) — either way, no longer
+        pending. What remains when the clearance finishes is the sweep's
+        entire justification for re-walking the ring.
+        """
+        services = self.services
+        for item in self.wanted_items(snap, centre, radius):
+            services.wanted_seen[item.unit_id] = item.position
+        player = snap.player
+        if player is None:
+            return
+        on_ground = {g.unit_id for g in snap.ground_items}
+        for unit_id, position in list(services.wanted_seen.items()):
+            if unit_id in on_ground:
+                continue
+            if _chebyshev(position, player.position) <= 40:
+                # Well inside the loaded-room horizon (46-67, T51): the
+                # spot is in view and the item is not on it.
+                del services.wanted_seen[unit_id]
+
+    def pending_sightings(self) -> list[tuple[int, tuple[int, int]]]:
+        """Memo entries still worth walking for: seen, not collected, not
+        written off as stuck."""
+        return [
+            (unit_id, position)
+            for unit_id, position in self.services.wanted_seen.items()
+            if unit_id not in self.services.stuck
+        ]
 
     def collect(
         self, snap: GameSnapshot, ctx: EngineContext, item: GroundItem
@@ -1187,6 +1233,10 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
         if centre is None or snap.player is None:
             return StepOutcome(done=False)
         now = self.services.clock()
+        # The sightings memo (T3): whatever the pickit wants and this
+        # step does not collect is the sweep's work order — and its only
+        # reason to re-walk the ring.
+        self.note_wanted_sightings(snap, centre, self.radius)
 
         in_radius = [
             m for m in snap.live_monsters
@@ -1406,7 +1456,21 @@ class PickupStep(_PatrolMixin, _PickupMixin):
             return StepOutcome(done=False, acted=acted)
         # Nothing WE CAN SEE is wanted — which is not the same as nothing
         # left, and treating the two as one is what left the rune behind.
+        # But the ring walk now needs EVIDENCE (T3, R186): the clearance
+        # already patrolled this circle recording every wanted sighting,
+        # so the sweep re-walks only while the memo holds something
+        # unaccounted for. No sightings pending = the rune-class item
+        # provably does not exist this run, and the old unconditional
+        # re-walk spent 60-120 s confirming emptiness.
         if not self.patrol_complete and snap.player is not None:
+            self.note_wanted_sightings(snap, self._centre, self.radius)
+            pending = self.pending_sightings()
+            if not pending:
+                return StepOutcome(
+                    done=True, acted=True,
+                    note="nothing left to pick — every sighting accounted "
+                    "for, ring walk skipped",
+                )
             return self.walk_the_circle(snap, ctx)
         return StepOutcome(
             done=True, acted=True,

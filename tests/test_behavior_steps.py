@@ -899,45 +899,59 @@ def sweeping(clock, **kw):
     return step, svc, here, executor, ctx
 
 
-def test_the_sweep_walks_the_circle_before_calling_it_empty():
+def test_the_sweep_walks_the_circle_while_a_sighting_is_pending():
+    """T3 (R186): the re-walk now needs EVIDENCE. With a wanted sighting
+    on the books — recorded by the clearance, never collected — the
+    sweep must still walk its circle the way it always did."""
     clock = Clock()
     step, svc, here, executor, ctx = sweeping(clock)
+    # The clearance saw a rune on the far side and never got it. The
+    # memo entry is exactly what it would have recorded.
+    rune = GroundItem(unit_id=77, kind=999, position=(1070, 1000), quality=RARE)
+    svc.wanted_seen[77] = rune.position
+
+    def visible(pos):
+        # Stand in for the client's horizon, which is what actually hides
+        # it — and the pickup itself: a clicked rune leaves the ground.
+        if any(isinstance(a, PickUpItem) and a.unit_id == 77
+               for a in executor.actions):
+            return []
+        return [rune] if _chebyshev(rune.position, pos) <= 50 else []
+
     outcome = None
     for _ in range(400):
-        outcome = step.step(snap(pos=here["pos"]), ctx)
+        outcome = step.step(snap(pos=here["pos"], items=visible(here["pos"])), ctx)
         clock.advance(0.5)
         if outcome.done:
             break
     assert outcome is not None and outcome.done
-    assert len(step._visited) == svc.patrol_points, (
-        "the sweep finished without walking its circle — the exact bug that "
-        "left a whitelisted rune on the far side"
-    )
     assert [a for a in executor.actions if isinstance(a, MoveTo)], "it never moved"
-
-
-def test_the_sweep_collects_something_only_reachable_by_patrolling():
-    """The rune on the far side. Visible only once the sweep gets there."""
-    clock = Clock()
-    step, svc, here, executor, ctx = sweeping(clock)
-    # 70 subtiles out: inside the 96 circle, outside anything the sweep can
-    # see from the arrival point.
-    rune = GroundItem(unit_id=77, kind=999, position=(1070, 1000), quality=RARE)
-
-    def visible(pos):
-        # Stand in for the client's horizon, which is what actually hides it.
-        return [rune] if _chebyshev(rune.position, pos) <= 50 else []
-
-    for _ in range(400):
-        outcome = step.step(snap(pos=here["pos"], items=visible(here["pos"])), ctx)
-        clock.advance(0.5)
-        if any(isinstance(a, PickUpItem) and a.unit_id == 77
-               for a in executor.actions):
-            break
-        if outcome.done:
-            break
     assert [a for a in executor.actions if isinstance(a, PickUpItem)
             and a.unit_id == 77], "the far-side item was never even attempted"
+    assert 77 not in svc.wanted_seen, "the sighting was never reaped"
+
+
+def test_the_sweep_skips_the_ring_when_every_sighting_is_accounted_for():
+    """The other half of T3: the clearance patrolled the same circle and
+    its memo is empty — the old unconditional re-walk spent 60-120 s
+    confirming emptiness the memo already proves."""
+    clock = Clock()
+    step, svc, here, executor, ctx = sweeping(clock)
+    outcome = step.step(snap(pos=here["pos"]), ctx)
+    assert outcome.done
+    assert "ring walk skipped" in outcome.note
+    assert not [a for a in executor.actions if isinstance(a, MoveTo)]
+
+
+def test_a_stuck_sighting_does_not_hold_the_sweep_open():
+    # Written off as unpickable = not pending: the sweep must not re-walk
+    # the ring for an item three clicks already failed to lift.
+    clock = Clock()
+    step, svc, here, executor, ctx = sweeping(clock)
+    svc.wanted_seen[77] = (1070, 1000)
+    svc.stuck.add(77)
+    outcome = step.step(snap(pos=here["pos"]), ctx)
+    assert outcome.done and "ring walk skipped" in outcome.note
 
 
 def test_the_sweep_follows_the_clearance_rather_than_its_own_number():

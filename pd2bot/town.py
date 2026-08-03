@@ -297,16 +297,27 @@ class TownConfig:
             offsets.NPC_CHARSI: (5824, 5724),
         }
     )
-    # Repair (user request, R70). Repair EVERY game rather than tuning a
-    # threshold (user decision, R71): gear wears every run, and a number
-    # that needs tuning is a number that will one day be wrong. 100% means
-    # "any wear at all is enough reason to go".
+    # Repair (user request, R70). R71 originally said repair EVERY game
+    # ("any wear at all is enough reason to go"); R186 superseded it with
+    # run-4 pricing in hand — a single missing point bought a 33 s Charsi
+    # trip every game. 70 means: go when any worn item is at or below 70%
+    # of its maximum; above that the trip buys nothing a later run will
+    # not buy cheaper.
     #
     # The one thing this does not do is skip the durability *read*: that is
     # not the trigger, it is the proof. Without it a repair-all click that
     # lands where the button used to be is indistinguishable from success,
     # and the first sign of trouble is gear breaking mid-run in Hell.
-    repair_below_pct: float = 100.0
+    repair_below_pct: float = 70.0
+    # T1 (R186): skip the Akara trip when vitals are effectively full.
+    # Exactly-full was the old bar, and a character 1 hp short paid a
+    # 26 s cross-town walk for a sliver (T54 run 4). Akara also heals the
+    # merc, so the merc gets its own bar (its hp reads on the 0-128
+    # client scale; `Monster.life_pct`) — and a DEAD merc does not block
+    # the skip, because Kashya's resurrect step owns that case.
+    heal_skip_hp_pct: float = 95.0
+    heal_skip_mana_pct: float = 90.0
+    heal_skip_merc_pct: float = 60.0
     walk_retries: int = 3  # travel clicks that open a dialog (see _walk_guarded)
     # How far to step aside when a route keeps clicking the same object
     # (R111). Far enough to change the angle, short enough that the
@@ -1193,9 +1204,26 @@ class TownLayer:
         player = self._read_player(self.session)
         if player is None:
             raise TownError("player unreadable at heal time")
-        if player.hp == player.max_hp and player.mana == player.max_mana:
+        hp_pct = 100.0 * player.hp / player.max_hp if player.max_hp else 0.0
+        mana_pct = (
+            100.0 * player.mana / player.max_mana if player.max_mana else 100.0
+        )
+        merc = self.snapshot().merc
+        merc_ok = merc is None or merc.life_pct >= self.config.heal_skip_merc_pct
+        if (
+            hp_pct >= self.config.heal_skip_hp_pct
+            and mana_pct >= self.config.heal_skip_mana_pct
+            and merc_ok
+        ):
+            # Effectively full (T1, R186): the cross-town walk buys a
+            # sliver the first potion covers. A hurting merc still earns
+            # the trip — Akara heals it for free.
             report.healed = True
-            report.log.append("heal: already at full vitals")
+            report.log.append(
+                f"heal: skipped (hp {hp_pct:.0f}%, mana {mana_pct:.0f}%"
+                + (f", merc {merc.life_pct:.0f}%" if merc is not None else "")
+                + ")"
+            )
             return
 
         self._begin_step()
@@ -2245,6 +2273,14 @@ class TownLayer:
                 )
                 raise
             elapsed = self._clock() - started
-            outcome = "; ".join(report.log[before:]) or "nothing to do"
+            # T4 (R186): the per-item cleanse KEEP lines belong to the
+            # micro-log; in the narrative they buried the station summary
+            # under a paragraph of item ids. The cleanse's own summary
+            # line ("N judged junk, M kept") survives the filter.
+            outcome = "; ".join(
+                line
+                for line in report.log[before:]
+                if not line.startswith("cleanse: KEEP")
+            ) or "nothing to do"
             self._narrate(f"{outcome} ({elapsed:.1f}s)")
         return report

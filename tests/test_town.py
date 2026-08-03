@@ -1625,10 +1625,19 @@ REPAIR_CFG = TownConfig(
 )
 
 
-def test_repair_goes_for_even_slight_wear(town, monkeypatch):
-    """Repair every game (R71): no threshold to tune, so a single point of
-    wear is reason enough to visit."""
-    items = [worn(1, 99, 100)]
+def test_repair_skips_slight_wear(town, monkeypatch):
+    """R186 superseded R71's repair-every-game: run 4 paid a 33 s Charsi
+    trip to restore ONE durability point. Above `repair_below_pct` the
+    trip buys nothing a later run will not buy cheaper."""
+    with_durability(town, monkeypatch, [worn(1, 99, 100)])
+    report = PreambleReport()
+    layer(town, REPAIR_CFG).repair_at_charsi(report)
+    assert report.repaired == 0 and town.world_clicks == []
+    assert any("nothing damaged" in line for line in report.log)
+
+
+def test_repair_goes_when_wear_crosses_the_threshold(town, monkeypatch):
+    items = [worn(1, 65, 100)]  # 65% <= repair_below_pct 70
     with_durability(town, monkeypatch, items)
     charsi = CALIBRATED.npc_positions[offsets.NPC_CHARSI]
 
