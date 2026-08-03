@@ -192,9 +192,10 @@ def test_engine_narrates_step_transitions_not_ticks():
 
 
 def test_an_outside_stop_wins_the_tick_over_everything():
-    """The abort channel (T54 run 3): `should_stop` is polled at the top
-    of EVERY tick, before the monitor and the ladder — a chat abort must
-    land within a tick anywhere in a run, not only inside town waits."""
+    """The abort channel (T54 run 3): `should_stop` is polled on EVERY
+    tick, ahead of the ladder and the step — a chat abort must land
+    within a tick anywhere in a run, not only inside town waits. Only
+    the safety monitor outranks it (review 2026-08-02, issue 001)."""
     monitor = ScriptedMonitor()
     step = FakeStep("s", ticks_to_done=5)
     stop = {"now": False}
@@ -213,8 +214,30 @@ def test_an_outside_stop_wins_the_tick_over_everything():
     stop["now"] = True
     with pytest.raises(StopRequested):
         eng.tick()
-    assert step.calls == 1 and monitor.ticks == 1  # nothing ran past the stop
+    assert step.calls == 1  # the step never ran past the stop
+    assert monitor.ticks == 2  # but the MONITOR did: the latch outranks stops
     assert issubclass(StopRequested, ChickenExit)  # the cycle leaves cleanly
+
+
+def test_the_death_latch_outranks_every_stop():
+    """Review 2026-08-02 issue 001: a stop rides ChickenExit into the
+    cycle's leave-game path, which SENDS INPUT — so on the tick a death
+    occurs, the monitor must win the race or the latch never sets and
+    the leave types at a dead character."""
+    clock = Clock()
+    eng = BehaviorEngine(
+        snapshot=lambda: snap(
+            ui=UIState(open_panels=frozenset({offsets.UI_ESCMENU_MAIN}))
+        ),
+        monitor=ScriptedMonitor([DeathHalt("died")]),
+        states=[FakeStep("s")],
+        executor=RecordingExecutor(),
+        clock=clock,
+        sleep=lambda s: clock.advance(s),
+        should_stop=lambda: True,  # an abort AND a death, same tick
+    )
+    with pytest.raises(DeathHalt):
+        eng.tick()
 
 
 def test_the_operator_pressing_esc_stops_the_run():

@@ -504,19 +504,24 @@ class BehaviorEngine:
         Monitor exceptions (ChickenExit, DeathHalt) and IdleBail propagate
         to the caller untouched — the cycle owns what they mean.
         """
+        snap = self._snapshot()
+        # The death latch outranks EVERY stop (review 2026-08-02, issue
+        # 001): a StopRequested rides ChickenExit into the cycle's
+        # leave-game path, which SENDS INPUT — and if the stop preempted
+        # the monitor on the very tick a death occurred, the latch would
+        # never set and the leave would type at a dead character. The
+        # monitor ticks first; DeathHalt and ChickenExit win the race by
+        # construction, and an abort is still heard within this same
+        # tick, one line lower.
+        self._monitor.tick()
         if self._should_stop is not None and self._should_stop():
-            # Before the snapshot, the monitor, everything: an abort is a
-            # command from the person at the machine, and the only thing
-            # it should race is nothing.
             self._narrate("run aborted by request")
             raise StopRequested("stopped by outside request (abort)")
-        snap = self._snapshot()
         if self._operator_took_the_controls(snap):
             self._narrate("operator input (ESC/Enter) — standing down")
             raise StopRequested(
                 "the operator pressed ESC or opened chat — standing down"
             )
-        self._monitor.tick()
         now = self._clock()
         self.report.ticks += 1
         if self.report.ticks == 1:
