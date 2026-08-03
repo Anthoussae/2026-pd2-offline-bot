@@ -43,6 +43,13 @@ the repetitive boilerplate generated automatically. Used here as the state
 model: readable, cheap, and immutable by default. First seen in
 [from script to package](2026-07-28-from-script-to-package.md).
 
+**debouncing** — refusing to act on a single noisy reading: an alarming
+observation counts only when a second, fresh observation agrees. Named
+for mechanical switches, whose contacts "bounce" and register one press
+as several. Our route planner's "no route exists" is debounced — one
+answer is a reading, two answers over fresh grids is a fact. *(First
+seen: 2026-08-02, livelocks, margins, and the kill switch.)*
+
 **declarative (configuration)** — expressing *what* should happen as data
 (a list of steps, a table of thresholds) while the code owns *how*.
 The Cold Plains run and the necro's tuning are TOML text files, not
@@ -273,6 +280,14 @@ seen in [the game cycle](2026-07-29-the-game-cycle.md).
 before software can continue. We now log every such request (type and
 outcome) in `docs/instruction-log.md`, so the load can be measured and
 engineered down instead of guessed at.
+
+**priority inversion** — a high-priority task starved because a
+low-priority one holds a resource it needs. Famous for rebooting the
+Mars Pathfinder; here, the bone armor (survival) kept losing its cast
+window to revive-wall maintenance casts. The classic fix: while the
+high-priority need is pending, the low-priority work does not get the
+resource. *(First seen: 2026-08-02, livelocks, margins, and the kill
+switch.)*
 
 **race condition** — a bug where two events arrive so close together that the processing order is effectively random, and one order is wrong. Notoriously hard to find because the wrong order may be rare, and harmless in most places it occurs. Fixed by forcing the order (waits, locks, sequencing). *(First seen: 2026-07-31, when the tools lie.)*
 
