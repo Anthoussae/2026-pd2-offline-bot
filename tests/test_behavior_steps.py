@@ -638,17 +638,35 @@ def test_patrol_walks_the_routes_answer_not_the_bearing():
     assert first_move.target == (1000, 1012)  # toward the corner, not the ring
 
 
-def test_patrol_writes_off_a_routeless_point_on_the_first_tick():
-    """No-path targets fail FAST: the run-2 dawdle was budgets burning at
-    fences, and the R174 closure wrongly claimed this already happened."""
+def test_patrol_writes_off_a_routeless_point_after_two_asks():
+    """No-path targets still fail FAST — two ticks, zero legs — but never
+    on a single answer: T55 run 1's torn grid read produced five spurious
+    no-routes in one second, writing off points the clearance had just
+    walked. One answer is a reading; two over fresh grids is a fact."""
     clock = Clock()
     step, svc, here, executor, ctx = patrolling(clock, route_to=lambda t: None)
-    outcome = drive(step, here, ctx, clock, ticks=30)
+    outcome = drive(step, here, ctx, clock, ticks=40)
     assert outcome is not None, "routeless points must not hold the step open"
     assert not [a for a in executor.actions if isinstance(a, MoveTo)], (
         "a routeless point earned walking legs"
     )
     assert len(step._visited) == svc.patrol_points
+
+
+def test_one_no_route_answer_is_not_believed():
+    clock = Clock()
+    answers = [None, [(1000, 1060)], [(1000, 1060)]]  # a torn read, then honest
+    step, svc, here, executor, ctx = patrolling(
+        clock, route_to=lambda t: answers.pop(0) if answers else [(1000, 1060)]
+    )
+    first = step.step(snap(pos=here["pos"]), ctx)
+    assert "asking again" in first.note
+    second = step.step(snap(pos=here["pos"]), ctx)
+    assert "asking again" not in second.note  # the fresh grid answered
+    assert [a for a in executor.actions if isinstance(a, MoveTo)], (
+        "the recovered route was not walked"
+    )
+    assert not step._visited, "a point was written off on one torn answer"
 
 
 def test_survey_writes_off_a_routeless_frontier_on_the_first_tick():
@@ -662,8 +680,10 @@ def test_survey_writes_off_a_routeless_frontier_on_the_first_tick():
     step = make_step("survey", svc)
     executor = RecordingExecutor(clock=clock)
     ctx = context(executor)
+    first = step.step(snap(), ctx)
+    assert "asking again" in first.note  # one answer is a reading
     outcome = step.step(snap(), ctx)
-    assert "no route" in outcome.note
+    assert "wrote off" in outcome.note  # two is a fact
     assert executor.actions == []
 
 
@@ -675,6 +695,8 @@ def test_clearance_writes_off_a_routeless_monster_and_steers_by_route():
     ctx = context(RecordingExecutor(clock=clock))
     ctx.notes["arrival"] = HOME
     far = monster(1, (1100, 1000))  # inside the clearance, outside the fight
+    first = step.step(snap(monsters=[far]), ctx)
+    assert "asking again" in first.note  # one torn answer is not believed
     outcome = step.step(snap(monsters=[far]), ctx)
     assert outcome.acted and "no route" in outcome.note
     assert 1 in step._unreachable, "the routeless monster was not written off"

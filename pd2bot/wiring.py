@@ -151,8 +151,16 @@ def route_service(
             path = astar(grid, start, goal)
             if path is not None:
                 route = simplify(grid, path)
-        cache["key"] = key
-        cache["route"] = route
+        if route is not None:
+            # None is deliberately NOT cached (T55 run 1): a torn live
+            # collision read walled the origin in for ~a second and five
+            # ring points the clearance had just WALKED got "no route" —
+            # the offline atlas paths all of them in <70 ms. A cached
+            # None would hand the callers' confirmation retry the same
+            # wrong answer for free; recomputing it re-reads the grid,
+            # which is exactly the point.
+            cache["key"] = key
+            cache["route"] = route
         return route
 
     return route_to

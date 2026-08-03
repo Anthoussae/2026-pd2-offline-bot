@@ -834,23 +834,29 @@ class ReflexLadder:
         # the combat-module half never does (desecrate/revive are not
         # castable in town, R47.4).
         needs, why = self._armor_needs_recast(was_hit)
-        if (
-            needs
-            and (cfg.armor_in_town or not in_town)
-            and (
+        if needs and (cfg.armor_in_town or not in_town):
+            if (
                 self._armor_attempt is None
                 or now - self._armor_attempt >= cfg.armor_retry_s
-            )
-        ):
-            return ReflexDecision(
-                rung="upkeep",
-                action=CastSelf(cfg.armor_skill_id),
-                reason=why,
-                # PACING, not a cooldown: recorded even when the send
-                # fails, or a switch that never takes retries at tick rate
-                # and starves the whole run (stage B run 9).
-                on_attempt=lambda: setattr(self, "_armor_attempt", now),
-            )
+            ):
+                return ReflexDecision(
+                    rung="upkeep",
+                    action=CastSelf(cfg.armor_skill_id),
+                    reason=why,
+                    # PACING, not a cooldown: recorded even when the send
+                    # fails, or a switch that never takes retries at tick
+                    # rate and starves the whole run (stage B run 9).
+                    on_attempt=lambda: setattr(self, "_armor_attempt", now),
+                )
+            # Armor NEEDS a recast and is waiting out its pacing: the
+            # combat upkeep does not get the tick. Its desecrate/revive
+            # casts are exactly what kept colliding with the recast in
+            # T55 run 1 — every armor window opened into someone else's
+            # animation (CastInFlight) and the absorb slid 67% -> 54% ->
+            # 5% before a recast finally landed. Draining the cast
+            # pipeline is the fastest way to get the armor up, and the
+            # armor outranks a fuller revive wall by design.
+            return None
         if not in_town and self._combat_upkeep is not None:
             action = self._combat_upkeep(snap)
             if action is not None:

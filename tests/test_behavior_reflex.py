@@ -713,6 +713,35 @@ def test_armor_fallback_recasts_after_a_hit():
     assert decision.action == CastSelf(offsets.SKILL_BONE_ARMOR)
 
 
+def test_a_pending_armor_recast_starves_the_combat_upkeep():
+    """T55 run 1: absorb slid 67% -> 54% -> 5% while desecrate/revive
+    casts occupied every recast window (CastInFlight ate the retries).
+    While an armor recast is NEEDED but waiting out its pacing, rung 8's
+    combat half must not start another animation — draining the cast
+    pipeline is the fastest way to get the armor up."""
+    calls = []
+
+    def upkeep(s):
+        calls.append(s)
+        return CastAtPoint(offsets.SKILL_DESECRATE, POS)
+
+    armor = [0.0]
+    ladder, clock = make_ladder(armor=lambda: armor[0], upkeep=upkeep)
+    first = ladder.evaluate(snap())
+    assert first.rung == "upkeep" and first.action == CastSelf(
+        offsets.SKILL_BONE_ARMOR
+    )
+    first.commit_attempted()  # the send collided: pacing recorded
+    clock.advance(0.5)
+    assert ladder.evaluate(snap()) is None, "combat cast during armor pacing"
+    assert calls == []
+    armor[0] = 1.0  # the recast finally landed
+    clock.advance(0.1)
+    decision = ladder.evaluate(snap())
+    assert decision is not None and decision.action.skill_id == offsets.SKILL_DESECRATE
+    assert len(calls) == 1
+
+
 def test_combat_upkeep_delegation_out_of_town_only():
     calls = []
 

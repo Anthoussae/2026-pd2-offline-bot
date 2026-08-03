@@ -144,6 +144,19 @@ def test_route_service_caches_per_origin_bucket():
     assert nav.grid_reads == 2
 
 
+def test_route_service_does_not_cache_a_no_route_answer():
+    """T55 run 1: a torn live-collision read produced spurious no-routes;
+    a cached None would hand the callers' confirmation retry the same
+    wrong answer for free. Every None is recomputed over a fresh grid."""
+    torn = {"now": True}
+    nav = _CountingGridNav(lambda x, y: not torn["now"])
+    route = route_service(nav)
+    assert route((140, 100)) is None  # the torn read
+    torn["now"] = False
+    assert route((140, 100)) is not None  # a fresh grid, the honest answer
+    assert nav.grid_reads == 2
+
+
 def test_route_service_walks_straight_when_position_is_unreadable():
     # A torn read must not write a target off: the answer degrades to the
     # old bearing hop, not to "no route".

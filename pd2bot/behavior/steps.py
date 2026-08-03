@@ -989,6 +989,13 @@ class _PatrolMixin:
     _index: int = 0
     _attempts: int = 0  # legs since we last got closer to the current point
     _closest: int | None = None
+    # No-route strikes per target (T55 run 1): a torn live-collision read
+    # walled the origin in for ~a second and FIVE reachable ring points
+    # were written off on single "no route" answers. One answer is a
+    # reading; two consecutive answers over fresh grids is a fact — the
+    # same distinction the warp's position-verify draws. Genuine
+    # no-routes still die in two ticks with zero legs spent.
+    _route_denied: dict[tuple[int, int], int] = field(default_factory=dict)
 
     def patrol_points(self, centre: tuple[int, int]) -> list[tuple[int, int]]:
         """The ring, computed once from the centre and the radius.
@@ -1070,14 +1077,23 @@ class _PatrolMixin:
 
         leg = _route_leg(self.services, here, target)
         if leg is None:
-            # The map itself says no route exists (R181): the honest
-            # instant write-off, before any leg is spent at a fence.
+            # The map says no route exists (R181) — believed only when a
+            # SECOND ask over a fresh grid agrees (T55 run 1: a torn
+            # grid read produced five spurious no-routes in one second).
+            strikes = self._route_denied.get(target, 0) + 1
+            self._route_denied[target] = strikes
+            if strikes < 2:
+                return StepOutcome(
+                    done=False, acted=True,
+                    note=f"no route to {target} — asking again",
+                )
             self.services.log(f"patrol: no route to {target} — written off")
             self.services.narrate(f"patrol: no route to ring point {target}")
             self._advance()
             return StepOutcome(
                 done=False, acted=True, note=f"patrol wrote off {target} (no route)"
             )
+        self._route_denied.pop(target, None)
         try:
             ctx.executor.execute(MoveTo(leg))
         except NavigationError as exc:
@@ -1138,6 +1154,9 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
     # achieved nothing since. Same shape as the patrol's own two fields.
     _closest_to: dict[int, int] = field(default_factory=dict)
     _no_progress: dict[int, int] = field(default_factory=dict)
+    # No-route strikes per monster (T55 run 1's torn grid read): one
+    # answer is a reading, two consecutive answers is a fact.
+    _no_route: dict[int, int] = field(default_factory=dict)
 
     # -- monsters we cannot get to -------------------------------------------
 
@@ -1307,6 +1326,15 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
             if self.services.route_to is not None:
                 route = self.services.route_to(nearest.position)
                 if route is None:
+                    # Two-strike like the patrol's (T55 run 1): one torn
+                    # grid read must not write off a reachable monster.
+                    strikes = self._no_route.get(nearest.unit_id, 0) + 1
+                    self._no_route[nearest.unit_id] = strikes
+                    if strikes < 2:
+                        return StepOutcome(
+                            done=False, acted=True,
+                            note=f"no route to monster {nearest.unit_id} — asking again",
+                        )
                     self._write_off(
                         nearest.unit_id, nearest.position, "no route exists"
                     )
@@ -1314,6 +1342,7 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
                         done=False, acted=True,
                         note=f"no route to monster {nearest.unit_id}",
                     )
+                self._no_route.pop(nearest.unit_id, None)
                 via = _next_route_waypoint(route, snap.player.position)
             closing = self.services.combat.approach(
                 snap, nearest.position, via=via
@@ -1504,6 +1533,7 @@ class SurveyStep(_PickupMixin):
 
     name: str = "survey"
     _done_targets: set[tuple[int, int]] = field(default_factory=set)
+    _route_denied: dict[tuple[int, int], int] = field(default_factory=dict)
     _written_off: int = 0
     _legs: int = 0
     _current: tuple[int, int] | None = None
@@ -1684,8 +1714,16 @@ class SurveyStep(_PickupMixin):
 
         leg = _route_leg(self.services, origin, target)
         if leg is None:
-            # No route on the map (R181): write the frontier point off on
-            # the first tick instead of clamping legs at a fence.
+            # No route on the map (R181) — confirmed by a second ask over
+            # a fresh grid before it costs the point (T55 run 1's torn
+            # grid read; the patrol carries the same two-strike rule).
+            strikes = self._route_denied.get(target, 0) + 1
+            self._route_denied[target] = strikes
+            if strikes < 2:
+                return StepOutcome(
+                    done=False, acted=True,
+                    note=f"no route to {target} — asking again",
+                )
             self.services.log(f"survey: no route to frontier {target}")
             self._done_targets.add(target)
             self._written_off += 1
@@ -1693,6 +1731,7 @@ class SurveyStep(_PickupMixin):
             return StepOutcome(
                 done=False, acted=True, note=f"survey wrote off {target} (no route)"
             )
+        self._route_denied.pop(target, None)
         self._legs += 1
         if not self.send(ctx, MoveTo(leg)):
             # Unknown/blocked ground on the way: this frontier is not
