@@ -12,10 +12,16 @@ same commit as the transition itself.
   `docs/request-index.md` for the highest issued)
 - **Next test ID:** T56 (check `docs/drill-log.md`)
 
-Updated: 2026-08-02 (~20:20; the potions cycle is live-validated — T54
-run 4 PASS, and the T55 timed patrol went 1032 → 458 → 217 s across
-three runs as R185-R190 landed: upkeep quiet-field gate + honest
-budget, heal/repair skip thresholds, sweep-on-evidence, collect budget,
-progress margin, seam-point filter, the Shift merc chord, the 0-128
-merc hp scale, and the Enter/ESC operator kill switch. PR #1 still open
-awaiting the user's merge decision)
+Updated: 2026-08-02 (~21:00, session end). The potions cycle is
+live-validated (T54 run 4 PASS; T55 timed patrols 1032 → 458 → 217 →
+236 s — steady state ~220 s). Session reviewed:
+`docs/reviews/2026-08-02-potions-live-validation/` (P1 stop-vs-death-
+latch order fixed in review; P3 issues 002-003 open). PR #1 body
+updated, still open awaiting the user's merge decision. NEXT: finish
+M5 P6 per `docs/plans/2026-07-29-m5-trial-run/06-staged-acceptance-
+closeout.md` — Stage C (supervised full run, radius 150, R49
+thresholds), Stage D (🔶 threshold decision, chicken back to 35%?),
+Stage E (3 clean UNATTENDED games), then closeout items 1-10 (
+behavior.md, ADR → accepted, README/CLAUDE.md/roadmap, archive the M5
+plan) — and then the M6 (Countess) yona-plan pass, for which the
+border/seam lessons and multi-area routing are the key inputs.
