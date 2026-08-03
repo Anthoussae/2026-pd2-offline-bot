@@ -183,3 +183,5 @@ headings, noted in parentheses, say roughly where they fell).
 - M5 P6 R184 [execute] T54 run 4: OK the gates in-game after the run-3 fixes · 2026-08-02 17:00
 
 - M5 P6 R185 [decision] The 854 s clearance: approve the upkeep-churn fixes · 2026-08-02 17:25
+
+- M5 P6 R186 [decision] Dilly-dally review: which of T1-T4 to implement? · 2026-08-02 17:52
