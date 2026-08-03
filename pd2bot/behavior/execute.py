@@ -42,10 +42,27 @@ from pd2bot.behavior.actions import (
     MoveTo,
     PickUpItem,
 )
-from pd2bot.input import GatedInput, InputRefused
+from pd2bot.input import VK_MENU, GatedInput, InputRefused
 from pd2bot.memory import GameSession
 from pd2bot.player import read_player
 from pd2bot.skills import belt_drink, belt_give_merc, ensure_right_skill
+from pd2bot.units import label_display_on
+
+# Where an item is actually CLICKABLE, relative to the projection of its
+# ground tile — measured by T63 (2026-08-03), the drill that ended a
+# five-drill hunt: position clicks DO pick items (no hover state needed;
+# the hover pointer was a red herring for clicks), but the sprite draws
+# UPWARD from its tile, so the tile projection itself misses ~29 times in
+# 30 (T57). T63's direct-click matrix landed at (0, -28) with labels off
+# and (-16, -40) with labels on. One offset per retry, best guesses
+# first: the schedule is what makes retry N differ from retry N-1.
+_PICKUP_OFFSETS: tuple[tuple[int, int], ...] = (
+    (0, -28), (-16, -40), (16, -28), (0, -16), (-16, -28), (0, -40),
+    (16, -40), (0, -48),  # the LABEL band (T65 v4): small classes —
+    # runes, gems, charms — are effectively label-clicked; their ground
+    # sprites survived 58-147 direct probes while both v4 hits landed
+    # at y=-48. Labels are ensured ON below, so the tail can reach them.
+)
 
 
 class ExecutionError(RuntimeError):
@@ -203,8 +220,7 @@ class GameActionExecutor:
         if isinstance(action, PickUpItem):
             # No stand-still here, deliberately: SHIFT would turn this into
             # an attack on empty ground where the item lies.
-            self.gated.click_world(*action.position)
-            self._record(action, f"item {action.unit_id} at {action.position}")
+            self._pick_up(action)
             return
 
         if isinstance(action, MoveTo):
@@ -213,6 +229,43 @@ class GameActionExecutor:
             return
 
         raise ExecutionError(f"no execution path for {action!r}")
+
+    def _pick_up(self, action: PickUpItem) -> None:
+        """Click the item's SPRITE, not its tile (T63).
+
+        The projection lands on the ground tile; the clickable sprite
+        draws above it. Each retry aims at the next point of the measured
+        schedule, so the retries genuinely differ. If the offset point
+        falls outside the safe click region (an item at the screen edge),
+        the raw tile click is the honest fallback — labelled, so the
+        trace shows which aim was actually used.
+        """
+        # The label policy (T66): labels must be SHOWING for the small
+        # classes to be clickable at all, and the flag makes the toggle
+        # parity-safe — read, press only when provably off, re-read next
+        # attempt. Unknown (None) means do not touch the key.
+        if label_display_on(self.session) is False:
+            try:
+                self.gated.press_key(VK_MENU)
+                self.sleep(0.1)
+            except InputRefused:
+                pass
+        try:
+            base = self.gated.project_world(*action.position)
+            dx, dy = _PICKUP_OFFSETS[action.attempt % len(_PICKUP_OFFSETS)]
+            self.gated.click_screen(base[0] + dx, base[1] + dy)
+            self._record(
+                action,
+                f"item {action.unit_id} at {action.position} sprite click "
+                f"({dx}, {dy}), attempt {action.attempt}",
+            )
+        except InputRefused:
+            self.gated.click_world(*action.position)
+            self._record(
+                action,
+                f"item {action.unit_id} at {action.position} "
+                "offset unusable — raw tile click",
+            )
 
 
 @dataclass

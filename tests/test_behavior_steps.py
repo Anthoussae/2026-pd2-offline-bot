@@ -1106,10 +1106,10 @@ def test_a_stuck_item_trips_the_inventory_full_guard():
     ctx.notes["arrival"] = HOME
     loot = GroundItem(unit_id=60, kind=999, position=(1001, 1000), quality=RARE)
     world = snap(items=[loot])
-    for _ in range(6):  # more ticks than pickup_attempts
+    for _ in range(9):  # more ticks than pickup_click_attempts
         step.step(world, ctx)
         clock.advance(2.0)
-    assert len(executor.actions) == svc.pickup_attempts  # bounded, not a loop
+    assert len(executor.actions) == svc.pickup_click_attempts  # bounded, not a loop
     assert svc.inventory_full
     assert alerts and "INVENTORY FULL" in alerts[0]
 
@@ -1197,7 +1197,7 @@ def test_the_rearm_waits_for_the_step_off_and_happens_once():
     # The retry fails again: written off for the game, NO new cleanse —
     # a second cleanse cannot differ from the first for this item.
     rune = GroundItem(unit_id=601, kind=999, position=(1001, 1000), quality=RARE)
-    svc.attempts[601] = svc.pickup_attempts
+    svc.attempts[601] = svc.pickup_click_attempts
     assert not step.collect(snap(items=[rune]), ctx, rune)
     assert 601 in svc.stuck and svc.inventory_full
     assert not svc.cleanse_queued
@@ -1215,7 +1215,7 @@ def test_a_different_item_still_earns_its_own_cleanse():
     step, svc, executor, ctx, calls = hygiene_setup()
     svc.cleanse_retried.add(601)  # 601 spent its retry; 602 has not
     other = GroundItem(unit_id=602, kind=998, position=(1001, 1000), quality=RARE)
-    svc.attempts[602] = svc.pickup_attempts
+    svc.attempts[602] = svc.pickup_click_attempts
     assert not step.collect(snap(items=[other]), ctx, other)
     assert svc.cleanse_queued, "601's exhaustion must not block 602's cleanse"
 
@@ -1499,3 +1499,115 @@ def test_the_shipped_run_builds_end_to_end():
     ]
     assert states[2].radius == 150  # the run file's parameter reached the step
     assert states[1].dest == offsets.AREA_COLD_PLAINS
+
+
+# -- potion pickup: tiers, the belt-full diagnosis, arrival telemetry ------------
+#
+# T56 (2026-08-02): game 2 chickened at 47% with healing potions on the
+# ground all game. Three causes, each pinned here: only ONE healing tier
+# (hp5/606) was in the kind table, a click miss was diagnosed as "belt
+# full for the type", and the type write-off never expired when drinking
+# made room.
+
+
+def belt_potion(uid, kind, slot):
+    from pd2bot.items import CarriedItem
+    return CarriedItem(
+        unit_id=uid, kind=kind, quality=2, mode=offsets.ITEM_MODE_IN_BELT,
+        game_location=0, node_page=0, position=(slot, 0), item_level=1,
+    )
+
+
+def carried_with_belt(*potions):
+    return CarriedItems(items=tuple(potions), skipped=0)
+
+
+def test_every_potion_tier_is_recognized():
+    # The game's own code table (config/item_codes.toml, T42): hp1-hp5 are
+    # kinds 602-606, mp1-mp5 are 607-611. A tier missing from the sets is
+    # invisible to the pickit, the town refill AND the belt hygiene — the
+    # T56 starvation had hp4s in the inventory reported as "no stock".
+    from pd2bot.pickit import potion_type_of
+    for kind in (602, 603, 604, 605, 606):
+        item = GroundItem(unit_id=1, kind=kind, position=HOME, quality=2)
+        assert potion_type_of(item) == "healing", kind
+    for kind in (607, 608, 609, 610, 611):
+        item = GroundItem(unit_id=1, kind=kind, position=HOME, quality=2)
+        assert potion_type_of(item) == "mana", kind
+    for kind in (530, 531):
+        item = GroundItem(unit_id=1, kind=kind, position=HOME, quality=2)
+        assert potion_type_of(item) == "rejuv", kind
+
+
+def test_a_click_miss_with_belt_room_blames_the_item_not_the_type():
+    clock = Clock()
+    alerts = []
+    svc = services(clock, alerts=alerts)
+    svc.carried = lambda: carried_with_belt(belt_potion(1, HEAL, 2))  # 1/8: room
+    step = make_step("pickup", svc)
+    executor = RecordingExecutor(clock=clock)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    potion = GroundItem(unit_id=70, kind=HEAL, position=(1001, 1000), quality=2)
+    world = snap(items=[potion])
+    for _ in range(10):  # past pickup_click_attempts
+        step.step(world, ctx)
+        clock.advance(2.0)
+    assert 70 in svc.stuck  # the ITEM is written off
+    assert "healing" not in svc.belt_full  # the TYPE stays wanted
+    assert alerts and "click misses suspected" in alerts[0]
+    # A different healing potion is still collected.
+    other = GroundItem(unit_id=71, kind=605, position=(1001, 1000), quality=2)
+    step.step(snap(items=[other]), ctx)
+    assert executor.actions[-1] == PickUpItem(71, (1001, 1000))
+
+
+def test_a_refused_potion_marks_the_type_only_when_the_belt_is_full():
+    clock = Clock()
+    alerts = []
+    svc = services(clock, alerts=alerts)
+    svc.carried = lambda: carried_with_belt(
+        *(belt_potion(i, HEAL, i) for i in range(8))  # 8/8: genuinely full
+    )
+    step = make_step("pickup", svc)
+    ctx = context(RecordingExecutor(clock=clock))
+    ctx.notes["arrival"] = HOME
+    potion = GroundItem(unit_id=70, kind=HEAL, position=(1001, 1000), quality=2)
+    world = snap(items=[potion])
+    for _ in range(10):
+        step.step(world, ctx)
+        clock.advance(2.0)
+    assert "healing" in svc.belt_full
+    assert alerts and "belt full for healing" in alerts[0]
+
+
+def test_the_belt_full_mark_expires_when_drinking_makes_room():
+    clock = Clock()
+    svc = services(clock)
+    svc.belt_full.add("healing")
+    svc.carried = lambda: carried_with_belt(belt_potion(1, HEAL, 2))  # room again
+    step = make_step("pickup", svc)
+    executor = RecordingExecutor(clock=clock)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    potion = GroundItem(unit_id=70, kind=602, position=(1001, 1000), quality=2)
+    step.step(snap(items=[potion]), ctx)
+    assert "healing" not in svc.belt_full  # re-derived from the live count
+    assert executor.actions == [PickUpItem(70, (1001, 1000))]
+
+
+def test_a_confirmed_pickup_narrates_with_the_belt_census():
+    clock = Clock()
+    lines = []
+    svc = services(clock)
+    svc.narrate = lines.append
+    svc.carried = lambda: carried_with_belt(belt_potion(1, HEAL, 2))
+    step = make_step("pickup", svc)
+    ctx = context(RecordingExecutor(clock=clock))
+    ctx.notes["arrival"] = HOME
+    potion = GroundItem(unit_id=70, kind=605, position=(1001, 1000), quality=2)
+    step.step(snap(items=[potion]), ctx)  # the click
+    clock.advance(2.0)
+    step.step(snap(), ctx)  # gone from the ground: confirmed
+    confirmed = [line for line in lines if "came up" in line]
+    assert confirmed and "belt healing 1/8, mana 0/4, rejuv 0/4" in confirmed[0]

@@ -90,10 +90,18 @@ class PickUpItem:
     the modifier differs and getting it wrong is silent: an attack holds
     SHIFT (strike in place), and a pickup must NOT — shift-clicking an item
     on the ground attacks the air where it lies.
+
+    `attempt` is which retry this is (0-based). The executor aims each
+    attempt at a different point of the item's SPRITE — T63 measured the
+    clickable region sitting ~16-40 px above the projected ground tile,
+    which is why the tile click missed ~29 times in 30 — and the retry
+    schedule is how the same action can honestly differ from the attempt
+    it retries (this codebase's own rule).
     """
 
     unit_id: int
     position: tuple[int, int]
+    attempt: int = 0
 
 
 Action = (

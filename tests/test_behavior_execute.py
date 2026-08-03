@@ -33,9 +33,13 @@ HOME = (1000, 1000)
 class FakeGated:
     """Records every send, with its modifiers, exactly as issued."""
 
+    BASE = (500, 400)  # where project_world puts every target
+
     def __init__(self):
         self.pressed = []
         self.world_clicks = []
+        self.hovers = []
+        self.screen_clicks = []
 
     def press_key(self, vk):
         self.pressed.append(vk)
@@ -46,6 +50,15 @@ class FakeGated:
     def click_world(self, wx, wy, button="left", *, stand_still=False):
         self.world_clicks.append(((wx, wy), button, stand_still))
         return (0, 0)
+
+    def project_world(self, wx, wy):
+        return self.BASE
+
+    def hover_screen(self, sx, sy):
+        self.hovers.append((sx, sy))
+
+    def click_screen(self, sx, sy, button="left", *, stand_still=False):
+        self.screen_clicks.append(((sx, sy), button, stand_still))
 
 
 def player_at(pos=HOME, mode=1):
@@ -269,7 +282,39 @@ def test_pickup_does_not_hold_shift(monkeypatch):
     # Shift would attack the ground where the item lies instead of taking it.
     executor, gated, _, _ = make(monkeypatch)
     executor.execute(PickUpItem(7, (1002, 1000)))
-    assert gated.world_clicks == [((1002, 1000), "left", False)]
+    assert len(gated.screen_clicks) == 1
+    (_, button, stand_still) = gated.screen_clicks[0]
+    assert button == "left" and stand_still is False
+    assert gated.world_clicks == []
+
+
+def test_pickup_aims_at_the_sprite_not_the_tile(monkeypatch):
+    # T63: the clickable sprite draws ABOVE the projected ground tile —
+    # attempt 0 clicks the schedule's first measured offset, not the tile.
+    from pd2bot.behavior.execute import _PICKUP_OFFSETS
+
+    executor, gated, _, _ = make(monkeypatch)
+    executor.execute(PickUpItem(7, (1002, 1000)))
+    base = gated.BASE
+    dx, dy = _PICKUP_OFFSETS[0]
+    assert gated.screen_clicks[0][0] == (base[0] + dx, base[1] + dy)
+    assert "sprite click" in executor.trace[-1].detail
+
+
+def test_pickup_retries_aim_at_different_points(monkeypatch):
+    # A retry that cannot differ from the attempt it retries is not a
+    # retry: each attempt index selects the next offset of the schedule.
+    from pd2bot.behavior.execute import _PICKUP_OFFSETS
+
+    executor, gated, _, _ = make(monkeypatch)
+    for attempt in range(3):
+        executor.execute(PickUpItem(7, (1002, 1000), attempt=attempt))
+    base = gated.BASE
+    expected = [
+        (base[0] + dx, base[1] + dy) for dx, dy in _PICKUP_OFFSETS[:3]
+    ]
+    assert [point for point, _, _ in gated.screen_clicks] == expected
+    assert len(set(expected)) == 3  # genuinely different aims
 
 
 def test_move_goes_through_walk_to(monkeypatch):

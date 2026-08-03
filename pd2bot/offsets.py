@@ -551,17 +551,50 @@ QUALITY_NAMES = {
 # extend as more are seen.
 
 HEALING_POTION_KINDS = {
-    606: "healing_606",
+    602: "healing_602",  # hp1 (minor)
+    603: "healing_603",  # hp2 (light)
+    604: "healing_604",  # hp3
+    605: "healing_605",  # hp4 (greater)
+    606: "healing_606",  # hp5 (super)
 }
 MANA_POTION_KINDS = {
-    610: "mana_610",
-    611: "mana_611",
+    607: "mana_607",  # mp1 (minor)
+    608: "mana_608",  # mp2 (light)
+    609: "mana_609",  # mp3
+    610: "mana_610",  # mp4 (greater)
+    611: "mana_611",  # mp5 (super)
 }
 REJUV_POTION_KINDS = {
-    530: "rejuv_530",
-    531: "rejuv_531",
+    530: "rejuv_530",  # rvs (small)
+    531: "rejuv_531",  # rvl (full)
 }
+# The full tier runs come from config/item_codes.toml — the game's OWN code
+# table, read live by T42 (602-606 = hp1-hp5, 607-611 = mp1-mp5). "Only
+# observed tiers" (above) turned out to be a trap that starved the belt:
+# T56 game 2 chickened at 47% while two kind-605 (hp4) healing potions sat
+# in the inventory reported as "no loadable stock", the town refill and
+# ground pickup blind to every tier but hp5, and the belt hygiene one drink
+# away from clearing real healing potions as "foreign".
 POTION_KINDS = {**HEALING_POTION_KINDS, **MANA_POTION_KINDS, **REJUV_POTION_KINDS}
+
+# The hovered-ITEM pointer, PLAYER-UNIT-RELATIVE (T58, 2026-08-03): while
+# the cursor rests on a ground item, `player_unit + PLAYER_HOVER_ITEM`
+# holds that item's unit address. Found by the T40-style pointer scan — 20
+# holders in round A, ONE survivor of the change-away/come-back rounds,
+# and that survivor sat at the player unit + 0xE8, which is why no pointer
+# chain is needed: the player unit is already found per game. Measured
+# caveats from the same drill: the pointer CLEARS over empty ground but
+# can RETAIN the last item while the cursor is on a living unit, so a
+# consumer must read it fresh after a deliberate cursor move and validate
+# the target as an item-type unit (units.hovered_item_id does both).
+PLAYER_HOVER_ITEM = 0xE8
+
+# The ground-item LABEL DISPLAY toggle (ALT), found by T66 (2026-08-03):
+# 117 modules diffed across four ALT presses, exactly ONE byte alternated
+# in lockstep — in BH.dll, which is where PD2's loot-filter QoL lives.
+# 1 = labels showing, 0 = hidden (semantics as read at T66's start).
+BH_LABEL_MODULE = "BH.dll"
+BH_LABEL_DISPLAY = 0x14D2CA
 
 # Both live-verified by the T38 probe (64 and 72 charges respectively), and
 # 534 corroborated at R112 where the bot identified an item by accident.

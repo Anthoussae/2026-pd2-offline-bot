@@ -302,12 +302,12 @@ def test_the_stuck_item_was_bounded_and_flagged(sim):
         e for e in run.trace
         if isinstance(e.action, PickUpItem) and e.action.unit_id == 504
     ]
-    # Two bounded rounds, not an endless loop: three attempts before the
-    # cleanse, and — because the cleanse freed space — three more after,
-    # sharing one memory across both pickup steps.
-    assert len(attempts) == 6
-    # And the conclusion was recorded where the rest of the game can see it.
+    # Two bounded rounds, not an endless loop: one full click schedule
+    # before the cleanse, and — because the cleanse freed space — one
+    # more after, sharing one memory across both pickup steps.
     services = run.engine._states[2].services
+    assert len(attempts) == 2 * services.pickup_click_attempts
+    # And the conclusion was recorded where the rest of the game can see it.
     assert services.inventory_full
     assert 504 in services.stuck
 

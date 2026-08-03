@@ -71,6 +71,10 @@ VK_1, VK_2, VK_3, VK_4 = 0x31, 0x32, 0x33, 0x34
 # options by accident, which is the R89 defect.
 VK_UP, VK_DOWN, VK_RETURN = 0x26, 0x28, 0x0D
 VK_I = 0x49  # the inventory toggle (default binding)
+# ALT — in PD2 a TOGGLE of the ground-item label display (user, 2026-08-03),
+# not vanilla's hold-to-show. Labels are the big click targets for pickup;
+# the toggle protocol is labels ON to pick, OFF to travel (T63).
+VK_MENU = 0x12
 
 # Down/up spacing: a real click is never instantaneous, and the game samples
 # input per frame (25 fps sim); 60 ms was proven against the live client in M1
@@ -124,6 +128,72 @@ def _send_mouse_flag(flags: int) -> None:
     event = _INPUT(type=_INPUT_MOUSE)
     event.union.mi = _MOUSEINPUT(0, 0, 0, flags, 0, None)
     user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(_INPUT))
+
+
+_MOUSEEVENTF_MOVE = 0x0001
+_MOUSEEVENTF_ABSOLUTE = 0x8000
+_MOUSEEVENTF_VIRTUALDESK = 0x4000
+_SM_XVIRTUALSCREEN = 76
+_SM_YVIRTUALSCREEN = 77
+_SM_CXVIRTUALSCREEN = 78
+_SM_CYVIRTUALSCREEN = 79
+
+
+def _send_mouse_move(sx: int, sy: int) -> None:
+    """Move the cursor with a REAL mouse-move event, not a teleport.
+
+    `SetCursorPos` repositions the cursor without a WM_MOUSEMOVE reaching
+    the game, so the client's hover state never re-evaluates — measured
+    by T60 (2026-08-03): a 421-probe sweep directly across a potion never
+    set the hovered-item pointer (round 1), while a pointer latched by
+    the user's real hand never CLEARED under the same sweep (round 2).
+    T58's hunt worked precisely because a human hand made the moves. A
+    SendInput absolute move is the synthetic equivalent of that hand:
+    the cursor lands at (sx, sy) AND the game hears about it.
+    Coordinates are normalized over the virtual desktop (0..65535).
+    """
+    vx = user32.GetSystemMetrics(_SM_XVIRTUALSCREEN)
+    vy = user32.GetSystemMetrics(_SM_YVIRTUALSCREEN)
+    vw = user32.GetSystemMetrics(_SM_CXVIRTUALSCREEN)
+    vh = user32.GetSystemMetrics(_SM_CYVIRTUALSCREEN)
+    if vw <= 1 or vh <= 1:  # pragma: no cover - a broken metrics read
+        user32.SetCursorPos(sx, sy)
+        return
+    nx = round((sx - vx) * 65535 / (vw - 1))
+    ny = round((sy - vy) * 65535 / (vh - 1))
+    event = _INPUT(type=_INPUT_MOUSE)
+    event.union.mi = _MOUSEINPUT(
+        nx, ny, 0,
+        _MOUSEEVENTF_MOVE | _MOUSEEVENTF_ABSOLUTE | _MOUSEEVENTF_VIRTUALDESK,
+        0, None,
+    )
+    user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(_INPUT))
+
+
+def _send_mouse_move_relative(dx: int, dy: int) -> None:
+    """One RELATIVE mouse move — deltas, the way a physical mouse reports.
+
+    T60 run 3 measured that the game's hover state ignores absolute
+    synthetic moves entirely (421 probes across a potion, zero pointer
+    flips, while the LABEL highlighted — labels poll the cursor position,
+    the hover pointer listens to motion). Relative deltas are the other
+    dialect of mouse motion, and the one DirectInput-era clients track.
+    Subject to pointer acceleration, so callers must close the loop
+    against the real cursor position (see `GatedInput.glide_screen`).
+    """
+    event = _INPUT(type=_INPUT_MOUSE)
+    event.union.mi = _MOUSEINPUT(dx, dy, 0, _MOUSEEVENTF_MOVE, 0, None)
+    user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(_INPUT))
+
+
+class _POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+def _cursor_pos() -> tuple[int, int]:
+    point = _POINT()
+    user32.GetCursorPos(ctypes.byref(point))
+    return point.x, point.y
 
 
 def _send_key(vk: int, flags: int) -> None:
@@ -211,7 +281,11 @@ class GatedInput:
             if button == "left"
             else (_MOUSE_RIGHTDOWN, _MOUSE_RIGHTUP)
         )
-        user32.SetCursorPos(sx, sy)
+        # A real move event, not SetCursorPos: the game resolves what a
+        # click is ON from its hover state, and hover only updates when a
+        # mouse-move actually arrives (T60). A teleported cursor clicks
+        # whatever the game still THINKS is under the old position.
+        _send_mouse_move(sx, sy)
         time.sleep(_PRE_CLICK_PAUSE_S)
         self.check()  # re-check at the last moment; state may have moved
         if stand_still:
@@ -227,18 +301,12 @@ class GatedInput:
             if stand_still:
                 _send_key(VK_SHIFT, _KEY_UP)
 
-    def click_world(
-        self,
-        wx: int,
-        wy: int,
-        button: str = "left",
-        *,
-        stand_still: bool = False,
-    ) -> tuple[int, int]:
-        """Gated click on a world subtile. Returns the screen point used.
+    def project_world(self, wx: int, wy: int) -> tuple[int, int]:
+        """Where a world subtile lands on screen, from a FRESH player read.
 
-        Reads the player position fresh: the camera follows the player, so a
-        stale position projects every target to the wrong pixel.
+        The camera follows the player, so a stale position projects every
+        target to the wrong pixel. Public because hover-verified pickup
+        (T58) projects once and then probes screen points around it.
         """
         unit = player_unit(self.session)
         position = (
@@ -249,7 +317,71 @@ class GatedInput:
         if position is None:
             raise InputRefused("player position unreadable — cannot project a world click")
         projection = projection_for(position, self.window.client_rect())
-        sx, sy = projection.world_to_screen(wx, wy)
+        return projection.world_to_screen(wx, wy)
+
+    def hover_screen(self, sx: int, sy: int) -> None:
+        """Gated cursor move with NO click — the probe half of hover-verified
+        pickup (T58): put the cursor somewhere, let the game notice, read
+        back what it says is under it. Same guard, same safe-region check as
+        a click, because a synthetic cursor move is still input. The move is
+        a real SendInput event — a `SetCursorPos` teleport never reaches the
+        game's hover logic, which T60 measured as a pointer that neither
+        updates nor clears under a 400-probe sweep."""
+        self.check()
+        rect = self.window.client_rect()
+        if not clickable(rect, sx, sy):
+            raise InputRefused(
+                f"({sx}, {sy}) is outside the safe click region of {rect} "
+                "(window edge or HUD strip)"
+            )
+        _send_mouse_move(sx, sy)
+
+    def glide_screen(
+        self,
+        sx: int,
+        sy: int,
+        *,
+        step: int = 8,
+        settle_s: float = 0.004,
+        max_steps: int = 400,
+    ) -> None:
+        """Gated cursor WALK to (sx, sy): a train of small relative moves,
+        feedback-corrected against the real cursor position each step, the
+        way a hand crosses a screen. Exists because the game's hover state
+        ignores teleports — both `SetCursorPos` and absolute SendInput
+        (T60 runs 1-3) — while labels highlight off the polled position.
+        Acceleration may scale any single delta; the closed loop absorbs
+        that. Raises InputRefused if the walk never converges."""
+        self.check()
+        rect = self.window.client_rect()
+        if not clickable(rect, sx, sy):
+            raise InputRefused(
+                f"({sx}, {sy}) is outside the safe click region of {rect} "
+                "(window edge or HUD strip)"
+            )
+        for _ in range(max_steps):
+            cx, cy = _cursor_pos()
+            if abs(cx - sx) <= 1 and abs(cy - sy) <= 1:
+                return
+            dx = max(-step, min(step, sx - cx))
+            dy = max(-step, min(step, sy - cy))
+            _send_mouse_move_relative(dx, dy)
+            time.sleep(settle_s)
+        raise InputRefused(
+            f"cursor glide never converged on ({sx}, {sy}) — "
+            "pointer acceleration fighting the loop?"
+        )
+
+    def click_world(
+        self,
+        wx: int,
+        wy: int,
+        button: str = "left",
+        *,
+        stand_still: bool = False,
+    ) -> tuple[int, int]:
+        """Gated click on a world subtile. Returns the screen point used."""
+        sx, sy = self.project_world(wx, wy)
         self.click_screen(sx, sy, button, stand_still=stand_still)
         return (sx, sy)
 

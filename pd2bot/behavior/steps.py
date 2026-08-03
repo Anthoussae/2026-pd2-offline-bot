@@ -36,7 +36,7 @@ from pd2bot.behavior.run import ParamSpec, StepRegistry, StepSpec
 from pd2bot.items import CarriedItems
 from pd2bot.narrate import noop as narrate_noop
 from pd2bot.navigate import NavigationError
-from pd2bot.pickit import Pickit, potion_type_of
+from pd2bot.pickit import Pickit, belt_count, potion_type_of
 from pd2bot.snapshot import GameSnapshot
 from pd2bot.uistate import blocking_panels
 from pd2bot.units import GroundItem
@@ -181,7 +181,11 @@ class RunServices:
     clear_settle_s: float = 5.0
     pickup_radius: int = 30  # opportunistic pickups during clearance
     pickup_reach: int = 4  # close enough to click an item and have it land
-    pickup_attempts: int = 3  # clicks per item before calling it stuck
+    pickup_attempts: int = 3  # WALKS toward an item before calling it stuck
+    # CLICKS per item before calling it stuck — one per T63 sprite-offset,
+    # so the budget and the aim schedule are the same length by design:
+    # every write-off means every measured aim point was actually tried.
+    pickup_click_attempts: int = 8
     pickup_retry_s: float = 1.5  # between attempts on the same item
     alert: Callable[[str], None] = _default_alert
     # Where per-decision detail goes. Separate from `alert`, which is for
@@ -303,7 +307,23 @@ class RunServices:
     # `inventory_full` because they are different facts with different
     # remedies: the cleanse can free inventory grid space, and nothing
     # the bot does in the field can empty a full belt column.
+    #
+    # Since T56 (2026-08-02) the set is EVIDENCE-CHECKED both ways rather
+    # than sticky: a type only enters it while the live belt count really
+    # is at capacity (a click that fails with room in the belt is a MISS,
+    # and misses write off the item, not the type), and it leaves the set
+    # the moment drinking makes room again — "nothing the bot does in the
+    # field can empty a full belt column" forgot that the ladder empties
+    # them all game long, and a game that starts with one transiently full
+    # column must not end it ignoring the potions it is starving for.
     belt_full: set[str] = field(default_factory=set)
+    # Items we have clicked and not yet seen leave the ground: unit_id ->
+    # (kind, potion type, position, clicked-at). Pure telemetry — the
+    # confirmation narrates the arrival with a belt census, which is what
+    # makes the narrative log answer "did the potions actually arrive?"
+    # (T56's log showed the same coordinates "picked" twice and the belt
+    # still short, and nobody could say what really happened).
+    pending_pickup: dict[int, tuple] = field(default_factory=dict)
     cleanse_safe_radius: int = 40
     # -- cleanse drop hygiene (R175, user-diagnosed live) ------------------
     #
@@ -606,6 +626,12 @@ class _PickupMixin:
 
     services: RunServices
 
+    def _belt_has_room(self, potion: str, carried: CarriedItems | None = None) -> bool:
+        if carried is None:
+            carried = self.services.carried()
+        capacity = self.services.pickit.belt_capacity.get(potion, 0)
+        return belt_count(carried, potion) < capacity
+
     def wanted_items(
         self, snap: GameSnapshot, centre: tuple[int, int], radius: int
     ) -> list[GroundItem]:
@@ -621,15 +647,64 @@ class _PickupMixin:
                 continue
             if action == "belt":
                 # Belt-bound potions are unaffected by a full inventory —
-                # they route to the belt — but a belt column that has
-                # already refused this type will refuse it again, and
+                # they route to the belt — but a belt that is still at
+                # capacity for this type will refuse it again, and
                 # re-attempting it every tick is how run 4 spent its time.
-                if potion_type_of(item) in self.services.belt_full:
-                    continue
+                # The write-off expires the moment drinking makes room:
+                # the belt drains all game, and a belt-full mark that
+                # outlived the fullness is how T56 game 2 starved.
+                potion = potion_type_of(item)
+                if potion in self.services.belt_full:
+                    if self._belt_has_room(potion, carried):
+                        self.services.belt_full.discard(potion)
+                        self.services.log(
+                            f"pickup: the belt has room for {potion} again "
+                            f"— {potion} potions are wanted again"
+                        )
+                    else:
+                        continue
             elif self.services.inventory_full:
                 continue
             found.append(item)
         return found
+
+    def confirm_pickups(self, snap: GameSnapshot) -> None:
+        """Narrate clicked items that actually left the ground.
+
+        Verification stays where it always was — the wanted list re-derives
+        from the ground every tick — but until now nothing SAID an item
+        came up, so the narrative showed decisions with no outcomes and the
+        belt census had to be reconstructed by hand. One line per arrival,
+        with the belt state for potions, closes that. An item still lying
+        there after its clicks is simply forgotten once stale (the per-item
+        attempts budget is the real bookkeeping; this is telemetry).
+        """
+        if not self.services.pending_pickup:
+            return
+        on_ground = {g.unit_id for g in snap.ground_items}
+        now = self.services.clock()
+        census: str | None = None
+        for unit_id, (kind, potion, position, clicked) in list(
+            self.services.pending_pickup.items()
+        ):
+            if unit_id in on_ground:
+                if now - clicked > 10.0:
+                    del self.services.pending_pickup[unit_id]
+                continue
+            del self.services.pending_pickup[unit_id]
+            if potion is not None:
+                if census is None:
+                    carried = self.services.carried()
+                    capacity = self.services.pickit.belt_capacity
+                    census = ", ".join(
+                        f"{t} {belt_count(carried, t)}/{capacity.get(t, 0)}"
+                        for t in ("healing", "mana", "rejuv")
+                    )
+                self.services.narrate(
+                    f"pickup: kind {kind} at {position} came up — belt {census}"
+                )
+            else:
+                self.services.narrate(f"pickup: kind {kind} at {position} came up")
 
     def note_wanted_sightings(
         self, snap: GameSnapshot, centre: tuple[int, int], radius: int
@@ -716,7 +791,7 @@ class _PickupMixin:
         ):
             return False  # the last click is still resolving
         attempts = self.services.attempts.get(item.unit_id, 0)
-        if attempts >= self.services.pickup_attempts:
+        if attempts >= self.services.pickup_click_attempts:
             self.services.stuck.add(item.unit_id)
             potion = potion_type_of(item)
             if potion is not None:
@@ -729,16 +804,34 @@ class _PickupMixin:
                 # `inventory_full` and `stuck`, the same potion was retried,
                 # and it failed again for the same unchanged reason.
                 #
+                # But "would not come up" only MEANS belt-full while the
+                # belt count agrees (T56: three click misses in a dense
+                # pile were diagnosed as "belt full for healing" on a belt
+                # that was SHORT, and the type-level write-off then refused
+                # every later healing potion in a game that chickened on
+                # exactly that starvation). With room in the belt the
+                # failure is the CLICK's — the item is written off (the
+                # `stuck` add above), the type stays wanted.
+                #
                 # Recorded per TYPE, because that is the granularity the belt
                 # refuses at — same reasoning as `fill_belt`'s own `full` set.
-                if potion not in self.services.belt_full:
+                if self._belt_has_room(potion):
+                    self.services.alert(
+                        f"pickup: a {potion} potion at {item.position} "
+                        f"would not come up after "
+                        f"{self.services.pickup_click_attempts} attempts even "
+                        f"though the belt has room — click misses "
+                        f"suspected. Leaving that one; {potion} potions "
+                        "stay wanted."
+                    )
+                elif potion not in self.services.belt_full:
                     self.services.belt_full.add(potion)
                     self.services.alert(
                         f"belt full for {potion}: a {potion} potion at "
                         f"{item.position} would not come up after "
-                        f"{self.services.pickup_attempts} attempts. Leaving "
-                        f"{potion} potions this game; the inventory has "
-                        "nothing to do with it."
+                        f"{self.services.pickup_click_attempts} attempts. Leaving "
+                        f"{potion} potions until drinking makes room; the "
+                        "inventory has nothing to do with it."
                     )
                 return False
             # A non-potion that will not come up IS the inventory-full tell.
@@ -771,7 +864,10 @@ class _PickupMixin:
             )
         self.services.attempts[item.unit_id] = attempts + 1
         self.services.last_try[item.unit_id] = now
-        ctx.executor.execute(PickUpItem(item.unit_id, item.position))
+        self.services.pending_pickup[item.unit_id] = (
+            item.kind, potion_type_of(item), item.position, now,
+        )
+        ctx.executor.execute(PickUpItem(item.unit_id, item.position, attempt=attempts))
         return True
 
     def send(self, ctx: EngineContext, action) -> bool:
@@ -997,7 +1093,7 @@ class _PickupMixin:
         self.services.inventory_full = True
         self.services.alert(
             f"INVENTORY FULL: item kind {item.kind} at {item.position} would "
-            f"not come up after {self.services.pickup_attempts} attempts. "
+            f"not come up after {self.services.pickup_click_attempts} attempts. "
             "Skipping further non-potion pickups this game; the town preamble "
             "empties the inventory next game."
         )
@@ -1329,6 +1425,7 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
         if centre is None or snap.player is None:
             return StepOutcome(done=False)
         now = self.services.clock()
+        self.confirm_pickups(snap)
         # The sightings memo (T3): whatever the pickit wants and this
         # step does not collect is the sweep's work order — and its only
         # reason to re-walk the ring.
@@ -1550,6 +1647,7 @@ class PickupStep(_PatrolMixin, _PickupMixin):
         self.resolve(snap, ctx)
         if self._centre is None:
             return StepOutcome(done=True, note="nowhere to sweep")
+        self.confirm_pickups(snap)
         if self.maybe_cleanse(snap, ctx):
             # Space first, sweep second: a written-off item may be liftable
             # once the junk is gone.

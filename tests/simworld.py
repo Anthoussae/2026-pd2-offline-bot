@@ -385,6 +385,19 @@ class SimGated:
         self.clicks.append(((wx, wy), button, stand_still))
         return (0, 0)
 
+    # The hover-verified pickup surface (T58). The sim has no cursor and no
+    # hover pointer, so hovers are inert and `hovered_item_id` reads None —
+    # the executor then takes its blind-click fallback, which is the path
+    # `world.apply` has always modelled.
+    def project_world(self, wx, wy):
+        return (wx, wy)
+
+    def hover_screen(self, sx, sy):
+        pass
+
+    def click_screen(self, sx, sy, button="left", *, stand_still=False):
+        self.clicks.append(((sx, sy), button, stand_still))
+
 
 class SimExecutor(GameActionExecutor):
     """The real executor; the world reacts only once a send has completed.
@@ -495,6 +508,9 @@ def build_sim(
         walk_to=lambda target: world.apply(MoveTo(target)),
         hotkeys=config.hotkeys,
         clock=world.clock,
+        # The hover probe ring sleeps between cursor moves; in the sim
+        # those are real seconds nobody is simulating. No time passes.
+        sleep=lambda seconds: None,
     )
 
     combat = NecroCombat(

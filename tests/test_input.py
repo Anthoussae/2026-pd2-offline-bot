@@ -63,6 +63,11 @@ def sent(monkeypatch):
     monkeypatch.setattr("pd2bot.input._send_mouse_flag", lambda f: record.append(("mouse", f)))
     monkeypatch.setattr("pd2bot.input._send_key", lambda vk, f: record.append(("key", vk, f)))
     monkeypatch.setattr("pd2bot.input.time", SimpleNamespace(sleep=lambda s: None))
+    # The cursor move is a real SendInput event since T60; tests record it
+    # under the same ("cursor", x, y) shape the SetCursorPos era used.
+    monkeypatch.setattr(
+        "pd2bot.input._send_mouse_move", lambda x, y: record.append(("cursor", x, y))
+    )
     monkeypatch.setattr(
         "pd2bot.input.user32",
         SimpleNamespace(SetCursorPos=lambda x, y: record.append(("cursor", x, y))),

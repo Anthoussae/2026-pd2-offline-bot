@@ -195,3 +195,40 @@ headings, noted in parentheses, say roughly where they fell).
 - M5 P6 R190 [execute] T55 run 3: OK the gate — livelock fixes and kill switch, live · 2026-08-02 20:07
 
 - M5 P6 R191 [execute] T55 run 4: OK the gate — confirm the trend · 2026-08-02 20:29
+
+- M5 P6 R192 [execute] T56 run 1: OK the gate — Stage C, the supervised full run · 2026-08-02 21:10
+
+- M5 P6 R193 [execute] T57 run 1: stage 1 healing potion, OK the gate — the potion supply chain · 2026-08-02 23:19
+
+- M5 P6 R194 [execute] T58: drop a potion, then hover on my marks — the hover-pointer hunt · 2026-08-03 00:09
+
+- M5 P6 R195 [execute] T59: drop 2-3 potions at the character's feet, GO, hands off · 2026-08-03 00:26
+
+- M5 P6 R196 [execute] T60: two rounds — drop one potion a few steps away, GO, hands off · 2026-08-03 00:44
+
+- M5 P6 R197 [execute] T60 run 2: same two rounds, now with REAL mouse-move events · 2026-08-03 01:02
+
+- M5 P6 R198 [execute] T60 run 3: three rounds, transition-click protocol · 2026-08-03 01:14
+
+- M5 P6 R199 [execute] T61: drop TWO potions apart, GO — steering strategies + the far-click question · 2026-08-03 01:33
+
+- M5 P6 R200 [execute] T62: drop ONE potion, GO, hand off — the glide lawnmower · 2026-08-03 01:52
+
+- M5 P6 R201 [execute] T63: two rounds — labels ON then OFF, the click matrix · 2026-08-03 02:14
+
+- M5 P6 R202 [execute] T59 run 2: drop 2-3 potions at the feet, GO — the sprite-aim rematch · 2026-08-03 02:33
+
+- M5 P6 R203 [execute] T59 run 3: drops 3-5 steps out, DIFFERENT directions — the occlusion check · 2026-08-03 02:48
+
+- M5 P6 R204 [execute] Restock healing potions before the Stage C rerun · 2026-08-03 02:58
+
+- M5 P6 R205 [execute] T64 (after Stage C concludes): drop a junk/whitelist mix, GO — pickit accuracy · 2026-08-03 03:15
+
+- M5 P6 R206 [decision] Stage D item 1: chicken back to 35% (user-decided) · 2026-08-03 03:40
+- M5 P6 R207 [execute] Autonomous pickup-accuracy campaign (T65+) · 2026-08-03 03:40
+
+- M5 P6 R208 [decision] Stage D threshold review closed — all items keep shipped behavior · 2026-08-03 05:20
+
+- M5 P6 R209 [execute] T66 (autonomous): find the ALT label flag · 2026-08-03 05:40
+
+- M5 P6 R210 [execute] STAGE E: 3 unattended games (user go) · 2026-08-03

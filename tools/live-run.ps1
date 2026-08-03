@@ -13,14 +13,17 @@
 param(
     [string]$Run = 'runs\cold-plains-patrol.toml',
     [int]$Games = 1,
-    [int]$Chicken = 50,
+    # 0 = use the class config's number (35 since the Stage D decision,
+    # 2026-08-03). The staged-acceptance 50 was always an override.
+    [int]$Chicken = 0,
     [int]$Radius = 0,
     [switch]$DryRun,
     [int]$TimeoutSec = 900
 )
 
 $repo = 'C:\dev\2026-pd2-bot\2026-pd2-offline-bot'
-$cmd = "& `"`$HOME\.venvs\pd2bot\Scripts\python.exe`" -m pd2bot.wiring --games $Games --chicken $Chicken --run $Run"
+$cmd = "& `"`$HOME\.venvs\pd2bot\Scripts\python.exe`" -m pd2bot.wiring --games $Games --run $Run"
+if ($Chicken -gt 0) { $cmd += " --chicken $Chicken" }
 if ($Radius -gt 0) { $cmd += " --radius $Radius" }
 if ($DryRun) { $cmd += ' --dry-run' }
 

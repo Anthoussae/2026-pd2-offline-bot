@@ -341,14 +341,21 @@ class Rule:
             capacity = (belt_capacity or DEFAULT_BELT_CAPACITY).get(
                 self.potion_type or "", 0
             )
-            in_belt = _belt_count(carried, self.potion_type)
+            in_belt = belt_count(carried, self.potion_type)
             in_inventory = _inventory_count(carried, self.potion_type)
             if in_belt >= capacity and in_inventory >= self.potion_reserve:
                 return False
         return True
 
 
-def _belt_count(carried: CarriedItems, potion_type: str | None) -> int:
+def belt_count(carried: CarriedItems, potion_type: str | None) -> int:
+    """How many potions of `potion_type` are in the belt right now.
+
+    Public because the pickup step compares it against capacity to tell a
+    genuinely full belt from a click that missed (T56: three click misses
+    were diagnosed as "belt full for healing" while the belt was SHORT,
+    and the type-level write-off then refused every later healing potion
+    in a game that ended on exactly that starvation)."""
     return sum(1 for i in carried.belt if potion_type_of(i) == potion_type)
 
 

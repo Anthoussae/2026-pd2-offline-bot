@@ -377,6 +377,49 @@ def read_socket_count(session: GameSession, unit: int) -> int | None:
     return stats.get(offsets.STAT_NUM_SOCKETS, 0)
 
 
+def label_display_on(session: GameSession) -> bool | None:
+    """Is the ground-item label display (the ALT toggle) currently ON?
+
+    Reads BH.dll's own flag (T66). None = unreadable (BH.dll absent?) —
+    callers must treat that as 'unknown', never guess a direction.
+    """
+    try:
+        base = next(
+            m.base for m in session.modules()
+            if m.name == offsets.BH_LABEL_MODULE
+        )
+        return bool(session.u8(base + offsets.BH_LABEL_DISPLAY))
+    except Exception:
+        return None
+
+
+def hovered_item_id(session: GameSession) -> int | None:
+    """The unit id of the ground item under the cursor, or None.
+
+    Reads `player_unit + PLAYER_HOVER_ITEM` (T58) and believes it only
+    after validation: whatever it holds must read back as an ITEM-type
+    unit, because the drill measured the pointer retaining its last item
+    while the cursor sat on a living unit. Null, garbage, or a non-item
+    all answer None — the pickup path treats that as "not confirmed" and
+    falls back to the blind click, which is exactly the pre-T58 behavior.
+    """
+    try:
+        player = player_unit(session)
+        if player is None:
+            return None
+        target = session.ptr(player + offsets.PLAYER_HOVER_ITEM)
+        if target is None:
+            return None
+        if session.u32(target + offsets.UNIT_TYPE) != offsets.UNIT_TYPE_ITEM:
+            return None
+        return session.u32(target + offsets.UNIT_ID)
+    except Exception:
+        # Includes "not a real session at all" (sims pass None): a hover
+        # that cannot be read is a hover that never confirms, and the
+        # pickup path degrades to the blind click rather than breaking.
+        return None
+
+
 def iter_units_of_type(session: GameSession, unit_type: int) -> Iterator[int]:
     """Every distinct unit of one type the client knows about.
 
