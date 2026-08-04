@@ -1,8 +1,12 @@
 # Behavior architecture: a ticked engine, runs as data, reflexes above offense
 
 Date: 2026-07-31 (M5 P4)
-Status: proposed — drafted with the sim-only implementation; to be
-finalized at P6 once the architecture has survived live staged acceptance.
+Status: **accepted** (2026-08-03, M5 P6) — the architecture survived the
+full staged live acceptance: stages A–E in order, ending with 3 clean
+unattended Cold Plains runs (created, Hell-verified, preamble, waypoint,
+radius-150 clearance with patrol, pickit honored, deposit verified,
+left) with the safety monitor silent. What the live stages taught is in
+the second amendments block below; none of it changed the shape.
 
 ## Context
 
@@ -161,3 +165,45 @@ this ADR is where the superseded details were written down:
   `RunServices`, the engine, and the town layer.
 - **Route-aware legs (R181).** Steps ask the map before spending legs:
   see navigation.md's "route service" section.
+
+## Amendments (2026-08-03, P6 — what staged live acceptance taught)
+
+Again extensions, not shape changes — the tick order, the layer
+boundaries and the guard family all held as designed. Recorded because
+each one corrects an assumption the P4/P5 design was written under:
+
+- **Clicks aim at sprites, not tiles (T57–T63).** The design assumed
+  clicking an item meant clicking the projection of its ground tile;
+  live, that misses ~29 times in 30, because the clickable sprite draws
+  ~28–48 px ABOVE the tile. The executor now follows a measured
+  per-attempt offset schedule (`_PICKUP_OFFSETS`), small item classes
+  are effectively label-clicked, and the ALT label display is ensured on
+  by a memory-read-verified toggle (`units.label_display_on`) — pressed
+  only when provably off. Dead end, documented so nobody re-digs it: the
+  hover slot (player+0xE8) tracks only REAL mouse motion, synthetic
+  moves never update it, and clicks do not need it.
+- **A stop order is part of the tick (T54 run 3 → R189).** The design
+  had no field-side abort; the user's in-chat abort went unheard until
+  refused sends piled into a halt. `StopRequested` (chat abort, drill
+  cancel file, the Enter/ESC operator kill switch) is now checked at the
+  top of every tick — but AFTER the monitor, because the death latch
+  must win the race against a leave path that sends input (review 001).
+- **Declared waits get a deadline (reviews 003/001).** `StepOutcome.
+  waiting` was added so deliberate settles stop tripping the idle
+  watchdog — and then a genuine hang hid inside it. A declared wait is
+  a claim that something will expire; the engine holds an unbroken run
+  of them to `wait_bail_s`.
+- **The belt is evidence, both ways (T56–T59).** Potion tier blindness
+  (only hp5/mp4–5 recognized; hp1–hp4 read as foreign) and a sticky
+  belt-full misdiagnosis each cost a live run. All potion tiers are now
+  in the code table (kinds 602–611), and belt-full is checked against
+  live counts in both directions before it is believed.
+- **Stage D settled the thresholds as shipped**: chicken 35% is the
+  config default (the live-run override retired), warp and drink
+  numbers confirmed, belt-short after a refill is notice-and-continue
+  (halting is reserved for the mechanical case), and by-catch pickups
+  are accept-and-cleanse.
+- The P4 "known imperfection" (idle bails sharing the chicken counter)
+  was resolved by `is_vitals = False` (R115): the cycle's vitals
+  backstop no longer counts non-vitals exits, so the mixed-sequence
+  mislabel cannot recur.

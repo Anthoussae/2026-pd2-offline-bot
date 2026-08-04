@@ -2,10 +2,11 @@
 kind: plan
 size: md
 depth: implementation
-status: active
+status: done
 repo: 2026-pd2-offline-bot
 created: 2026-07-29
-adr: expected
+completed: 2026-08-03
+adr: delivered (2026-07-29-behavior-architecture.md, accepted)
 ---
 
 # M5 — trial run: Cold Plains clearance (Hell)

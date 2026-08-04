@@ -70,6 +70,46 @@ two calibrations recorded in `pd2bot/cycle.py` and `pd2bot/menuinput.py`
 position was hover-measured) — re-check them after changing window size or
 resolution.
 
+## Running the bot (M5)
+
+The bot now plays: town preamble → waypoint → clearance (with patrol)
+→ pickit-driven pickup → leave, repeat. From an **elevated** terminal
+at the repo root (or through the bridge — see below):
+
+```bash
+python -m pd2bot.wiring --games 3
+```
+
+Flags: `--run runs/<file>.toml` (default `cold-plains`), `--radius N`
+and `--chicken PCT` overrides (both refuse loudly if they have nothing
+to apply to), `--dry-run` (assemble, print the wiring, send nothing).
+`tools/live-run.ps1` wraps this through the elevated bridge with
+absolute paths baked in; `tools/bridge-run.ps1` runs arbitrary drills
+the same way, and `tools/drill-cancel.ps1` (or typing `abort` in the
+in-game chat, or pressing ESC/Enter in the field) stops a run.
+Architecture: `docs/architecture/behavior.md`.
+
+**What the operator tunes** (both files are commented for exactly this):
+
+- `config/pickit.toml` — what is worth picking up and what to keep,
+  stash, or drop. The user-facing knob; edit freely between sessions.
+  While it names unresolved item ids the inventory cleanse disables
+  itself and says so at startup.
+- `config/necro.toml` — every class number: skill ids, hotkeys (must
+  match the client's F1–F6 bindings), the belt layout and refill
+  minimums, all reflex-ladder thresholds, the skirmish numbers. The
+  loader rejects unknown keys loudly, so typos fail at startup.
+- `runs/*.toml` — the runs themselves (ordered steps + parameters); a
+  new run is a new file, validated at load. `config/item_codes.toml`
+  and `config/item_ids*.toml` are the item vocabulary the pickit
+  matches against (`item_ids.learned.toml` grows from play).
+
+`pd2bot.dump` gained diagnostic flags used throughout the M5 live work:
+`--items` (raw ground-item fields), `--monsters` (type-1 units with
+alignment and distance), `--carried` (carried items with raw location
+bytes). Live drills follow the T-numbered protocol in `pd2bot/drill.py`
+and log to `docs/drill-log.md`.
+
 ## Map knowledge: the explored-map atlas
 
 Single-player maps are fixed per character per difficulty, so the bot

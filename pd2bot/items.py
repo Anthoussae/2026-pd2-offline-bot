@@ -356,4 +356,4 @@ def read_carried_items(
 # needs each item's width/height, which live in the ItemsTxt data table —
 # a D2COMMON structure this module has no verified offsets for. P3's stash
 # guardrail verifies deposits by watching this list shrink instead
-# (plan: docs/plans/2026-07-29-m5-trial-run/01-perception-extensions.md).
+# (plan: docs/archive/plans/2026-07-29-m5-trial-run/01-perception-extensions.md).

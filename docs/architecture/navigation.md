@@ -166,8 +166,27 @@ closer to the goal resets the give-up counter — a crawling character
 arrives late; only a truly blocked one fails. A
 blocking panel pauses walking (up to 10 s) rather than fighting it —
 in M3, a panel means a human or a death screen, and both outrank us.
-Doors, monsters, and area transitions are explicitly later milestones
-(M4/M5); the M3 navigator's world is one area with static walls.
+Monsters en route are M5's behavior layer's business now; doors and
+cross-area *walking* (area transitions on foot) remain deferred — the
+navigator's world is still one area with static walls, and M6's
+Countess route (Black Marsh → Forgotten Tower → five cellar levels)
+is where that changes.
+
+## Waypoint travel (`waypoint.py` + the `waypoint` run step, M5)
+
+Travel between areas exists, by waypoint only. The step requires the
+panel-closed → open *edge* attributable to its own click on the
+waypoint object (the fail-safe against the stuck-slot observation in
+uistate.py), clicks the destination row — a calibrated UIPoint, sent
+through the town layer's shared `InteractionLayer` over `PanelInput`
+(the panel-scoped guard; see behavior.md) — and then *verifies arrival
+by area id* rather than trusting the click. The arrival position is
+recorded on the run's blackboard, which is what `clear_radius` centers
+on. Cross-area walking — leaving an area through its exit seam on foot
+— is not built; the atlas records per-area grids and the patrol keeps a
+seam inset (`_SEAM_INSET`, R189 c) precisely so a ring point on a
+border cannot flip which area's grid plans the next walk (T55 run 2's
+lesson).
 
 All timing is injected, so the whole ladder is tested against a scripted
 fake world in `tests/test_navigate.py` — the game is only needed for the

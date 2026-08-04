@@ -6,7 +6,9 @@ I get a *game* at all, and when do I abandon one". It is the layer that
 turns a bot that can walk into a bot that can be left alone.
 
 Companion docs: [perception.md](perception.md),
-[navigation.md](navigation.md), and the archived M4 planning dir
+[navigation.md](navigation.md), [behavior.md](behavior.md) — the layer
+that now runs *inside* the games this cycle creates — and the archived
+M4 planning dir
 ([docs/archive/plans/2026-07-28-m4-game-cycle/](../archive/plans/2026-07-28-m4-game-cycle/plan.md)
 — live-check history, calibrations, the implementation log).
 
@@ -126,6 +128,15 @@ Acceptance was empirical: `python -m pd2bot.cycle --games 3 --dwell 10`
 ran three unattended cycles, each created, Hell-verified, dwelled, and
 exited, with zero retries and zero human input.
 
+The run callback this cycle was built for is no longer a dwell: as of
+M5, `run_games(callback)` receives the behavior runner (`wiring.py`
+assembles it; `python -m pd2bot.wiring --games N` is the entry point),
+and the cycle's `ChickenExit`/`DeathHalt`/`NavigationError` semantics
+carry unchanged — the behavior layer's own exits (`IdleBail`,
+`StopRequested`) ride `ChickenExit` precisely so nothing in this layer
+had to change. M5's acceptance re-ran the same pattern with a real run
+inside: 3/3 clean unattended Cold Plains clearances (see behavior.md).
+
 ## The safety monitor (`safety.py`)
 
 A per-tick watchdog over the player's vitals, two reflexes, death
@@ -145,8 +156,15 @@ loop continues — **but not forever**: PD2 carries HP/mana between games
 would chicken out of every game it ever enters. The loop halts loudly
 after N consecutive chickens (default 2) — user-spotted during the live
 drill, whose "odd" instant trip was exactly this carried-vitals effect.
-The durable fix is M5's town-heal preamble (visit the healer before
-leaving town, kolbot-style); the backstop stays as defense in depth.
+The durable fix landed in M5 and closed R45's loop: every run opens
+with the town preamble (heal at the healer, repair, restock the belt
+from inventory, merc check — `town.py`), so a game entered with
+carried-down vitals heals before the field. The consecutive-chicken
+backstop stays as defense in depth, and non-vitals exits (`IdleBail`,
+`StopRequested`, `is_vitals = False`) no longer count against it —
+R115's fix for one real chicken plus one idle bail halting with a
+message telling the operator to heal a character whose actual problem
+was a hang.
 
 **The death latch**: if the player's unit mode reads Death/Dead (0/17)
 or hp reads zero, the monitor fires a loud local alert and latches

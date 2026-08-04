@@ -232,3 +232,5 @@ headings, noted in parentheses, say roughly where they fell).
 - M5 P6 R209 [execute] T66 (autonomous): find the ALT label flag · 2026-08-03 05:40
 
 - M5 P6 R210 [execute] STAGE E: 3 unattended games (user go) · 2026-08-03
+- M6 R211 [decision] Approve the M5 closeout commit · 2026-08-03 06:31
+- M6 R212 [decision] M6 plan: Q1-Q10 + phase table · 2026-08-03 06:31

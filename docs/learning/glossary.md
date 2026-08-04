@@ -99,6 +99,20 @@ Pathfinding algorithms like A* operate on this grid. Our bot reads them
 from the live game's memory and remembers them in a per-seed atlas
 (single-player maps never change).
 
+**command vs. effect** — the discipline of never treating "I sent the
+command" as "the thing happened": act, then read the world to confirm
+the effect (the skill really switched, the character really moved).
+The heart of reliable automation and of distributed systems. *(First
+seen: 2026-08-03, layers, reflexes, and guards.)*
+
+**cooldown vs. pacing** — two rate limits that look alike and must not
+be collapsed. A cooldown means "the resource is spent" and may only
+start when the action truly happened; pacing means "do not spam this"
+and must record even failed attempts. Collapsing them gives either a
+livelock (retry every tick forever) or a starved system (a refused
+action locking out the retry it needs). *(First seen: 2026-08-03,
+layers, reflexes, and guards.)*
+
 **binding constraint** — when several limits apply at once, the one you
 actually hit first; the others are dead weight, and improving them buys
 nothing. Our perception filter (80 subtiles) never bound — the client's
@@ -111,6 +125,12 @@ observation both could explain. T51 scanned every sample twice — filter
 on, filter off — so "our filter hides it" and "the client never loaded
 it" had to come apart. *(First seen: 2026-08-01, measuring what the bot
 can see.)*
+
+**blackboard (pattern)** — a shared scratch space through which
+otherwise-ignorant components pass data: one writes a fact ("arrival
+was at (x, y)"), a later one reads it, and neither knows the other
+exists. How our run steps cooperate without coupling. *(First seen:
+2026-08-03, layers, reflexes, and guards.)*
 
 **blocking (call)** — a function that does not return until its work is
 finished, so nothing else in that thread runs meanwhile. Harmless where
@@ -189,6 +209,14 @@ standard testing move follows directly: hand the code a *fake* that has
 the right shape and scripted answers, and it cannot tell the difference.
 First seen in [the behavior engine](2026-07-31-the-behavior-engine.md).
 
+**layered architecture / separation of concerns** — splitting a system
+into layers that each own one kind of question (what to do next; how a
+class fights; what is worth looting) and hiding each layer's internals
+from the others. The test of a good split is what a change costs: in
+ours, a new run is a data file and a new class is one module — neither
+touches the engine. *(First seen: 2026-08-03, layers, reflexes, and
+guards.)*
+
 **least privilege** — granting a component the minimum capability its
 job needs, so a bug or abuse of it is bounded. Our chat channel can
 trigger exactly two commands (a whitelist), only while a test is
@@ -244,6 +272,19 @@ of modules imported under one name (here, `pd2bot`). The boundaries you draw
 between them become the vocabulary the rest of the code uses. First seen in
 [from script to package](2026-07-28-from-script-to-package.md).
 
+**pickit** — botting jargon (from kolbot) for the rule set deciding
+which ground items are worth picking up and what to keep, stash, or
+sell. Ours is a data file (`config/pickit.toml`) the user edits — the
+canonical example of behavior-as-data in this project. *(First seen:
+2026-08-03, layers, reflexes, and guards.)*
+
+**fail fast (load-time validation)** — checking everything checkable at
+startup — unknown keys, misspelled step names, wrong types — and
+refusing to run, instead of misbehaving mid-run when the bad value is
+finally used. The loud early error is a feature: it names the typo
+while the fix is cheap. *(First seen: 2026-08-03, layers, reflexes,
+and guards.)*
+
 **fail-stop** — the design choice to halt completely on a serious
 failure instead of attempting recovery: no further actions, loud alert,
 state left untouched for a human. The opposite pole is fail-recover;
@@ -291,6 +332,13 @@ switch.)*
 
 **race condition** — a bug where two events arrive so close together that the processing order is effectively random, and one order is wrong. Notoriously hard to find because the wrong order may be rare, and harmless in most places it occurs. Fixed by forcing the order (waits, locks, sequencing). *(First seen: 2026-07-31, when the tools lie.)*
 
+**registry (pattern)** — a lookup table mapping names to
+implementations, populated at startup: our step registry maps a run
+file's step names to the code that executes them. It is what lets data
+files name behavior safely — an unknown name is caught at the registry
+instead of crashing somewhere deep. *(First seen: 2026-08-03, layers,
+reflexes, and guards.)*
+
 **SHA (commit hash)** — every git commit is identified by a fingerprint
 computed from its entire content (files, message, parent, author) using
 a hash function called SHA-1 — a 40-character hex string like
@@ -326,6 +374,13 @@ is knowledge rather than shippable code: "is this even possible?" A spike
 that returns "no" is a success — it prevents a large investment in a dead
 end. First seen in
 [reading a program from the outside](2026-07-28-reading-a-program-from-outside.md).
+
+**staged rollout / staged acceptance** — increasing exposure to risk in
+deliberate steps, each with its own abort criteria, instead of jumping
+from "works in testing" straight to "runs alone": supervised, then
+hands-off, then unattended. Industry versions are canary releases and
+percentage rollouts. Our M5 stages A–E are this pattern. *(First seen:
+2026-08-03, layers, reflexes, and guards.)*
 
 **state machine** — a design where the program is always in exactly one
 named state and moves only along defined transitions; crucially, an
