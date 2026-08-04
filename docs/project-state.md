@@ -6,28 +6,33 @@ from here — update it at every milestone or phase transition, in the
 same commit as the transition itself.
 
 - **Milestone:** M6 — Countess flagship
-- **Phase:** P1 — transit and boss perception (plan:
-  `docs/plans/2026-08-03-m6-countess/`, ready for `yona-implement`)
-- **Next request ID:** R213 (overall counter; R171 was never issued — a
+- **Phase:** P2 — waypoint tabs and traverse (P1 and P3 are DONE; plan:
+  `docs/plans/2026-08-03-m6-countess/`)
+- **Next request ID:** R215 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
 - **Next test ID:** T68 (T67, the sparse melange, ran 2 passes on
   2026-08-03 — an earlier note here said "next: T67" in error; check
   `docs/drill-log.md`)
 
-Updated: 2026-08-03 (M5 CLOSED and committed `f1c6276` per R211; the
-M6 plan is WRITTEN per R212's answers — plan.md + phases 01–06 in
-`docs/plans/2026-08-03-m6-countess/`, notes.md carries the full Q&A).
-Headlines of the R212 decisions: doors DEFERRED (staircase clicks are
-the cellar transitions; doors bundle later with chests/barrels/
-teleporter gates as "interactive objects"); postures brisk (Black
-Marsh → Cellar 4) AND aggressive (Cellar 5) both get built; waypoint
-work includes act tabs + Arcane Sanctuary + Halls of Pain rows; exit
-discovery is memory-read (RoomTile chain) with the user's calibration
-survey as designed fallback; boss-read perception investigated in P1
-(<15 s chamber sweep as fallback); chicken 50 for early cellar
-drills, 35 for proper runs. NEXT: `yona-implement` on P1 (transit +
-boss perception; sim/unit work, no live time) — P3 is parallelizable
-with it; P2's calibrations + traversal drills are the first live
-session and deserve a standing-mandate 🔶. PR #1 (m5-trial-run) is
-open awaiting the user's merge decision.
+Updated: 2026-08-03 (PR #1 MERGED per R213 — main carries all of M5;
+branch `m6-countess` is the working line, one branch per milestone
+adopted. **P1 done** `4680df1`: exit perception via the RoomTile chain
+[BH-cited, cross-checked against d2mapapi_mod], boss identity
+[unique_no + wName, provisional is_super_unique — the Countess's id
+gets LEARNED in the P2 descent drill], area ids 6/20/21–25
+provisional, `dump --exits` probe. **P3 done** `6a5f8f9`:
+cautious/brisk/aggressive posture presets selected per run step
+[necro.toml tables, P5-tunable first guesses], right-skill parking
+[executor maintain(), 2 s grace], revive urgency [hold keyed to a
+recent wall cast + timed desecrate-budget refresh], and the four
+carried P3 review issues fixed [sightings wantedness, seam null-area,
+survey stride 4, atlas revision cache key]. 892 tests, ruff clean.
+Standing guidance [R214]: everything possible WITHOUT the bridge or
+game client; in-game testing later.) NEXT: P2 — Black Marsh/Arcane
+Sanctuary/Halls of Pain waypoint rows + act tabs (calibration drills,
+LIVE), the `traverse` step, T-exit-read/T-traverse/T-descent drills —
+the first live session; ask for a standing-mandate 🔶 for the drill
+batch. P2's CODE half (the traverse step + sim) can be pre-built
+without the game if the user wants it before their live session; P4
+needs P2's traverse either way.
