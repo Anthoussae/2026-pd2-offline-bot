@@ -132,6 +132,12 @@ was at (x, y)"), a later one reads it, and neither knows the other
 exists. How our run steps cooperate without coupling. *(First seen:
 2026-08-03, layers, reflexes, and guards.)*
 
+**branch** — a named line of commits inside one repository, letting
+work-in-progress accumulate snapshots without touching the official
+line (`main`). This project runs one branch per milestone
+(`m5-trial-run`), merged into main when the milestone's acceptance
+passes. *(First seen: 2026-08-03, in chat, explaining the M5 merge.)*
+
 **blocking (call)** — a function that does not return until its work is
 finished, so nothing else in that thread runs meanwhile. Harmless where
 nothing else needs to happen, dangerous where something does: the bot
@@ -252,6 +258,11 @@ is enough to read another program's live data. Offsets are true for one
 build of a program and can shift when it is patched. First seen in
 [reading a program from the outside](2026-07-28-reading-a-program-from-outside.md).
 
+**merge** — folding one branch's commits into another, usually a work
+branch into `main`. After the merge both lines are identical; nothing
+is deleted and all history survives. Accepting a pull request is a
+merge. *(First seen: 2026-08-03, in chat, explaining the M5 merge.)*
+
 **modal dialog** — a pop-up window that freezes the rest of its program
 until a human clicks a button ("OK", "Retry"). Fine on a desktop; fatal for
 automation, because a headless program that pops one has no human to click
@@ -329,6 +340,20 @@ window to revive-wall maintenance casts. The classic fix: while the
 high-priority need is pending, the low-priority work does not get the
 resource. *(First seen: 2026-08-02, livelocks, margins, and the kill
 switch.)*
+
+**pull request (PR)** — a proposal hosted on GitHub to merge one
+branch into another, presented as a page where the changes can be
+read, discussed, and accepted. The convention it encodes: the author
+of changes does not accept their own proposal — a reviewer signs off.
+In this project, that reviewer is the user, at milestone boundaries.
+*(First seen: 2026-08-03, in chat, explaining the M5 merge.)*
+
+**push / pull (git)** — push uploads your local commits to the
+repository's copy on a server (GitHub); pull downloads commits made
+elsewhere into your local copy. Committing alone saves only on your
+machine — pushing is what makes work survive the machine and reach
+other clones. *(First seen: 2026-08-03, in chat, explaining the M5
+merge.)*
 
 **race condition** — a bug where two events arrive so close together that the processing order is effectively random, and one order is wrong. Notoriously hard to find because the wrong order may be rare, and harmless in most places it occurs. Fixed by forcing the order (waits, locks, sequencing). *(First seen: 2026-07-31, when the tools lie.)*
 
