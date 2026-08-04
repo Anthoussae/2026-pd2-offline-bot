@@ -1,0 +1,20 @@
+﻿476f4a6 Log T55 run 4 (PASS, 236s): the trend is the steady state
+56536bb Issue R191 (T55 run 4: confirm the trend)
+c0d21cd Refresh project-state to the session's true position
+95946e6 Log T55 run 3 (PASS, 217s); teach: livelocks, margins, the kill switch
+ce1edd8 Log R189 outcome, issue R190
+28c9c6e R189: the border livelock's three fixes, and the Enter/ESC kill switch
+ac50f71 Log T55 run 2 abort (border livelock) and issue R189
+b4e84f3 Log T55 run 1 outcome under R187
+069f15c T55 follow-ups: armor outranks the wall; no-route needs two answers
+0d6eae8 T55: the timed patrol; log R186 outcome, issue R187
+8925977 R186 all four: heal/repair thresholds, sweep-on-evidence, tidy narrative
+83bc415 Log R185 outcome, issue R186 (dilly-dally proposals)
+28b6d91 R185 A+B+C and the belt-bottom-row contract (rung 7.6 generalized)
+017cca0 Log R184 outcome (T54 run 4 PASS) and issue R185 (upkeep churn)
+ea843a7 T54 run 4 lessons: the console is the operator's; mana-glut rung
+8f3ec8f T54 run 3 fixes: merc hp scale, bottom-of-column, tick-level abort
+061b5a8 R183: the merc-feed chord is Shift, not Alt; loud test endings
+77a223b T54 redesign: merc feed confirmed by ear, at any merc hp
+f8a211d T54: the potions acceptance test (merc aid, mixed belt, narrative)
+26857c1 Potion overhaul, narrative log, route-aware legs (R179/R181 cycle)

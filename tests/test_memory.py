@@ -8,7 +8,8 @@ import struct
 
 import pytest
 
-from pd2bot.memory import GameSession
+import pd2bot.memory
+from pd2bot.memory import GameSession, Module, Region
 
 
 class FakePymem:
@@ -83,3 +84,63 @@ def test_cstring_stops_at_terminator(session):
 def test_struct_at_unpacks_little_endian(session):
     assert session.struct_at(0x1014, "HH") == (1234, 5678)
     assert session.struct_at(0x1014, "<HH") == (1234, 5678)
+
+
+# -- the content scanner (T39's instrument) ---------------------------------
+#
+# The straddle case is the one that matters: a match sitting across a chunk
+# boundary that the scan skipped would report "not in memory", and that is a
+# conclusion about the GAME drawn from a bug in the INSTRUMENT — the exact
+# false negative T39 was built to avoid.
+
+
+class ScanSession(GameSession):
+    """A GameSession whose address space is one flat buffer."""
+
+    def __init__(self, data: bytes, origin: int = 0x10000) -> None:
+        self._pm = FakePymem(data, origin)
+        self.client_base = origin
+        self._win_base = None
+        self._region = Region(origin, len(data), 0x04)
+
+    def regions(self):
+        return [self._region]
+
+
+@pytest.fixture
+def small_chunks(monkeypatch):
+    monkeypatch.setattr(pd2bot.memory, "_CHUNK", 64)
+
+
+def test_search_finds_a_match_inside_one_chunk(small_chunks):
+    session = ScanSession(b"." * 20 + b"needle" + b"." * 200)
+    assert session.search(b"needle") == [0x10000 + 20]
+
+
+def test_search_finds_a_match_straddling_a_chunk_boundary(small_chunks):
+    """The match starts at 62 and runs past the 64-byte chunk edge."""
+    session = ScanSession(b"." * 62 + b"needle" + b"." * 200)
+    assert session.search(b"needle") == [0x10000 + 62]
+
+
+def test_search_reports_every_occurrence_once(small_chunks):
+    data = b"." * 10 + b"mark" + b"." * 100 + b"mark" + b"." * 50
+    session = ScanSession(data)
+    assert session.search(b"mark") == [0x10000 + 10, 0x10000 + 114]
+
+
+def test_search_honours_the_limit(small_chunks):
+    session = ScanSession((b"mark" + b"." * 12) * 10)
+    assert len(session.search(b"mark", limit=3)) == 3
+
+
+def test_search_refuses_an_empty_needle():
+    with pytest.raises(ValueError):
+        ScanSession(b"...").search(b"")
+
+
+def test_describe_names_an_address_inside_a_module():
+    session = ScanSession(b"...")
+    modules = [Module("D2Client.dll", 0x6FAB0000, 0x200000)]
+    assert session.describe(0x6FAB1234, modules) == "D2Client.dll+0x1234"
+    assert session.describe(0x00190000, modules) == "heap:0x190000"

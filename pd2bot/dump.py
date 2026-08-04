@@ -58,6 +58,11 @@ def format_snapshot(snap: GameSnapshot, verbose: bool = False) -> str:
     lines.append(f"  ui: {', '.join(panels) if panels else 'nothing open'}"
                  f"   can act: {'yes' if snap.can_act else 'NO'}")
 
+    if snap.skills is not None:
+        lines.append(
+            f"  skills: left {snap.skills.left_id}  right {snap.skills.right_id}"
+        )
+
     live = snap.live_monsters
     lines.append(f"  monsters: {len(live)} alive of {len(snap.monsters)} nearby")
     for monster in sorted(live, key=lambda m: m.position)[: 40 if verbose else 8]:
@@ -78,12 +83,39 @@ def format_snapshot(snap: GameSnapshot, verbose: bool = False) -> str:
         alive = [a for a in snap.allies if a.is_alive]
         names = []
         for ally in alive:
-            fraction = ally.hp_fraction
-            health = f" {fraction:.0%}" if fraction is not None else ""
-            names.append(f"{ally.merc_kind or f'summon {ally.kind}'}{health}")
-        dead = len(snap.allies) - len(alive)
-        tail = f"  (+{dead} dead)" if dead else ""
-        lines.append(f"  yours: {len(alive)} — {', '.join(names) or 'none alive'}{tail}")
+            # life_pct, not hp/max_hp: an ally's current hp is on the
+            # 0-128 client scale (the full merc used to print "8%" here).
+            names.append(
+                f"{ally.merc_kind or f'summon {ally.kind}'} {ally.life_pct:.0f}%"
+            )
+        lines.append(f"  yours: {len(alive)} — {', '.join(names) or 'none alive'}")
+        if not snap.in_town:
+            lines.append(
+                f"    merc: {'alive' if snap.merc else 'ABSENT'}"
+                f"   revives: {len(snap.revives)}"
+            )
+
+    if snap.corpses:
+        lines.append(f"  corpses: {len(snap.corpses)}")
+        if verbose:
+            for corpse in snap.corpses[:12]:
+                lines.append(
+                    f"    type {corpse.kind:<5} at {corpse.position}  mode {corpse.mode}"
+                )
+
+    interesting = [o for o in snap.objects if o.name is not None]
+    if interesting or verbose:
+        lines.append(
+            f"  objects: {len(snap.objects)} nearby"
+            + (f" — {', '.join(f'{o.name} at {o.position}' for o in interesting)}"
+               if interesting else "")
+        )
+        if verbose:
+            for obj in snap.objects[:20]:
+                lines.append(
+                    f"    kind {obj.kind:<5} at {obj.position}  mode {obj.mode}"
+                    f"{f'  ({obj.name})' if obj.name else ''}"
+                )
 
     lines.append(f"  items on the ground: {len(snap.ground_items)}")
     for item in snap.ground_items[: 40 if verbose else 8]:
@@ -176,6 +208,52 @@ def dump_item_units(session) -> str:
     return "\n".join(lines)
 
 
+def dump_carried_items(session) -> str:
+    """Every item the character owns, with all three location bytes raw.
+
+    This is the M5 P1 potion-shuffle instrument: the user moves one potion
+    between inventory, belt and stash while this dump runs, and every field
+    must match the screen before items.py's classification is trusted —
+    the ItemData location byte has lied before (instruction log R17).
+    """
+    from pd2bot import offsets
+    from pd2bot.items import read_carried_items
+
+    carried = read_carried_items(session)
+    lines = [f"{len(carried.items)} carried items ({carried.skipped} skipped)"]
+    lines.append(
+        "  kind   quality  mode  loc  node  position    container   note"
+    )
+    for item in carried.items:
+        note = item.potion_name or ""
+        if item.belt_slot is not None:
+            note += f"  belt col {item.belt_column} slot {item.belt_slot}"
+        lines.append(
+            f"  {item.kind:<6} {item.quality:<8} {item.mode:<5} "
+            f"{item.game_location:<4} {item.node_page:<5} "
+            f"{str(item.position):<11} {item.container:<11} {note}"
+        )
+    belt = carried.belt
+    lines.append(
+        f"\nbelt: {len(belt)} potions — columns "
+        + ", ".join(
+            f"{c}: {carried.belt_count(c)}" for c in range(offsets.BELT_COLUMNS)
+        )
+        + f"   rejuvs: {carried.belt_rejuv_count}"
+    )
+    lines.append(
+        f"inventory: {len(carried.main_inventory)} usable"
+        f" + {len(carried.charm_inventory)} in CHARM space (off limits)"
+        f"   stash: {len(carried.stash)}"
+        f"   cursor: {'yes' if carried.cursor_item else 'no'}"
+    )
+    lines.append(
+        "\nmode key: 0 in-storage, 1 equipped, 2 in-belt, 4 on-cursor, "
+        "6 socketed | loc key: 1 equip, 2 belt, 3 inven, 6 cube, 7 stash"
+    )
+    return "\n".join(lines)
+
+
 def dump_monster_units(session) -> str:
     """Every type-1 unit with the fields that classify it.
 
@@ -252,6 +330,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="dump every type-1 unit with alignment and distance (diagnostic)",
     )
+    parser.add_argument(
+        "--carried",
+        action="store_true",
+        help="dump every carried item with raw location bytes (diagnostic)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -271,6 +354,10 @@ def main(argv: list[str] | None = None) -> int:
         print(dump_monster_units(session))
         return 0
 
+    if args.carried and not args.watch:
+        print(dump_carried_items(session))
+        return 0
+
     if not args.watch:
         print(format_snapshot(perception.snapshot(), args.verbose))
         return 0
@@ -278,7 +365,10 @@ def main(argv: list[str] | None = None) -> int:
     print("watching — Ctrl+C to stop\n")
     try:
         while True:
-            print(format_snapshot(perception.snapshot(), args.verbose))
+            if args.carried:
+                print(dump_carried_items(session))
+            else:
+                print(format_snapshot(perception.snapshot(), args.verbose))
             print("-" * 60)
             time.sleep(0.2)
     except KeyboardInterrupt:

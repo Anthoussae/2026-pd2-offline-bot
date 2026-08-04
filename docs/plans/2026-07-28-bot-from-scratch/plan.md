@@ -99,16 +99,20 @@ areas (explicit check in M3).
 | M2 | md | Perception core: player, monsters, ground items, map seed, area, menu/in-game state detection | **Done 2026-07-28** → [docs/archive/plans/2026-07-28-m2-perception-core/](../../archive/plans/2026-07-28-m2-perception-core/plan.md) |
 | M3 | md | Navigation: gated input layer, live collision, explored-map atlas (replaced map-gen service — user decision at the P3 gate), A*, walk-to | **Done 2026-07-28** → [docs/archive/plans/2026-07-28-m3-navigation/](../../archive/plans/2026-07-28-m3-navigation/plan.md) |
 | M4 | md | Game cycle: create/leave SP game via menus, chicken logic, death→halt (recovery deferred), run-loop skeleton, in-game chat channel | **Done 2026-07-29** → [docs/archive/plans/2026-07-28-m4-game-cycle/](../../archive/plans/2026-07-28-m4-game-cycle/plan.md) |
-| M5 | md | Trial run end-to-end: FSM + necro combat module + pickit + stash — Cold Plains clearance (Hell) | Yes |
+| M5 | md | Trial run end-to-end: FSM + necro combat module + pickit + stash — Cold Plains clearance (Hell) | **Done 2026-08-03** (staged live acceptance A–E; Stage E 3/3 clean unattended) → [docs/archive/plans/2026-07-29-m5-trial-run/](../../archive/plans/2026-07-29-m5-trial-run/plan.md) |
 | M6 | md | Countess flagship: multi-area travel, Tower descent, boss kill, expanded pickit | Light planning |
 | M7 | sm | Manual, architecture docs, cleanup sweep (TODOs, debug prints, stale docs, scope creep) | No |
 
 ## ADR expectations
 
-`expected`: (a) language/stack choice; (b) map-knowledge approach;
-(c) behavior architecture (FSM + data layers). Write them as their
-milestones complete (a: M1, b: M3, c: M5). Straightforward config or
-run-data additions need no ADR.
+`expected`: (a) language/stack choice — **delivered**
+(`docs/adr/2026-07-28-python-out-of-process-perception.md`);
+(b) map-knowledge approach — **delivered**
+(`docs/adr/2026-07-28-hybrid-map-knowledge.md`);
+(c) behavior architecture (FSM + data layers) — **delivered and
+accepted at M5 closeout**
+(`docs/adr/2026-07-29-behavior-architecture.md`). Straightforward
+config or run-data additions need no ADR.
 
 ## Validation strategy
 

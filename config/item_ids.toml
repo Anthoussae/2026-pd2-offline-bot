@@ -1,0 +1,131 @@
+# The item vocabulary: every name the pickit rules may use, mapped to the
+# game's internal item-type number (dwTxtFileNo, "kind").
+#
+# WHY THIS FILE EXISTS: PD2 renumbered item kinds relative to classic
+# Diablo II — proven live when the potions turned up at ids no classic
+# table predicted (R54) — so no inherited number is trusted untested.
+# Every id in [verified] states where it came from; names in [pending]
+# are waiting for the T39 placement drill (place the item in the top-left
+# inventory cell, the drill reads the number the game itself uses).
+#
+# A pickit rule may name anything in this file. Rules naming [pending]
+# items load fine but MATCH NOTHING until the id is filled in — the
+# fail-safe direction (an item not picked, never a wrong item picked).
+# The inventory cleanse refuses to drop anything at all while names it
+# might need to recognise are still pending (pickit.py, cleanse_keep).
+
+# -- verified ------------------------------------------------------------------
+# name = id, each with provenance. Do not add a number here without a
+# drill or live observation to cite.
+
+[verified]
+healing_606 = 606 # P1 drill C + R54 (drunk by effect)
+mana_610 = 610    # P1 drill C
+mana_611 = 611    # R54: key 1 consumed 611, mana orb refilled
+rejuv_530 = 530   # P1 drill C
+rejuv_531 = 531   # P1 drill C
+horadric_cube = 564 # R67: identified live as the single kind-564 item
+# Read off the live inventory during the T38 probe (bridge 061): both
+# carried stat 70 = a charge count, 72 and 64 respectively, which is what
+# a tome is. Identity of 534 independently confirmed at R112, where the
+# bot cast one by right-clicking it.
+tome_of_identify = 534    # R112 + T38 probe (72 charges)
+tome_of_town_portal = 533 # T38 probe (64 charges)
+
+# -- pending -------------------------------------------------------------------
+# Names awaiting the T39 placement drill. Grouped by which part of the
+# R117 list they serve. The drill announces each name in this order.
+
+[pending]
+names = [
+  # gold: kolbot says 523; PD2 renumbering makes that untrustworthy (see
+  # offsets.py) — verified by the first live drop instead of placement.
+  "gold",
+  # flawless and perfect gems, including skulls (7 types x 2 grades)
+  "flawless_amethyst", "flawless_topaz", "flawless_sapphire",
+  "flawless_emerald", "flawless_ruby", "flawless_diamond", "flawless_skull",
+  "perfect_amethyst", "perfect_topaz", "perfect_sapphire",
+  "perfect_emerald", "perfect_ruby", "perfect_diamond", "perfect_skull",
+  # runes, El through Zod
+  "el_rune", "eld_rune", "tir_rune", "nef_rune", "eth_rune", "ith_rune",
+  "tal_rune", "ral_rune", "ort_rune", "thul_rune", "amn_rune", "sol_rune",
+  "shael_rune", "dol_rune", "hel_rune", "io_rune", "lum_rune", "ko_rune",
+  "fal_rune", "lem_rune", "pul_rune", "um_rune", "mal_rune", "ist_rune",
+  "gul_rune", "vex_rune", "ohm_rune", "lo_rune", "sur_rune", "ber_rune",
+  "jah_rune", "cham_rune", "zod_rune",
+  # charm bases (unique charms rule)
+  "small_charm", "large_charm", "grand_charm",
+  # jewelry bases (rare + unique rule)
+  "jewel", "ring", "amulet",
+  # necro head bases (unique + 3-socket rules)
+  "minion_skull", "overseer_skull", "succubus_skull", "hellspawn_skull",
+  "bloodlord_skull",
+  # unique base items
+  "shako", "spiderweb_sash", "mithril_coil", "cinquedeas", "bone_knife",
+  "dusk_shroud", "wire_fleece", "balrog_skin", "kraken_shell",
+  "shadow_plate", "sacred_armor",
+  # socketed base rule
+  "archon_plate",
+  # set base items
+  "bone_visage", "chaos_armor", "cantor_trophy", "troll_belt",
+  "heavy_bracers",
+  # PD2 quest, map and event items (user list, R117)
+  "worldstone_shard", "larzuks_puzzlebox", "larzuks_puzzlepiece", "tainted_worldstone_shard", "skeleton_key", "vial_of_lightsong",
+  "liliths_mirror", "relic_of_the_ancients", "sigil_of_madawc",
+  "sigil_of_talic", "sigil_of_korlic", "prime_evil_soul", "black_soulstone",
+  "pure_demonic_essence", "splinter_of_the_void",
+  "trang_ouls_jawbone", "hellfire_ashes", "flesh_of_malic",
+  "key_of_terror", "key_of_hate", "key_of_destruction",
+]
+
+# -- craft-only (R128) ---------------------------------------------
+# The user confirmed these cannot DROP - they exist only as cube
+# output. A pickup rule for them could never fire, and leaving them
+# pending would hold the inventory cleanse disabled forever over
+# items that cannot appear on the ground. Recorded here so the
+# knowledge is not lost; add ids if one is ever seen carried.
+#
+#   demonic_cube
+#   horadrim_navigator
+#   horadrim_almanac
+#   pandemonium_talisman
+#   vision_of_terror
+#   voidstone
+#   shadow_of_hatred
+#   demonic_insignia
+#   talisman_of_transgression
+
+# -- groups --------------------------------------------------------------------
+# A rule saying kinds = ["runes"] means every member. Members are names
+# from [verified]/[pending] above (or the built-in potion groups, which
+# stay in code because the belt logic shares them).
+
+[groups]
+gems_flawless_perfect = [
+  "flawless_amethyst", "flawless_topaz", "flawless_sapphire",
+  "flawless_emerald", "flawless_ruby", "flawless_diamond", "flawless_skull",
+  "perfect_amethyst", "perfect_topaz", "perfect_sapphire",
+  "perfect_emerald", "perfect_ruby", "perfect_diamond", "perfect_skull",
+]
+runes = [
+  "el_rune", "eld_rune", "tir_rune", "nef_rune", "eth_rune", "ith_rune",
+  "tal_rune", "ral_rune", "ort_rune", "thul_rune", "amn_rune", "sol_rune",
+  "shael_rune", "dol_rune", "hel_rune", "io_rune", "lum_rune", "ko_rune",
+  "fal_rune", "lem_rune", "pul_rune", "um_rune", "mal_rune", "ist_rune",
+  "gul_rune", "vex_rune", "ohm_rune", "lo_rune", "sur_rune", "ber_rune",
+  "jah_rune", "cham_rune", "zod_rune",
+]
+charms = ["small_charm", "large_charm", "grand_charm"]
+jewelry = ["jewel", "ring", "amulet"]
+necro_heads = [
+  "minion_skull", "overseer_skull", "succubus_skull", "hellspawn_skull",
+  "bloodlord_skull",
+]
+quest_and_map_items = [
+  "worldstone_shard", "larzuks_puzzlebox", "larzuks_puzzlepiece", "tainted_worldstone_shard", "skeleton_key", "vial_of_lightsong",
+  "liliths_mirror", "relic_of_the_ancients", "sigil_of_madawc",
+  "sigil_of_talic", "sigil_of_korlic", "prime_evil_soul", "black_soulstone",
+  "pure_demonic_essence", "splinter_of_the_void",
+  "trang_ouls_jawbone", "hellfire_ashes", "flesh_of_malic",
+  "key_of_terror", "key_of_hate", "key_of_destruction",
+]

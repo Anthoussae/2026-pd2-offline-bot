@@ -97,7 +97,13 @@ class CycleOutcome:
     verified: bool = False
     ran: bool = False
     left: bool = False
-    chickened: bool = False  # left early on a vitals threshold: routine
+    chickened: bool = False  # left early rather than completing: routine
+    # Whether that early exit was actually about VITALS (R115). An idle
+    # bail, a failed town step and an unexpected run error all arrive as
+    # `ChickenExit` so they get the cycle's leave-and-continue handling,
+    # and calling all four "CHICKEN" in the report made three of them
+    # unreadable.
+    vitals: bool = True
     error: str | None = None
 
 
@@ -124,7 +130,7 @@ class CycleReport:
                     "CVRL", (o.created, o.verified, o.ran, o.left), strict=True
                 )
             )
-            notes = "  CHICKEN" if o.chickened else ""
+            notes = ("  CHICKEN" if o.vitals else "  LEFT EARLY") if o.chickened else ""
             notes += f"  {o.error}" if o.error else ""
             lines.append(f"  #{o.index}: [{steps}]{notes}")
         return "\n".join(lines)
@@ -388,13 +394,21 @@ class GameCycle:
                 except ChickenExit as exc:
                     # Routine: the whole point of the threshold is that
                     # leaving is cheap. Log it, leave, keep cycling.
-                    print(f"  chicken: {exc}")
                     outcome.chickened = True
-                    consecutive_chickens += 1
+                    # Only a REAL vitals chicken feeds the vitals backstop
+                    # below (R115). The others each have their own counter
+                    # in runner.py, kept by the layer that can describe
+                    # them honestly; counting them here as well meant a
+                    # hang could halt the loop with "heal the character".
+                    outcome.vitals = getattr(exc, "is_vitals", True)
+                    print(f"  {'chicken' if outcome.vitals else 'left early'}: {exc}")
+                    if outcome.vitals:
+                        consecutive_chickens += 1
                 self.leave_game()
                 outcome.left = True
                 if (
                     outcome.chickened
+                    and outcome.vitals
                     and consecutive_chickens >= self.config.max_consecutive_chickens
                 ):
                     # Vitals persist between games in PD2: a character that

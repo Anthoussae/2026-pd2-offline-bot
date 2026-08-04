@@ -15,3 +15,7 @@ __pycache__/
 # The explored-map atlas (pd2bot/mapstore.py): collision grids recorded from
 # THIS machine's live game — save-data, regenerable by walking the area again.
 maps/
+
+# The narrative run logs (pd2bot/narrate.py, R179): one wall-clock-stamped
+# file per run, machine-local run history.
+logs/

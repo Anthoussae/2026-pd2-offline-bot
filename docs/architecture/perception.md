@@ -136,6 +136,54 @@ Two classification traps, both found live:
 Corpses stay in the table. `Monster.is_alive` exposes that rather than
 filtering silently, so callers decide.
 
+One non-issue worth recording because it was asked and answered (R179),
+then sharpened by M5's live pickup work: **ALT item-name visibility
+cannot affect what the bot SEES.** Perception reads the unit table from
+memory; holding ALT (or not) only changes what the client *renders*.
+But it does affect what the bot can *click* — small item classes
+(runes, gems, charms) are effectively only clickable at their rendered
+label (T65/T66) — so the executor reads the label-display flag from
+memory (`units.label_display_on`, BH.dll+0x14d2ca) and presses ALT only
+when it is provably off. Seeing is memory's job; clicking is the
+renderer's territory. See behavior.md's executor section.
+
+## What M5 added to the perception surface
+
+The trial run needed the bot to see its own belongings and its own
+skill, not just the world:
+
+- **Carried items** (`items.py`): every item in the inventory, belt,
+  stash, charm inventory, or on the cursor, with container, grid
+  position, belt column/slot, and potion typing. All ten potion tiers
+  are in the code table (hp1–hp5 = kinds 602–606, mp1–mp5 = 607–611 —
+  T42/T58; the original table knew only the top tiers, and the bot read
+  its own hp1–hp4 as foreign potions, a live-run root cause). Belt
+  geometry matters: pressing key N consumes the *bottom* row of column
+  N, so `belt_column`/`belt_slot` are what the drink logic reasons over.
+  `read_equipped_durability` feeds the town repair decision.
+- **Ground items** (`units.GroundItem`): on-the-floor detection by unit
+  mode (3 on-ground, 5 dropping), with the class/quality fields the
+  pickit matches on. Ground items EXPIRE if left long — measured live
+  (T51), which is why clearance and pickup share one circle.
+- **Objects** (`units.GameObject`): waypoints, stashes, doors, shrines.
+  `offsets.INTERACTIVE_OBJECT_KINDS` marks the clickable subset — the
+  navigator and every ground-targeted cast keep a berth from those
+  (a right-click on a waypoint opens its menu, which blocks all input).
+- **Allies, split finer**: the merc and revives are distinguished from
+  other allies (`snapshot.merc`, `snapshot.revives`), which the merc
+  first-aid rung and the revive wall depend on. A non-player unit's
+  current hp reads on the client's **0–128 scale**, not real hp — use
+  `Monster.life_pct` (the full-health rogue that read "128/1620 = 8%"
+  and got fed the whole belt is the cautionary tale).
+- **The active right skill** (`skills.py`): read from memory, which is
+  what makes the verified switch possible — press the hotkey, then
+  *confirm* the game agrees before any cast (`ensure_right_skill`,
+  `SkillSwitchFailed` on timeout with a full failure context).
+- **A dead end, documented** (T60–T62): the hover slot at player+0xE8
+  tracks only REAL mouse motion — synthetic cursor moves (SetCursorPos
+  and SendInput alike) never update it — and clicks do not need it.
+  Do not build on hover state.
+
 ## Knowing when it is safe to act
 
 This is the part that exists because of a specific mistake. During M1 a test

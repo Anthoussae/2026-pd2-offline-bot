@@ -1,0 +1,146 @@
+# What to pick up off the ground — the R117 list. Edit freely; this file
+# is meant to be read and changed by a human, and nothing in the code
+# needs to change with it.
+#
+# HOW IT WORKS: rules are checked TOP DOWN and THE FIRST MATCH WINS. An
+# item that matches no rule is left on the ground. Order matters: a broad
+# rule above a narrow one silences the narrow one completely.
+#
+# Conditions a rule may state (omitted ones do not constrain):
+#
+#   kinds           item names or group names from config/item_ids.toml,
+#                   plus the potion groups (healing_potion, mana_potion,
+#                   rejuv_potion, any_potion)
+#   qualities       low, normal, superior, magic, set, rare, unique, crafted
+#   sockets         e.g. [3, 4] — WAITS on the T38 drill verifying the
+#                   socket read; until then these rules match nothing
+#   potion_reserve  match while the belt has room for this potion type OR
+#                   fewer than N of it sit in the inventory (R118 Q1)
+#
+# Actions: keep (bring home), belt (potion), pick (gold), skip (leave —
+# useful to carve an exception out of a later, broader rule).
+#
+# MANY NAMES ARE STILL PENDING their id (see item_ids.toml): PD2
+# renumbered item kinds, so every id must be read from the live game
+# (T39 placement drill). A rule naming a pending item loads fine and
+# matches nothing until the drill fills the id in.
+
+# -- potions (R118 Q1: belt first, then a reserve of 2 per type) ---------------
+
+[[rule]]
+name = "healing potions to belt and reserve"
+kinds = ["healing_potion"]
+potion_reserve = 2
+action = "belt"
+
+[[rule]]
+name = "mana potions to belt and reserve"
+kinds = ["mana_potion"]
+potion_reserve = 2
+action = "belt"
+
+[[rule]]
+name = "rejuvs to belt and reserve"
+kinds = ["rejuv_potion"]
+potion_reserve = 2
+action = "belt"
+
+# -- gems and runes ------------------------------------------------------------
+
+[[rule]]
+name = "flawless and perfect gems and skulls"
+kinds = ["gems_flawless_perfect"]
+action = "keep"
+
+[[rule]]
+name = "all runes"
+kinds = ["runes"]
+action = "keep"
+
+# -- charms and jewelry --------------------------------------------------------
+
+[[rule]]
+name = "unique charms"
+kinds = ["charms"]
+qualities = ["unique"]
+action = "keep"
+
+[[rule]]
+name = "rare and unique jewels, rings, amulets"
+kinds = ["jewelry"]
+qualities = ["rare", "unique"]
+action = "keep"
+
+# -- unique bases --------------------------------------------------------------
+
+[[rule]]
+name = "unique necro heads"
+kinds = ["necro_heads"]
+qualities = ["unique"]
+action = "keep"
+
+[[rule]]
+name = "unique shako"
+kinds = ["shako"]
+qualities = ["unique"]
+action = "keep"
+
+[[rule]]
+name = "unique belts (spiderweb sash, mithril coil)"
+kinds = ["spiderweb_sash", "mithril_coil"]
+qualities = ["unique"]
+action = "keep"
+
+[[rule]]
+name = "unique knives (cinquedeas, bone knife)"
+kinds = ["cinquedeas", "bone_knife"]
+qualities = ["unique"]
+action = "keep"
+
+[[rule]]
+name = "unique body armor bases"
+kinds = [
+  "dusk_shroud", "wire_fleece", "balrog_skin", "kraken_shell",
+  "shadow_plate", "sacred_armor",
+]
+qualities = ["unique"]
+action = "keep"
+
+# -- socketed bases (held back until T38 verifies the socket read) -------------
+
+[[rule]]
+name = "3-socket necro heads"
+kinds = ["necro_heads"]
+sockets = [3]
+action = "keep"
+
+[[rule]]
+name = "3- and 4-socket archon plate"
+kinds = ["archon_plate"]
+sockets = [3, 4]
+action = "keep"
+
+# -- set bases -----------------------------------------------------------------
+
+[[rule]]
+name = "set bases"
+kinds = [
+  "bone_visage", "chaos_armor", "cantor_trophy", "troll_belt",
+  "heavy_bracers",
+]
+qualities = ["set"]
+action = "keep"
+
+# -- quest, map and event items ------------------------------------------------
+
+[[rule]]
+name = "quest and map items"
+kinds = ["quest_and_map_items"]
+action = "keep"
+
+# Everything else stays on the ground. There is deliberately no catch-all
+# below this line — to pick up more, add a rule ABOVE this point.
+#
+# (Gold has no rule: the R117 list does not include it. The old
+# placeholder rule is gone; re-add one with kinds = ["gold"] if wanted —
+# its id is still unverified either way.)

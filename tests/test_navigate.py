@@ -84,13 +84,15 @@ class FakeInput:
         return (0, 0)
 
 
-def navigator(world, sim, fake_input, grid_provider=None):
+def navigator(world, sim, fake_input, grid_provider=None, avoid=None, audit=None):
     return Navigator(
         position_reader=world.position,
         gated_input=fake_input,
         grid_provider=grid_provider or (lambda: OpenGrid()),
         clock=sim.clock,
         sleep=sim.sleep,
+        avoid_provider=avoid,
+        audit=audit,
     )
 
 
@@ -103,6 +105,48 @@ def test_walks_to_target():
     assert result.clicks >= 2  # at least two waypoints on a 20-cell run
     assert result.replans == 0
     assert result.duration_seconds > 0
+
+
+def test_travel_clicks_avoid_interactive_units():
+    """R68/R111, fixed at the level the notes prescribed: a travel click
+    near an NPC or object INTERACTS instead of moving, and the panel it
+    opens kills the walk. So clicks aimed near a known hazard are nudged
+    away before being sent — Akara's approach can pass the town waypoint
+    without ever clicking it."""
+    from pd2bot.navigate import AVOID_RADIUS
+
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    hazard = (10, 0)  # squarely on the route to (20, 0)
+    result = navigator(world, sim, fake, avoid=lambda: (hazard,)).walk_to((20, 0))
+    assert abs(result.arrived_at[0] - 20) <= 3  # still arrives
+    for click in fake.clicks:
+        span = max(abs(click[0] - hazard[0]), abs(click[1] - hazard[1]))
+        assert span >= AVOID_RADIUS, f"click {click} landed on the hazard"
+    assert any("nudged" in line for line in result.log)
+
+
+def test_no_avoid_provider_changes_nothing():
+    """Environments with nothing interactive (tests, open field) pass None
+    and get the untouched click stream."""
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    result = navigator(world, sim, fake, avoid=None).walk_to((20, 0))
+    assert abs(result.arrived_at[0] - 20) <= 3
+    assert not any("nudged" in line for line in result.log)
+
+
+def test_a_hazard_off_the_route_is_ignored():
+    """Only clicks AIMED near a hazard are adjusted — avoidance must not
+    warp a walk that was never going to touch anything."""
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    result = navigator(world, sim, fake, avoid=lambda: ((10, 40),)).walk_to((20, 0))
+    assert abs(result.arrived_at[0] - 20) <= 3
+    assert not any("nudged" in line for line in result.log)
 
 
 def test_already_there():
@@ -121,6 +165,40 @@ def test_invisible_wall_gives_up_with_typed_error():
         navigator(world, sim, fake).walk_to((30, 0))
     # It tried: re-clicks happened before each re-plan, then it stopped.
     assert len(fake.clicks) >= MAX_FAILURES
+
+
+def test_a_stuck_walk_steps_aside_before_replanning():
+    """R163, the user watching it catch on a wall.
+
+    A re-plan from the same position over the same grid returns the same
+    path and clicks the same cell, so a character caught on geometry
+    re-derives its way into the identical corner until the budget runs
+    out — live, five cycles at (5226, 5658) seven subtiles from its
+    target, and the run ended there.
+
+    *Finding another open space or clicking beyond the obstacle often
+    solves the problem, provided that the ultimate destination objective
+    isn't lost.* So the sidestep must be sideways, and the destination
+    must survive it.
+    """
+    world = World(wall_x=5)
+    sim = Sim(world)
+    fake = FakeInput(world)
+    with pytest.raises(NavigationError):
+        navigator(world, sim, fake).walk_to((30, 0))
+    # It did not spend every cycle clicking the same unreachable place.
+    assert len({click for click in fake.clicks}) > 1, fake.clicks
+    sideways = [click for click in fake.clicks if click[1] != 0]
+    assert sideways, f"never tried another line: {fake.clicks}"
+
+
+def test_shaking_loose_keeps_the_destination():
+    # The sidestep changes where we plan FROM, never where we are going.
+    world = World(wall_x=5)
+    sim = Sim(world)
+    fake = FakeInput(world)
+    with pytest.raises(NavigationError, match=r"target \(30, 0\)"):
+        navigator(world, sim, fake).walk_to((30, 0))
 
 
 def test_obstacle_clearing_leads_to_replan_then_success():
@@ -222,3 +300,259 @@ def test_crawling_character_replans_but_never_gives_up():
     assert result.replans >= 1  # the ladder fired...
     assert any("stuck" in line for line in result.log)  # ...was logged...
     # ...and the counter kept resetting instead of exhausting MAX_FAILURES.
+
+
+def test_a_cluster_of_hazards_still_yields_a_clear_click():
+    """Stage B run 3, as a test.
+
+    The old nudge applied every hazard in one pass without re-checking, so
+    each push could land the click inside the next hazard and the last one
+    won. Against a Cold Plains scenery cluster it walked the click in a
+    circle and back onto the character, who then never moved and failed the
+    walk as "stuck". Nudging must CONVERGE, not just happen.
+    """
+    from pd2bot.navigate import AVOID_RADIUS
+
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    # Five hazards packed around the route, the shape that broke it.
+    cluster = ((10, 0), (12, 2), (8, 3), (13, -2), (9, -3))
+    result = navigator(world, sim, fake, avoid=lambda: cluster).walk_to((20, 0))
+    assert abs(result.arrived_at[0] - 20) <= 3, "the walk must still finish"
+    for click in fake.clicks:
+        for hazard in cluster:
+            span = max(abs(click[0] - hazard[0]), abs(click[1] - hazard[1]))
+            assert span >= AVOID_RADIUS, f"click {click} landed on {hazard}"
+
+
+def test_being_boxed_in_still_produces_a_click():
+    """A ring with no clear point inside it must not stop the walk.
+
+    One click that might interact is recoverable — the loop re-plans and
+    panels get closed. A walk that refuses to click is not: that is the
+    failure that ended stage B's third attempt, and it is worse.
+    """
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    ring = tuple(
+        (10 + dx, dy) for dx in (-2, 0, 2) for dy in (-2, 0, 2)
+    )
+    result = navigator(world, sim, fake, avoid=lambda: ring).walk_to((20, 0))
+    assert fake.clicks, "boxed in is not a reason to send nothing"
+    assert abs(result.arrived_at[0] - 20) <= 3
+
+
+# -- which units count as hazards at all (stage B run 3) --------------------------
+
+
+def _hazards_for(monkeypatch, *, objects, allies, in_town, ground_items=None):
+    """Run `live_navigator`'s hazard provider over a scripted snapshot."""
+    from types import SimpleNamespace
+
+    from pd2bot.navigate import live_navigator
+
+    snap = SimpleNamespace(
+        objects=objects, allies=allies, in_town=in_town,
+        ground_items=ground_items or [],
+    )
+    monkeypatch.setattr(
+        "pd2bot.snapshot.Perception",
+        lambda session: SimpleNamespace(snapshot=lambda: snap),
+    )
+    monkeypatch.setattr("pd2bot.navigate.GatedInput", lambda session: object())
+    navigator = live_navigator(object(), store=None, difficulty=2)
+    return set(navigator._avoid())
+
+
+def _obj(kind, position):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(kind=kind, position=position)
+
+
+def _ally(position):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(position=position, is_alive=True)
+
+
+def test_decorative_scenery_is_not_a_hazard(monkeypatch):
+    """The Cold Plains cluster: 15 objects of kinds 160/161/162 packed into
+    ~12 subtiles, none of them clickable, which between them made the area
+    unnavigable. Avoiding what cannot punish a click costs mobility for
+    nothing — the same reasoning that already excludes monsters."""
+    hazards = _hazards_for(
+        monkeypatch,
+        objects=[_obj(160, (10, 10)), _obj(161, (11, 11)), _obj(162, (12, 12))],
+        allies=[],
+        in_town=False,
+    )
+    assert hazards == set()
+
+
+def test_the_waypoint_is_still_a_hazard(monkeypatch):
+    from pd2bot.offsets import OBJ_WAYPOINT_A1
+
+    """The narrowing must not lose the case it was built for: the character
+    arrives standing ON the waypoint, and clicking it opens the menu."""
+    hazards = _hazards_for(
+        monkeypatch,
+        objects=[_obj(OBJ_WAYPOINT_A1, (10, 10)), _obj(160, (11, 11))],
+        allies=[],
+        in_town=False,
+    )
+    assert hazards == {(10, 10)}
+
+
+def test_allies_are_hazards_in_town_only(monkeypatch):
+    """In town an ally is an NPC whose dialog blocks all input (R66/R78 —
+    T12 opened Kashya's chat with travel clicks and looped). Outside town
+    every ally is the merc or a summon, clicking one opens nothing, and a
+    working necro is surrounded by seven of them exactly when movement
+    matters most."""
+    in_town = _hazards_for(
+        monkeypatch, objects=[], allies=[_ally((5, 5))], in_town=True
+    )
+    in_field = _hazards_for(
+        monkeypatch, objects=[], allies=[_ally((5, 5))], in_town=False
+    )
+    assert in_town == {(5, 5)}
+    assert in_field == set()
+
+
+def test_ground_items_are_hazards(monkeypatch):
+    """Clicking a ground item picks it up — the same hazard class as a
+    waypoint menu, and the one the user watched loop in stage B run 4: the
+    cleanse drops junk at the character's feet, the next travel click lands
+    on it, and it comes straight back into the inventory to be cleansed
+    again. Deliberate pickups go through the executor's own click, not the
+    navigator, so they are unaffected."""
+    hazards = _hazards_for(
+        monkeypatch,
+        objects=[],
+        allies=[],
+        in_town=False,
+        ground_items=[_obj(999, (7, 7))],
+    )
+    assert hazards == {(7, 7)}
+
+
+def test_a_hazard_on_the_destination_does_not_block_arrival():
+    """Stage B run 6, as a test.
+
+    Ground items became hazards so a stray travel click would not scoop up
+    the junk the cleanse had just dropped — and that immediately broke the
+    opposite case. `collect` walks to an item's exact position to get in
+    range, so every click was nudged off the very thing it was walking to
+    and the bot could never reach anything it wanted.
+
+    A hazard at the destination is not a hazard; it is the destination.
+    """
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    target = (20, 0)
+    result = navigator(world, sim, fake, avoid=lambda: (target,)).walk_to(target)
+    assert abs(result.arrived_at[0] - 20) <= 3, "the walk must still arrive"
+    assert not any("nudged" in line for line in result.log)
+
+
+def test_an_item_merely_NEAR_the_destination_is_still_avoided():
+    """The junk mechanism, measured on the first patrol run and fixed.
+
+    The goal exemption is for the item `collect` is deliberately walking
+    to — distance ZERO. Testing it against AVOID_RADIUS exempted anything
+    within 3 subtiles of any destination, so a rune lying beside a patrol
+    leg's endpoint stopped being avoided and the travel click scooped it.
+    Of 39 goal-exempt clicks in one run, 31 were this; 21 landed inside
+    the avoid radius and five landed exactly on an item.
+    """
+    from pd2bot.navigate import AVOID_MARGIN, AVOID_RADIUS
+
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    goal = (20, 0)
+    hazard = (22, 2)  # 2 from the goal: near it, emphatically not it
+    result = navigator(world, sim, fake, avoid=lambda: (hazard,)).walk_to(goal)
+
+    # Not one click near the item — that is the whole point.
+    for click in fake.clicks:
+        span = max(abs(click[0] - hazard[0]), abs(click[1] - hazard[1]))
+        assert span >= AVOID_RADIUS, (
+            f"click {click} landed {span} from an item beside the destination"
+        )
+    # And it STOPS SHORT rather than failing. Demanding arrival at a point
+    # we deliberately refused to click is a guaranteed stuck, and turning
+    # that into a NavigationError would cost the caller its target — which
+    # is how "avoid items properly" would have become "cannot reach
+    # anything near an item". Close enough is reported honestly; every
+    # caller re-checks distance for itself.
+    short = max(
+        abs(result.arrived_at[0] - goal[0]), abs(result.arrived_at[1] - goal[1])
+    )
+    assert short <= AVOID_RADIUS + AVOID_MARGIN + 3, (
+        f"stopped {short} short of {goal}, further than avoidance explains"
+    )
+
+
+def test_the_click_audit_sees_every_click_and_never_changes_one():
+    """The instrument for the junk question, and it must be inert.
+
+    Junk keeps arriving in the inventory behind ZERO deliberate pickups,
+    so travel clicks are scooping ground items — but nobody knows whether
+    AVOID_RADIUS is too tight or something bypasses it. The audit reports;
+    it must not decide.
+    """
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    seen = []
+    hazard = (10, 0)
+    result = navigator(
+        world, sim, fake, avoid=lambda: (hazard,),
+        audit=lambda point, goal, nudges: seen.append((point, goal, nudges)),
+    ).walk_to((20, 0))
+
+    assert len(seen) == len(fake.clicks), "every sent click must be audited"
+    assert all(goal == (20, 0) for _point, goal, _n in seen)
+    assert any(nudges > 0 for _p, _g, nudges in seen), "it saw the nudging"
+
+    # And the walk is byte-identical without it.
+    world2 = World()
+    sim2 = Sim(world2)
+    fake2 = FakeInput(world2)
+    plain = navigator(world2, sim2, fake2, avoid=lambda: (hazard,)).walk_to((20, 0))
+    assert fake2.clicks == fake.clicks
+    assert plain.arrived_at == result.arrived_at
+
+
+def test_a_failing_audit_cannot_break_a_walk():
+    """Measurement is never worth a run. A broken probe stays a broken probe."""
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+
+    def explode(point, goal, nudges):
+        raise RuntimeError("the probe is broken")
+
+    result = navigator(world, sim, fake, audit=explode).walk_to((20, 0))
+    assert abs(result.arrived_at[0] - 20) <= 3
+
+
+def test_a_hazard_short_of_the_destination_is_still_avoided():
+    """The narrowing must not disarm the mechanism generally: only what sits
+    AT the goal is exempt, not everything on the way to it."""
+    from pd2bot.navigate import AVOID_RADIUS
+
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    hazard = (10, 0)  # on the route, far from the (20, 0) goal
+    result = navigator(world, sim, fake, avoid=lambda: (hazard,)).walk_to((20, 0))
+    assert any("nudged" in line for line in result.log)
+    for click in fake.clicks:
+        span = max(abs(click[0] - hazard[0]), abs(click[1] - hazard[1]))
+        assert span >= AVOID_RADIUS

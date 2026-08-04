@@ -63,6 +63,11 @@ def sent(monkeypatch):
     monkeypatch.setattr("pd2bot.input._send_mouse_flag", lambda f: record.append(("mouse", f)))
     monkeypatch.setattr("pd2bot.input._send_key", lambda vk, f: record.append(("key", vk, f)))
     monkeypatch.setattr("pd2bot.input.time", SimpleNamespace(sleep=lambda s: None))
+    # The cursor move is a real SendInput event since T60; tests record it
+    # under the same ("cursor", x, y) shape the SetCursorPos era used.
+    monkeypatch.setattr(
+        "pd2bot.input._send_mouse_move", lambda x, y: record.append(("cursor", x, y))
+    )
     monkeypatch.setattr(
         "pd2bot.input.user32",
         SimpleNamespace(SetCursorPos=lambda x, y: record.append(("cursor", x, y))),
@@ -131,3 +136,66 @@ def test_automap_does_not_block(sent):
     """The automap overlays the world but the world stays clickable."""
     gated(make_session(open_panels=(offsets.UI_AUTOMAP,))).click_screen(400, 300)
     assert ("mouse", 0x0002) in sent
+
+
+def test_stand_still_wraps_the_click_in_shift(sent):
+    """The attack-in-place modifier: shift down before the mouse, up after."""
+    gated(make_session()).click_screen(400, 300, stand_still=True)
+    assert sent.index(("key", 0x10, 0)) < sent.index(("mouse", 0x0002))
+    assert sent.index(("mouse", 0x0004)) < sent.index(("key", 0x10, 0x0002))
+
+
+def test_stand_still_shift_released_when_the_click_fails(sent, monkeypatch):
+    """A stuck shift would corrupt all later input; release must survive
+    a mid-click failure."""
+
+    def explode(flag):
+        sent.append(("mouse", flag))
+        raise OSError("SendInput failed")
+
+    monkeypatch.setattr("pd2bot.input._send_mouse_flag", explode)
+    with pytest.raises(OSError):
+        gated(make_session()).click_screen(400, 300, stand_still=True)
+    assert ("key", 0x10, 0x0002) in sent
+
+
+def test_stand_still_click_world_passes_the_modifier_through(sent):
+    gated(make_session()).click_world(5010, 5000, stand_still=True)
+    assert ("key", 0x10, 0) in sent and ("key", 0x10, 0x0002) in sent
+
+
+def test_refused_stand_still_click_sends_no_shift(sent):
+    """A refusal before the click must not leave any key event behind."""
+    with pytest.raises(InputRefused):
+        gated(make_session(in_game=False)).click_screen(400, 300, stand_still=True)
+    assert sent == []
+
+
+def test_shift_chord_holds_the_modifier_around_the_key(sent):
+    """The merc-feed chord (R179, corrected to Shift at R183): Shift
+    provably down before the belt key, provably still down when the key
+    releases — the R113 same-frame race, applied to a keyboard chord."""
+    gated(make_session()).press_key_with_shift(0x33)
+    assert sent.index(("key", 0x10, 0)) < sent.index(("key", 0x33, 0))
+    assert sent.index(("key", 0x33, 0x0002)) < sent.index(("key", 0x10, 0x0002))
+
+
+def test_shift_chord_is_gated(sent):
+    with pytest.raises(InputRefused):
+        gated(make_session(), foreground=False).press_key_with_shift(0x33)
+    assert sent == []
+
+
+def test_shift_released_when_the_key_send_fails(sent, monkeypatch):
+    """A stuck Shift would silently reinterpret every later click and
+    belt key; the release must survive a mid-chord failure."""
+
+    def explode(vk, flags):
+        sent.append(("key", vk, flags))
+        if vk == 0x33 and flags == 0:
+            raise OSError("SendInput failed")
+
+    monkeypatch.setattr("pd2bot.input._send_key", explode)
+    with pytest.raises(OSError):
+        gated(make_session()).press_key_with_shift(0x33)
+    assert ("key", 0x10, 0x0002) in sent

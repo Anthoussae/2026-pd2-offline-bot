@@ -1,0 +1,41 @@
+# The M5 trial run: clear around the Cold Plains waypoint, Hell.
+#
+# A run is an ordered list of steps; the step vocabulary and each step's
+# parameters live in pd2bot/behavior/run.py (default_registry). This file
+# says WHAT happens — no class names, no pixel coordinates, no game
+# structures — and a new run should be a new file like this one, not code.
+#
+# The cycle owns everything outside these steps: game creation, the Hell
+# guard, and leaving when the run completes (or chickens out).
+
+name = "cold-plains"
+
+[[step]] # heal -> repair -> R75 inventory loop -> merc; town layer, P3
+name = "town_preamble"
+
+[[step]] # town waypoint -> Cold Plains (area 3), arrival verified by area id
+name = "waypoint"
+dest = 3
+
+[[step]] # kill everything within `radius` subtiles of the arrival point
+name = "clear_radius"
+center = "arrival" # recorded by the waypoint step on the shared blackboard
+radius = 150       # R46 Q2
+# `patrol` is what makes that 150 honest, so do not "simplify" it away.
+# The step decides an area is clear from what perception can see, and
+# T51 measured that at 46-67 subtiles (2026-08-01, seven dropped potions
+# watched vanishing) — NOT the 80 that `units.PERCEPTION_RADIUS` claims,
+# which never binds because the real limit is the client's loaded-room
+# horizon. So from the arrival point this file was declaring clear a
+# circle it could see under a third of, and had been since it was
+# written. Walking the circle is what turns the number into a statement
+# about the ground.
+patrol = true
+
+[[step]] # collect what the pickit rules want from the cleared ground
+# Takes no parameters: it adopts the circle above off the shared
+# blackboard, so there is one radius here rather than two that drift.
+name = "pickup"
+
+[[step]] # run complete; the cycle takes it from here (leave, next game)
+name = "done"

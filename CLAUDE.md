@@ -28,24 +28,41 @@ separately-guarded `MenuInput`, autonomous create/leave with an
 unconditional Hell-verification guard on every entry, chicken +
 death-latch safety monitor, in-game chat channel; acceptance 3/3
 unattended cycles — see `docs/architecture/game-cycle.md` and the
-archived `docs/archive/plans/2026-07-28-m4-game-cycle/_DONE.md`). Next
-up is M5 (trial run: FSM + necro combat + survival reflex ladder +
-pickit — Cold Plains), which needs its own `yona-plan` pass; its
-planning inputs (the survival toolkit, robustness-before-live-runs) are
-recorded in the archived M4 notes.md.
+archived `docs/archive/plans/2026-07-28-m4-game-cycle/_DONE.md`). **M5
+done** (trial run: the ticked behavior engine — snapshot → safety
+monitor → reflex ladder → run step — with runs as TOML, the necro
+combat module, the R49 survival ladder, pickit-as-data, the town
+preamble, waypoint travel, patrol clearance, and sprite-aimed pickup;
+staged live acceptance A–E passed, Stage E 3/3 clean unattended Cold
+Plains clearances with the monitor silent — see
+`docs/architecture/behavior.md`, the accepted
+`docs/adr/2026-07-29-behavior-architecture.md`, and the archived
+`docs/archive/plans/2026-07-29-m5-trial-run/_DONE.md`). Next up is M6
+(the flagship Countess run: multi-area routing Black Marsh → Forgotten
+Tower → Tower Cellar 1–5, doors, cellar line-of-sight, combat
+postures; corpse retrieval and TP-tome behavior still deferred), which
+needs its own `yona-plan` pass; its planning inputs are recorded in the
+M5 `_DONE.md`.
 
 **User request protocol**: every instruction to the user is issued as
-`🔶 R<n> [type]` and logged in `docs/instruction-log.md` — see the
-convention in the agent-toolkit skills; continue IDs from that log. Superseded kolbot roadmap:
+`🔶 M<m> P<p> R<n> — Title [type] · YYYY-MM-DD HH:MM` (M/P from
+`docs/project-state.md`; R is the overall counter, never reset), logged
+in `docs/instruction-log.md` and appended one-line to
+`docs/request-index.md` — full rules in the agent-toolkit skills'
+"User request protocol" section. Superseded kolbot roadmap:
 `docs/archive/plans/2026-07-28-pd2-offline-bot/`.
 
-Perception, navigation, and the game cycle are done and live-verified.
+Perception, navigation, the game cycle, and the behavior layer are done
+and live-verified.
 Input goes through guarded send paths with **no bypass**: world input
 via `pd2bot.input.GatedInput` (guard: `can_act()` AND foreground),
 menu input via `pd2bot.menuinput.MenuInput` (guard: the complement —
 not in a game, or the ESC menu open), chat via `pd2bot.chat.Chat`
-(types only while the chat console is verified open). M4 kept the M1
-contract: `GatedInput`'s guard was not touched. Safety invariant: after
+(types only while the chat console is verified open), and in-game
+panel clicks via `pd2bot.panelinput.PanelInput` (clicks only while the
+panel the caller names is verified open — the waypoint list, stash,
+NPC dialogs; M5's addition, Chat's construction generalized). M4 and
+M5 both kept the M1 contract: `GatedInput`'s guard was not touched. Safety invariant: after
 a detected death the bot sends no input of any kind, permanently
 (`pd2bot.safety`, the death latch) — do not add recovery behavior
 without an explicit user decision (see

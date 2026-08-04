@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from pd2bot import offsets
+from pd2bot import offsets, uistate
 from pd2bot.chat import Chat, ChatError, _split
 from pd2bot.input import InputRefused
 from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, u32
@@ -38,6 +38,10 @@ class Rig:
 
     def set_console(self, open_: bool) -> None:
         self._panels[offsets.UI_CHAT_CONSOLE * 4] = 1 if open_ else 0
+        self.memory.write(UI_ARRAY, bytes(self._panels))
+
+    def set_panel(self, panel_id: int, open_: bool = True) -> None:
+        self._panels[panel_id * 4] = 1 if open_ else 0
         self.memory.write(UI_ARRAY, bytes(self._panels))
 
     def send_key(self, vk: int, flags: int) -> None:
@@ -122,6 +126,41 @@ def test_refused_when_backgrounded(rig):
     with pytest.raises(InputRefused, match="foreground"):
         chat.say("hi")
     assert r.typed == []
+
+
+def test_refused_while_an_npc_dialog_is_open(rig):
+    """R89, the user's diagnosis of three confusing live runs: the opening
+    Enter is a keystroke into whatever is on screen, and an NPC dialog takes
+    it as CHOOSING AN OPTION. The console then never opens, so the caller
+    retries — clicking through the dialog once a second. Not one key may be
+    sent while a panel is up."""
+    chat, r = rig()
+    r.set_panel(offsets.UI_NPCMENU)
+    with pytest.raises(InputRefused, match="npc_menu"):
+        chat.say("hi")
+    assert r.typed == [] and r.keys == []  # the Enter itself never happened
+
+
+def test_refused_for_every_blocking_panel(rig):
+    """Whatever swallows a world click can swallow an Enter — so the list is
+    the same list, read from uistate rather than copied here."""
+    for panel_id in uistate.blocking_panels():
+        if panel_id == offsets.UI_CHAT_CONSOLE:
+            continue  # that one IS the chat, and means we may type
+        chat, r = rig()
+        r.set_panel(panel_id)
+        with pytest.raises(InputRefused):
+            chat.say("hi")
+        assert r.keys == []
+
+
+def test_the_console_being_open_is_not_treated_as_a_blocking_panel(rig):
+    """The chat console blocks world input, but it is precisely the state
+    chat needs — refusing on it would make the module unable to ever type."""
+    chat, r = rig()
+    r.set_console(True)
+    chat.say("hi")
+    assert r.typed == ["h", "i"]
 
 
 def test_split_respects_word_boundaries():

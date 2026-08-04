@@ -112,20 +112,32 @@ class UIState:
 #   0x06, 0x13       always 1, never move                    -> internal
 #   0x23             on during play, off while the esc menu is up -> looks like
 #                    a "gameplay running" flag, not a panel
-#   0x14             on at rest, moves on its own            -> not a display
-#                                                               flag
 #
 # Membership below is limited to slots that mean "this panel is displayed".
 # Treating the always-on slots as open panels made can_act() report NO during
 # ordinary play.
 #
+# 0x14 (UI_WPMENU) has two conflicting live observations. M2 (2026-07-28,
+# incidental): "on at rest, moves on its own" -> filtered as not-a-panel.
+# M5 P2 (2026-07-30, controlled toggle drill): 0 at rest, 1 exactly while
+# the waypoint list was open, 0 after closing — a clean display flag. The
+# controlled experiment wins and the slot is treated as a panel again, but
+# with a fail-safe posture in case the M2 state recurs: UI_WPMENU is in the
+# BLOCKING set (a stuck-1 would *refuse* world input loudly, never click
+# through a phantom panel), and P3's waypoint flow must verify the 0->1
+# edge after clicking the waypoint object, not just the level.
+#
 # The automap observation doubles as proof the array itself is the right one:
 # its slot is the address BH documents separately as AutomapOn, and it moved in
 # lockstep with the automap key.
-_ALWAYS_ON_SLOTS = frozenset(
-    {offsets.UI_GAME, 0x06, offsets.UI_ESCMENU_EX, 0x23, offsets.UI_WPMENU}
-)
+_ALWAYS_ON_SLOTS = frozenset({offsets.UI_GAME, 0x06, offsets.UI_ESCMENU_EX, 0x23})
 
+# The stash observation (M5 P2 drill): opening the stash raises ONLY 0x19 —
+# the inventory slot stays 0 even though the inventory shows beside it. Both
+# stash and waypoint panels swallow clicks over most of the screen, so both
+# are blocking: without them here, can_act() said YES with the stash open,
+# and a world click would have landed on the stash grid — the M1 incident's
+# shape, one panel over.
 _BLOCKING_PANELS = frozenset(
     {
         offsets.UI_INVENTORY,
@@ -137,8 +149,21 @@ _BLOCKING_PANELS = frozenset(
         offsets.UI_QUEST,
         offsets.UI_QUEST_LOG,
         offsets.UI_CHAT_CONSOLE,
+        offsets.UI_STASH,
+        offsets.UI_WPMENU,
     }
 )
+
+def blocking_panels() -> tuple[int, ...]:
+    """The panels that make world input illegal, in a stable order.
+
+    Published so callers that must *recover* from a blocking panel (close
+    it, name it in an error) work from the same list as the guard that
+    refuses because of it. A caller keeping its own shorter copy is how a
+    stray waypoint click became an undiagnosable NavigationError (R85).
+    """
+    return tuple(sorted(_BLOCKING_PANELS))
+
 
 _PANEL_COUNT = 0x26  # the bounds check compiled into GetUiVar_I
 
@@ -154,6 +179,22 @@ def read_ui_state(session: GameSession, ui_array: int | None = None) -> UIState:
         and int.from_bytes(raw[index * 4 : index * 4 + 4], "little")
     }
     return UIState(frozenset(open_panels))
+
+
+def read_ui_raw(session: GameSession, ui_array: int | None = None) -> tuple[int, ...]:
+    """Every slot of the UI array, unfiltered — always-on slots included.
+
+    The calibration instrument: `read_ui_state` deliberately hides the
+    always-on slots, but pinning a *new* panel's slot (M5: the waypoint
+    list, whose BH enum index 0x14 turned out to be an always-on slot, not
+    the panel) means diffing the raw array while a human toggles the panel.
+    """
+    array = ui_array if ui_array is not None else find_ui_array(session)
+    raw = session.raw(array, _PANEL_COUNT * 4)
+    return tuple(
+        int.from_bytes(raw[index * 4 : index * 4 + 4], "little")
+        for index in range(_PANEL_COUNT)
+    )
 
 
 def is_in_game(session: GameSession) -> bool:

@@ -10,6 +10,52 @@ from pd2bot.units import player_unit, read_stats, unit_position
 
 
 @dataclass(frozen=True)
+class ActiveSkills:
+    """What the two mouse buttons would cast right now.
+
+    Read fresh before every cast decision: the whole point (M5) is verifying
+    that a hotkey switch actually took before any click trusts it — the
+    difficulty-guard pattern applied to skills. `None` in a slot means the
+    chain was unreadable mid-transition, not "no skill".
+    """
+
+    left_id: int | None
+    right_id: int | None
+
+
+def _skill_id(session: GameSession, skill_slot_addr: int) -> int | None:
+    """Follow Skill* -> SkillsTxt -> wSkillId; None if any link is null."""
+    skill = session.ptr(skill_slot_addr)
+    if skill is None:
+        return None
+    txt = session.ptr(skill + offsets.SKILL_TXT)
+    if txt is None:
+        return None
+    return session.u16(txt + offsets.SKILLTXT_ID)
+
+
+def read_active_skills(session: GameSession) -> ActiveSkills | None:
+    """The player's active left/right skill ids, or None when not in a game.
+
+    Also None mid-transition, when the unit exists but the Info chain does
+    not yet — the same poll-through-it posture as `read_player`.
+    """
+    try:
+        unit = player_unit(session)
+        if unit is None:
+            return None
+        info = session.ptr(unit + offsets.UNIT_INFO)
+        if info is None:
+            return None
+        return ActiveSkills(
+            left_id=_skill_id(session, info + offsets.INFO_LEFT_SKILL),
+            right_id=_skill_id(session, info + offsets.INFO_RIGHT_SKILL),
+        )
+    except Exception:
+        return None  # a torn chain mid-load is a normal state, not an error
+
+
+@dataclass(frozen=True)
 class Player:
     name: str
     level: int

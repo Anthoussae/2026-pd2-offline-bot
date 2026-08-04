@@ -1,0 +1,25 @@
+89d9fa1 Pacing is not a cooldown, and let a cast animation finish
+90b8758 Print the executor trace: did the bot ever actually swing?
+0648658 Too close to click is a distance too, and _walk_near could not say it
+32080e9 Necro combat: wall first, and stop standing still
+abd9448 A hazard at the destination is the destination
+cbff371 Survive the area-change stutter the user spotted
+5f671b5 Invert the runner's default: survive anything unexpected
+043ba88 R144: anchor the item vocabulary to D2 codes, not to kind ids
+1de1516 Three of the four things the user watched go wrong in run 4
+fe744db Stage B run 4 COMPLETED — and misread three potions as a full inventory
+75f3149 Avoid only what can punish a click, and make nudging converge
+8c014b4 Armor down is a trigger, not an unknown (T46)
+8996bdb T46: check the bone-armor stats before trusting them
+0b94781 A probe for the stage-B navigation stall
+58da7c1 Log R137: the unit-id collision that hid 13 objects per snapshot
+ee70472 Dedup units per TYPE: unit ids are not globally unique
+a79e8bc Log R135: T45 passed and found the materials tab is unreadable
+90c0759 T27 caught two defects in this morning's stash-pressure warning
+b1ed54e R134: deposit on whatever tab is up, toggle only on refusal
+a445616 T45: a drill for the R134 auto-route claim
+b3a5fb8 Stage B attempt 1: a TownError still escaped as a traceback
+a756493 Log R133: the stage-B request, with the pre-flight read
+1ef9141 Add the stage-B run file: same run, radius 50
+7a08adc P6 wiring: the production assembly gets a home
+1e5759c Cleanse reads sockets; fix the two P2 findings; handle a full stash

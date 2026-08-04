@@ -1,0 +1,21 @@
+# Survey the Rogue Encampment: walk the town until it is all in the atlas.
+#
+# Same machinery as survey-cold-plains.toml (see its header), starting
+# from the town spawn — no waypoint travel, and nothing in town is
+# hostile, so the combat gate simply never fires. The preamble still runs
+# first: it is idempotent, and arriving stocked costs nothing.
+#
+# Worth doing once (M5 P6 R175): town trips — stash, NPCs, the waypoint —
+# plan over this atlas too, and T12's class of failure (giving up on an
+# NPC across an unseen stretch of camp) dies with the gaps.
+
+name = "survey-town"
+
+[[step]]
+name = "town_preamble"
+
+[[step]]
+name = "survey"
+
+[[step]] # run complete; the cycle takes it from here (leave, next game)
+name = "done"

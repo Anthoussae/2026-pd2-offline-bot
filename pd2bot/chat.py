@@ -13,10 +13,18 @@ array uistate reads for the input gates; the chat console is panel 0x05),
 and if it never opens, the result is a refusal with zero keys sent, not a
 prayer.
 
+That premise had a hole for three milestones (R89): it protected the
+*typing* but treated the opening Enter as harmless. Enter is not harmless.
+With an NPC dialog open it chooses a dialog option, so a message sent
+during a dialog silently clicked through menus — and because the console
+then never opened, the caller's retry loop did it again every second. The
+guard now refuses while any blocking panel is up.
+
 Guard shape (the third narrowly-scoped send path, same philosophy as
-GatedInput and MenuInput): in a game AND foreground to start; every
-character is sent only while the chat console remains open and the window
-remains foreground. No bypass, no unguarded variant.
+GatedInput and MenuInput): in a game AND foreground AND no panel that could
+swallow the Enter; every character is then sent only while the chat console
+remains open and the window remains foreground. No bypass, no unguarded
+variant.
 
     python -m pd2bot.chat "message here"
 """
@@ -79,6 +87,30 @@ class Chat:
             raise InputRefused(
                 "the game window is not in the foreground — keystrokes would "
                 "go to another application"
+            )
+        # The opening Enter is itself a keystroke into whatever is on screen,
+        # and this module's whole premise was that only the *typing* could
+        # be misread as hotkeys. It was wrong (user diagnosis, R89): with an
+        # NPC dialog open, Enter does not open the console — it SELECTS the
+        # highlighted dialog option. The console then never opens, `say`
+        # raises, and the drill harness retries once a second for a minute,
+        # picking a dialog option every time. That is the M1 "Save and Exit"
+        # shape exactly: a keystroke whose meaning changes with state, sent
+        # without checking the state.
+        state = uistate.read_ui_state(self.session, self._ui_array)
+        blocking = [
+            p
+            for p in uistate.blocking_panels()
+            if p != offsets.UI_CHAT_CONSOLE and state.is_open(p)
+        ]
+        if blocking:
+            names = ", ".join(
+                offsets.UI_NAMES.get(p, f"ui_{p:#x}") for p in blocking
+            )
+            raise InputRefused(
+                f"a panel is open ({names}) — Enter would act on it instead "
+                "of opening the chat console (an NPC dialog would take it as "
+                "choosing an option), so nothing is typed"
             )
 
     def say(self, text: str) -> None:

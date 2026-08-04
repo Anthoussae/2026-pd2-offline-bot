@@ -22,7 +22,7 @@
 #
 # Trust model (user decision, R31): while this loop runs, anything that can
 # write to the queue directory executes as Administrator. That is the point
-# — sole-user machine, and the agent's commands still appear in the app's
+# - sole-user machine, and the agent's commands still appear in the app's
 # normal tool flow. Every command is also echoed here before it runs, so
 # this window doubles as a live audit log. Stale *.cmd.ps1 files found at
 # startup are quarantined (renamed *.stale), never executed.
@@ -40,6 +40,19 @@ $principal = New-Object Security.Principal.WindowsPrincipal($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host 'ERROR: not elevated. Start this from a Run-as-administrator window.' -ForegroundColor Red
     exit 1
+}
+
+# Single instance, enforced with a named mutex. Necessary since the bridge
+# auto-starts at logon (scheduled task, M5 P6 R169): a manual start on top
+# of the task's instance would give TWO loops racing on one queue — each
+# command grabbed by whichever polls first, answers interleaved, and the
+# audit trail split across two windows. Global\ scope so it holds across
+# sessions; the mutex dies with the process, so a crashed bridge never
+# blocks the next one.
+$script:bridgeMutex = New-Object System.Threading.Mutex($false, 'Global\pd2bot-elevated-bridge')
+if (-not $script:bridgeMutex.WaitOne(0)) {
+    Write-Host 'Another bridge is already running; this one is not needed.' -ForegroundColor Yellow
+    exit 0
 }
 
 New-Item -ItemType Directory -Force -Path $QueueDir | Out-Null
