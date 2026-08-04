@@ -230,33 +230,54 @@ loudly when they have nothing to apply to), `--dry-run` to print the
 assembled wiring without sending anything. `tools/live-run.ps1` wraps
 it through the elevated bridge.
 
-## Combat posture: where "cautious" lives
+## Combat postures (M6 P3: implemented)
 
-The shipped posture is best described as **cautious**: hold until a
-revive tank is in front, strike-and-retreat, drift rather than press.
-The user intends two more postures later — **aggressive** (attack more,
-back off less) and **brisk** (fight only what obstructs the path to the
-target, brush past the rest when safe) — ideally switchable at runtime.
-The posture is not one setting today; it is distributed across three
-places, listed here so the change stays small:
+Three named postures ship as config presets, selectable **per run
+step** (`posture = "brisk"` on a `clear_radius`/`traverse` step) and
+swappable mid-run — the module changes only its config dataclass, so
+every piece of fight bookkeeping survives the swap. Loading is strict
+as ever: `[combat.postures.<name>]` tables override only behavior knobs
+(never skills), unknown keys and unknown posture names fail before the
+bot moves, and "cautious" cannot be redefined because it *is* the base
+`[combat]` numbers — a run naming no posture behaves exactly as M5 did.
 
-- **Config numbers** (`config/necro.toml [combat]`): `restrike_s` (how
-  passive between strikes), `retreat_subtiles` (how far out after each
-  strike), `approach_with_revives` (how much wall before advancing),
-  `wait_for_revives_s`, `engage_radius` (what counts as "in a fight" —
-  brisk would shrink this toward the path corridor). A posture could be
-  a named preset over exactly these keys.
-- **Code shape** (`behavior/necro.py`): the retreat-after-strike beat
-  (`_retreat_after_strike` in `engage`) and the hold-until-wall gate
-  (the `approach_with_revives`/`_building_wall` check) are the cautious
-  skeleton; `approach()` refusing while a fight exists is what makes
-  every hostile en route a full stop — brisk would relax precisely that
-  refusal, plus `clear_radius`'s insistence on clearing rather than
-  passing.
-- **Unaffected by posture**: the reflex ladder, the safety monitor,
-  and the executor's rules do not move. A posture changes offense, not
-  survival — that boundary is the architecture's whole point, and it is
-  what makes a runtime-switchable posture safe to build.
+- **cautious** (the base): hold until a revive tank is in front,
+  strike-and-retreat after every strike, drift rather than press.
+- **brisk** (the descent posture, R212 Q4/Q5): fight only what
+  obstructs passage — a tight `engage_radius` bubble around the moving
+  character is the route corridor, and `linger = false` makes the
+  module hand the tick back when everything nearby is already poisoned,
+  so the run keeps walking. "Brush past them toward the target, as long
+  as that is safe" — and safety is unchanged: the ladder stands above.
+- **aggressive** (the Cellar 5 posture): `retreat_group_size = 3` makes
+  the post-strike retreat group-conditioned — an isolated enemy is
+  struck without the back-out, a closing group still triggers the full
+  retreat (the user's own definition); `restrike_s` drops to 0.5.
+
+Two companion defaults landed with the postures (both user notes,
+2026-08-03):
+
+- **Right-skill parking** (`execute.py::maintain`, engine-granted once
+  per tick): after the last cast of a burst resolves and `park_grace_s`
+  (2 s) passes with no further cast, the executor switches the right
+  skill back to bone armor — a verified SWITCH, no click, paced on
+  failure. While Revive stays the active right skill, ground corpses
+  are selectable and interfere with pathing and pickup; the grace lets
+  a 3-revive burst finish without thrashing the switch.
+- **Revive urgency** (`necro.py`): while the wall is short and a wall
+  cast is actively in the pipeline (a recent desecrate/revive), strikes
+  and dashes hold — drift only — so the desecrate→revive casts never
+  share the cast pipeline with strike clicks (the T55 armor lesson one
+  rung down). Keyed to a *recent cast*, not to wall-shortness, so it
+  cannot re-create the pre-R163 full-wall passivity; and a desecrate
+  budget burned against the skill's own cooldown now refreshes on time
+  (`desecrate_budget_refresh_s`, in combat only — the quiet-field gate
+  is untouched).
+
+**Unaffected by posture**: the reflex ladder, the safety monitor, and
+the executor's safety rules do not move. A posture changes offense, not
+survival — that boundary is the architecture's whole point, and it is
+what made runtime switching safe to build.
 
 ## Re-verification drill after a patch
 
@@ -293,17 +314,8 @@ behavior layer adds, in order of likelihood to move:
   ground.
 - **Vendor UI** is still out of scope: below-minimum potions after a
   refill is a notice-and-continue (Stage D policy) and a manual restock.
-- **Right-skill parking** (user note, 2026-08-03): after any
-  right-skill cast — revive especially — toggle back to the bone armor
-  hotkey. While Revive is the active right skill, enemy corpses on the
-  ground are selectable and may interfere with pathing and pickup. A
-  short grace (a couple of seconds) avoids thrashing when several
-  revives are queued.
-- **Revive wall priority** (user note, 2026-08-03): keeping 3 revives
-  up should be bumped in priority — not an emergency, but the
-  desecrate→revive loop is quick and materially increases run safety
-  and speed; the bot has been observed dilly-dallying over it.
-- **Combat postures**: build "aggressive" and "brisk" over the seams
-  in the posture section above, runtime-switchable.
+- ~~Right-skill parking, revive priority, combat postures~~ — all
+  three landed at M6 P3 (see the postures section above); their live
+  proof rides the M6 battery.
 - **The navigator label-band nudge** (optional polish, from the pickup
   arc): left as a bookmark; the offset schedule made it moot for M5.

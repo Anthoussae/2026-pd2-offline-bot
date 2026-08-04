@@ -177,6 +177,11 @@ class RunServices:
     carried: Callable[[], CarriedItems]
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
+    # The loaded posture names (M6 P3), for BUILD-time validation of a
+    # step's `posture` parameter. Empty = no postures in this environment
+    # (sims, drills), and naming one is then a loud build error rather
+    # than a runtime surprise.
+    postures: frozenset[str] = frozenset()
     # Tuning that belongs to the steps rather than to a class.
     clear_settle_s: float = 5.0
     pickup_radius: int = 30  # opportunistic pickups during clearance
@@ -383,7 +388,16 @@ class RunServices:
     # of ground the clearance just patrolled was ~60-120 s of the run,
     # spent mostly confirming emptiness. Dies with the run, like every
     # RunServices field: a memo, not a memory.
-    wanted_seen: dict[int, tuple[int, int]] = field(default_factory=dict)
+    #
+    # Value = (position, kind, potion type or None). Kind and type exist
+    # so `pending_sightings` can re-ask WANTEDNESS at sweep time (review
+    # 002, potions-live-validation): an item recorded as wanted can stop
+    # being wanted — a mana potion sighted early, then belt_full["mana"]
+    # set — and a memo that cannot re-check kept the sweep walking the
+    # ring for a bottle nobody would pick up on arrival.
+    wanted_seen: dict[int, tuple[tuple[int, int], int, str | None]] = field(
+        default_factory=dict
+    )
     # -- the survey step (R175/R176) ---------------------------------------
     #
     # Both closures are wired closures over the map store (wiring.py) so
@@ -720,12 +734,16 @@ class _PickupMixin:
         """
         services = self.services
         for item in self.wanted_items(snap, centre, radius):
-            services.wanted_seen[item.unit_id] = item.position
+            services.wanted_seen[item.unit_id] = (
+                item.position,
+                item.kind,
+                potion_type_of(item),
+            )
         player = snap.player
         if player is None:
             return
         on_ground = {g.unit_id for g in snap.ground_items}
-        for unit_id, position in list(services.wanted_seen.items()):
+        for unit_id, (position, _, _) in list(services.wanted_seen.items()):
             if unit_id in on_ground:
                 continue
             if _chebyshev(position, player.position) <= 40:
@@ -735,12 +753,34 @@ class _PickupMixin:
 
     def pending_sightings(self) -> list[tuple[int, tuple[int, int]]]:
         """Memo entries still worth walking for: seen, not collected, not
-        written off as stuck."""
-        return [
-            (unit_id, position)
-            for unit_id, position in self.services.wanted_seen.items()
-            if unit_id not in self.services.stuck
-        ]
+        written off as stuck — and still WANTED (review 002,
+        potions-live-validation).
+
+        Wantedness is re-asked at read time because it changes after the
+        sighting: a mana potion recorded early stops being worth a walk
+        once `belt_full` gains "mana", and a non-potion stops once the
+        inventory fills. The memo used to be unable to ask (it kept only
+        positions), so the sweep walked the ring for bottles it would
+        refuse on arrival — one avoidable ~60 s ring walk per run where
+        a belt type filled mid-clearance (T55 run 1's shape). The same
+        checks `wanted_items` applies, minus the expiry bookkeeping —
+        deciding whether to WALK must not mutate the belt-full marks.
+        """
+        pending = []
+        carried = None
+        for unit_id, (position, _, potion) in self.services.wanted_seen.items():
+            if unit_id in self.services.stuck:
+                continue
+            if potion is not None:
+                if potion in self.services.belt_full:
+                    if carried is None:
+                        carried = self.services.carried()
+                    if not self._belt_has_room(potion, carried):
+                        continue
+            elif self.services.inventory_full:
+                continue
+            pending.append((unit_id, position))
+        return pending
 
     def collect(
         self, snap: GameSnapshot, ctx: EngineContext, item: GroundItem
@@ -1156,6 +1196,14 @@ class _PatrolMixin:
         area's grid planned the next walk.
         """
         if self._points is None:
+            if area is None:
+                # A mid-transition read (review 003, potions-live-
+                # validation): without the area's bounds the seam filter
+                # cannot run, and CACHING an unfiltered ring would re-open
+                # the T55 run 2 border surface for the whole step. Plan
+                # nothing this tick; the next tick with the area readable
+                # computes and caches the filtered ring.
+                return []
             ring = max(1, round(self.radius * self.services.patrol_ring))
             count = max(1, self.services.patrol_points)
             points = [
@@ -1165,22 +1213,20 @@ class _PatrolMixin:
                 )
                 for i in range(count)
             ]
-            if area is not None:
-                inset = _SEAM_INSET
-                left, top, right, bottom = area.bounds_subtiles
-                kept = [
-                    (x, y)
-                    for x, y in points
-                    if left + inset <= x < right - inset
-                    and top + inset <= y < bottom - inset
-                ]
-                if len(kept) < len(points):
-                    self.services.log(
-                        f"patrol: dropped {len(points) - len(kept)} ring "
-                        "point(s) outside the area's bounds"
-                    )
-                points = kept
-            self._points = points
+            inset = _SEAM_INSET
+            left, top, right, bottom = area.bounds_subtiles
+            kept = [
+                (x, y)
+                for x, y in points
+                if left + inset <= x < right - inset
+                and top + inset <= y < bottom - inset
+            ]
+            if len(kept) < len(points):
+                self.services.log(
+                    f"patrol: dropped {len(points) - len(kept)} ring "
+                    "point(s) outside the area's bounds"
+                )
+            self._points = kept
         return self._points
 
     @property
@@ -1316,8 +1362,14 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
     radius: int = 150
     centre_note: str = "arrival"
     patrol: bool = False
+    # The combat posture this step fights in (M6 P3, R212 Q5). None =
+    # leave the module as it is (pre-M6 runs change nothing). Validated
+    # against the loaded posture names at registry-build time, so an
+    # unknown name never reaches a game.
+    posture: str | None = None
     name: str = "clear_radius"
     _empty_since: float | None = None
+    _posture_applied: bool = False
     _centre: tuple[int, int] | None = None
     # Monsters inside the radius that we have given up reaching, and where
     # each was standing when we did. The position is what allows the
@@ -1419,6 +1471,16 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
         return self._centre
 
     def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
+        if self.posture is not None and not self._posture_applied:
+            # First tick: fight this step in its declared posture. The
+            # module keeps all its bookkeeping across the swap — a
+            # posture is a manner, not a new fight — and modules without
+            # postures (fakes, sims) are simply left alone.
+            set_posture = getattr(self.services.combat, "set_posture", None)
+            if set_posture is not None:
+                set_posture(self.posture)
+                self.services.narrate(f"combat posture: {self.posture}")
+            self._posture_applied = True
         if self.recover_panels(snap):
             return StepOutcome(done=False, acted=True, note="closed a stray panel")
         centre = self.centre(snap, ctx)
@@ -1928,6 +1990,26 @@ class SurveyStep(_PickupMixin):
 # -- the registry ---------------------------------------------------------------
 
 
+def _checked_posture(services: RunServices, name: str | None) -> str | None:
+    """Validate a step's posture name at BUILD time (M6 P3).
+
+    Reaching a game with an unknown posture would fail mid-run in Hell;
+    this fails while the bot is still standing at the menus, the same
+    place every other run-file mistake fails.
+    """
+    if name is None:
+        return None
+    if name not in services.postures:
+        from pd2bot.behavior.run import RunError
+
+        loaded = ", ".join(sorted(services.postures))
+        raise RunError(
+            f"unknown posture {name!r} (loaded: "
+            f"{loaded or 'none — this environment has no postures'})"
+        )
+    return name
+
+
 def build_registry(services: RunServices) -> StepRegistry:
     """The M5 step vocabulary, with handlers wired to `services`.
 
@@ -1955,12 +2037,16 @@ def build_registry(services: RunServices) -> StepRegistry:
                 # Off by default so every run written before the patrol
                 # existed keeps behaving exactly as it did.
                 ParamSpec("patrol", bool, required=False, default=False),
+                # M6 P3: which combat posture to fight this step in.
+                # Absent = leave the module alone (cautious in practice).
+                ParamSpec("posture", str, required=False, default=None),
             ),
             factory=lambda p: ClearRadiusStep(
                 services,
                 radius=p["radius"],
                 centre_note=p["center"],
                 patrol=p["patrol"],
+                posture=_checked_posture(services, p["posture"]),
             ),
         )
     )

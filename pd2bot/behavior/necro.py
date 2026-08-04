@@ -79,6 +79,45 @@ class CombatConfig:
     wait_for_revives_s: float = 0.8  # let them get in front before dashing
     revive_engaged_range: int = 8  # a revive this close to a hostile is engaged
     revive_target: int = 3
+    # -- posture switches (M6 P3, R212 Q5) --------------------------------
+    # These four are what the named postures (cautious/brisk/aggressive)
+    # override; the defaults ARE cautious, so an empty posture table
+    # changes nothing and every pre-M6 run behaves exactly as it did.
+    #
+    # linger=False (brisk): when everything nearby is freshly poisoned,
+    # return None instead of drifting — the run step keeps moving, which
+    # is what "brush past them toward the target" means mechanically.
+    linger: bool = True
+    # retreat_group_size=0: back out after EVERY strike (the cautious
+    # skirmish beat). N>0 (aggressive): the post-strike retreat fires
+    # only when >=N hostiles stand within retreat_group_radius — an
+    # isolated enemy gets struck without the back-out ("attacks more,
+    # backs off less"), while a closing group still triggers the full
+    # retreat (the user's own definition of aggressive, R212 Q5).
+    retreat_group_size: int = 0
+    retreat_group_radius: int = 8
+    # -- revive urgency (M6 P3, user note 1.5) ----------------------------
+    # While hostiles are present, the wall is short, and the wall CAN
+    # still grow, offense holds (drift only, no strikes/dashes) so the
+    # desecrate->revive casts get the cast pipeline to themselves — the
+    # T55 armor lesson one rung down: strike CLICKS colliding with cast
+    # animations (CastInFlight) are what made the wall build look like
+    # dilly-dallying. Bounded by _building_wall exactly like the
+    # approach gate, so it can never hold offense forever.
+    revive_urgency_hold: bool = True
+    # A desecrate budget burned against the skill's own cooldown used to
+    # stay burned until the wall grew (R185 B). This refreshes it on
+    # TIME instead — in-combat only (the quiet-field gate still stops
+    # empty-field churn), and 0 disables the refresh entirely.
+    desecrate_budget_refresh_s: float = 8.0
+    # -- right-skill parking (M6 P3, user note 1; consumed by the
+    # executor, carried here so the user tunes it with the rest) --------
+    # After any right-skill cast resolves with no follow-up cast inside
+    # this grace, the executor switches back to the armor hotkey: an
+    # active Revive right-skill makes ground corpses selectable, which
+    # interferes with pathing and pickup. The grace is what lets a
+    # 3-revive burst finish without thrashing the switch.
+    park_grace_s: float = 2.0
     # How many revives must be up before OFFENSE may advance — a different
     # question from `revive_target`, which is how many upkeep maintains,
     # and conflating the two is why the bot stood back so much (R163).
@@ -112,6 +151,11 @@ class NecroCombat:
     config: CombatConfig = field(default_factory=CombatConfig)
     is_walkable: Callable[[tuple[int, int]], bool] = lambda p: True
     clock: Callable[[], float] = time.monotonic
+    # The named posture presets (M6 P3): full CombatConfigs built by the
+    # class-config loader. Empty = no postures in this environment and
+    # set_posture refuses everything but leaving things alone.
+    postures: dict[str, CombatConfig] = field(default_factory=dict)
+    posture: str = "cautious"
     # Bookkeeping.
     _last_strike: dict[int, float] = field(default_factory=dict)
     _engagement_start: float | None = None
@@ -123,6 +167,29 @@ class NecroCombat:
     # How many revives stood at the last upkeep look. The desecrate budget
     # refills only when this GROWS (R185 B) — see `upkeep`.
     _revive_count_seen: int = 0
+    # When upkeep last returned a wall cast (desecrate or revive) — the
+    # revive-urgency hold's correlation input (M6 P3).
+    _last_wall_cast: float | None = None
+
+    # -- postures (M6 P3) -------------------------------------------------------
+
+    def set_posture(self, name: str) -> None:
+        """Swap the active config for a named preset, mid-run safe.
+
+        Only `config` changes; every piece of bookkeeping (`_last_strike`,
+        the desecrate budget, the engagement timer) survives — a posture
+        is a change of manner, not a new fight. Unknown names are loud:
+        the run file was validated against the loaded posture names at
+        build time, so reaching here with a bad one is a wiring bug.
+        """
+        preset = self.postures.get(name)
+        if preset is None:
+            raise KeyError(
+                f"unknown posture {name!r} (loaded: "
+                f"{', '.join(sorted(self.postures)) or 'none'})"
+            )
+        self.config = preset
+        self.posture = name
 
     # -- engagement ------------------------------------------------------------
 
@@ -169,6 +236,18 @@ class NecroCombat:
         # on that ground — the deadlock this method's own docstring exists
         # to prevent, reached by a different road.
         return self._open_ground(snap, origin) is not None
+
+    def _wall_pipeline_s(self) -> float:
+        """How long after a wall cast the urgency hold keeps offense out.
+
+        Derived, not a knob: the longest settle plus roughly one cast
+        animation (T48 measured 610-640 ms), so tuning the settles moves
+        the hold with them and there is no second number to forget.
+        """
+        return (
+            max(self.config.desecrate_settle_s, self.config.revive_settle_s)
+            + 1.0
+        )
 
     def _reposition(
         self, origin: tuple[int, int], hostiles: list[Monster]
@@ -341,8 +420,30 @@ class NecroCombat:
                 return MoveTo(spot)
             # Nowhere to back off to: keep fighting rather than stand still.
 
+        # The revive-urgency hold (M6 P3, user note 1.5): while the wall is
+        # short AND a wall cast is actively in the pipeline, strikes and
+        # dashes wait — a strike is a CLICK, and clicks landing inside
+        # cast animations (CastInFlight) are what made the wall build
+        # look like dilly-dallying (the T55 armor lesson, one rung down).
+        # Keyed to a RECENT wall cast rather than to wall-shortness alone,
+        # so this never re-creates the pre-R163 full-wall passivity: no
+        # cast in flight (budget spent, corpses missing) = offense free.
+        if (
+            self.config.revive_urgency_hold
+            and len(snap.revives) < self.config.revive_target
+            and self._last_wall_cast is not None
+            and now - self._last_wall_cast < self._wall_pipeline_s()
+            and self._building_wall(snap, origin)
+        ):
+            return self._reposition(origin, hostiles)
+
         target = self._select_target(origin, hostiles, now)
         if target is None:
+            if not self.config.linger:
+                # Brisk (M6 P3): everything nearby is poisoned and nothing
+                # blocks the way — nothing to say, so the RUN keeps moving
+                # instead of the module drifting in place.
+                return None
             # Everything nearby is freshly poisoned. The original design
             # stood still here and let the poison work; the user watched it
             # and judged the stillness itself the bigger risk — "better to
@@ -378,7 +479,18 @@ class NecroCombat:
             )
 
         self._last_strike[target.unit_id] = now  # phase 4
-        self._retreat_after_strike = True
+        # Aggressive (M6 P3): the post-strike retreat is group-conditioned.
+        # 0 keeps the cautious beat — back out after every strike.
+        group = self.config.retreat_group_size
+        self._retreat_after_strike = group == 0 or (
+            sum(
+                1
+                for h in hostiles
+                if _chebyshev(h.position, origin)
+                <= self.config.retreat_group_radius
+            )
+            >= group
+        )
         return AttackUnit(target.unit_id, target.position)
 
     # -- desecrate -> revive maintenance (R47.4) --------------------------------
@@ -484,6 +596,7 @@ class NecroCombat:
             )
             self._last_revive = now
             self._last_revive_target = corpse.unit_id
+            self._last_wall_cast = now  # feeds the urgency hold (M6 P3)
             # Deliberately NO budget reset here (R185 B): corpses existing
             # is what desecrate manufactures, and refilling the budget on
             # its own product is how run 4 churned for 10 minutes.
@@ -498,10 +611,28 @@ class NecroCombat:
         ):
             return None  # corpses arrive a beat after the cast
         if self._desecrate_rounds >= self.config.desecrate_rounds:
-            return None
+            # The time-based refresh (M6 P3, user note 1.5): a budget
+            # burned against the skill's own cooldown used to stay burned
+            # until the wall grew — which it could not, with no corpses to
+            # raise. R185 B's only-on-growth rule stands for the churn it
+            # was written against (this branch is reached with hostiles
+            # PRESENT — the quiet-field gate already returned above), and
+            # the refresh is paced at desecrate_budget_refresh_s, so the
+            # worst case is desecrate_rounds casts per refresh window, in
+            # combat, not run 4's 10-minute empty-field churn.
+            if (
+                self.config.desecrate_budget_refresh_s > 0
+                and self._last_desecrate is not None
+                and now - self._last_desecrate
+                >= self.config.desecrate_budget_refresh_s
+            ):
+                self._desecrate_rounds = 0
+            else:
+                return None
         spot = self._open_ground(snap, origin)
         if spot is None:
             return None
         self._desecrate_rounds += 1
         self._last_desecrate = now
+        self._last_wall_cast = now  # feeds the urgency hold (M6 P3)
         return CastAtPoint(self.config.desecrate_skill_id, spot)

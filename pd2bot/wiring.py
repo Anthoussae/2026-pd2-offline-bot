@@ -311,6 +311,9 @@ class LiveBot:
             config=self.class_config.combat,
             is_walkable=self.is_walkable,
             clock=self.clock,
+            # The named presets (M6 P3): run steps select per step, the
+            # module swaps configs, bookkeeping survives the swap.
+            postures=self.class_config.postures,
         )
         ladder = ReflexLadder(
             self.class_config.reflex,
@@ -330,6 +333,12 @@ class LiveBot:
             walk_to=self.navigator.walk_to,
             hotkeys=self.class_config.hotkeys,
             clock=self.clock,
+            # Right-skill parking (M6 P3, user note 1): after a cast
+            # burst, switch back to the armor skill so Revive never stays
+            # the active right skill (selectable corpses interfere with
+            # pathing and pickup).
+            park_skill_id=self.class_config.reflex.armor_skill_id,
+            park_grace_s=self.class_config.combat.park_grace_s,
         )
         def field_cleanse() -> int:
             """The town cleanse, run in the field — and its report SURFACED.
@@ -351,8 +360,10 @@ class LiveBot:
         # The survey service (R175/R176): frontier targets and coverage over
         # the shared atlas, behind closures so the step never learns what a
         # MapStore is. The target list is cached per (seed, area,
-        # room-count): frontier extraction walks every stored room edge,
-        # and recomputing that on a tick where nothing new was recorded
+        # content REVISION — not room count, which a re-recorded room with
+        # changed terrain leaves unchanged; session-review issue 003):
+        # frontier extraction walks every stored room edge, and
+        # recomputing that on a tick where nothing new was recorded
         # would be pure heat.
         survey_cache: dict = {"key": None, "targets": []}
 
@@ -367,7 +378,7 @@ class LiveBot:
             area, explored = _survey_area()
             if area is None:
                 return []  # mid-transition: nothing to walk toward yet
-            key = (explored.seed, explored.area_id, explored.room_count)
+            key = (explored.seed, explored.area_id, explored.revision)
             if survey_cache["key"] != key:
                 survey_cache["key"] = key
                 survey_cache["targets"] = survey.frontier_targets(
@@ -394,6 +405,7 @@ class LiveBot:
             run_preamble=self.town.run_preamble,
             travel_to=self.waypoint.take,
             combat=combat,
+            postures=frozenset(self.class_config.postures),
             pickit=self.pickit,
             carried=lambda: read_carried_items(session, with_sockets=False),
             clock=self.clock,

@@ -54,6 +54,18 @@ class CastAtPoint:
 
 
 @dataclass(frozen=True)
+class ParkSkill:
+    """A verified right-skill SWITCH with no cast (M6 P3).
+
+    Executor-internal: the parking housekeeping records these in the
+    trace so a park never reads as a cast. Deciders (ladder, combat
+    module, steps) never emit one.
+    """
+
+    skill_id: int
+
+
+@dataclass(frozen=True)
 class MoveTo:
     """Walk toward a world position (disengage, retreat, repositioning)."""
 

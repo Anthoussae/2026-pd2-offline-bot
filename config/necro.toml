@@ -211,6 +211,55 @@ revive_search_radius = 15
 desecrate_rounds = 2
 desecrate_settle_s = 1.0
 revive_settle_s = 0.6
+# A budget burned against desecrate's own cooldown refreshes after this
+# long (M6 P3, user: 3 revives up matters — the bot dilly-dallied). In
+# combat only (the quiet-field gate still stops empty-field churn);
+# 0 disables the refresh.
+desecrate_budget_refresh_s = 8.0
+# While the wall is short and a wall cast is actively resolving, strikes
+# and dashes hold (drift only) so the desecrate->revive casts get the
+# cast pipeline to themselves — strike CLICKS colliding with cast
+# animations were what made the wall build slow (M6 P3, user note 1.5).
+revive_urgency_hold = true
+# After the last right-skill cast of a burst, the executor switches back
+# to the armor hotkey once this grace passes with no further cast (M6
+# P3, user note 1): an active Revive right skill makes ground corpses
+# selectable, which interferes with pathing and item pickup.
+park_grace_s = 2.0
+# Posture switches (M6 P3, R212 Q5). These two ARE the cautious posture;
+# the named presets below override them per run step.
+#   linger: drift near poisoned monsters rather than moving on. false =
+#   brisk's "brush past them toward the target".
+linger = true
+#   retreat_group_size 0 = back out after EVERY strike (the cautious
+#   skirmish beat). N>0: retreat only when >=N hostiles stand within
+#   retreat_group_radius — isolated enemies get struck without the
+#   back-out, a closing group still triggers the full retreat.
+retreat_group_size = 0
+retreat_group_radius = 8
 # Which skills the maintenance uses (names from [skills] above).
 desecrate_skill = "desecrate"
 revive_skill = "revive"
+
+# Named combat postures (M6 P3, R212 Q5): override tables over the
+# [combat] numbers above. "cautious" is the base itself and cannot be
+# redefined. Run steps select a posture per step (runs/countess.toml:
+# brisk for the descent, aggressive on Cellar 5); a step naming none
+# leaves the module in whatever posture it already holds (cautious at
+# game start). Every number here is a first-guess judgment call —
+# tune in the P5 battery like every M5 number was.
+
+[combat.postures.brisk]
+# Fight only what obstructs passage (the user's Q4): a tight engagement
+# bubble around the moving character IS the route corridor, and with
+# linger off the run keeps walking the moment nothing blocks it.
+engage_radius = 12
+linger = false
+retreat_subtiles = 8
+
+[combat.postures.aggressive]
+# Attack whenever safely feasible, especially isolated enemies; still
+# back off from groups that close in (the user's own definition).
+restrike_s = 0.5
+retreat_group_size = 3
+wait_for_revives_s = 0.5

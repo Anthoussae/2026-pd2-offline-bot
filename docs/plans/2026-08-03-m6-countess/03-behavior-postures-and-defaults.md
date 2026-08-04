@@ -111,3 +111,42 @@ posture). Report deviations.
 Three postures load and select per step; parking and revive bump
 implemented and traced; four review issues fixed with regression
 tests; sims green; docs touched; no ladder/safety diffs.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-08-03
+Commit: pending
+
+- Changed: `necro.py` (posture fields + `set_posture` — config swap,
+  bookkeeping survives; `linger`, group-conditioned retreat, the
+  revive-urgency hold keyed to a recent wall cast, time-based desecrate
+  budget refresh); `combat.py` (posture tables — overrides only, no
+  skills, cautious unredefinable; new [combat] keys incl. the two
+  bools); `execute.py` + `actions.py` (`maintain()` parking with
+  `ParkSkill` trace entries, paced failures); `engine.py` (per-tick
+  `maintain` grant, best-effort, not activity); `steps.py` (`posture`
+  step param + build-time validation via `services.postures`;
+  first-tick application; sightings memo carries kind+potion and
+  `pending_sightings` re-asks wantedness [review 002]; patrol ring not
+  cached until an Area filtered it [review 003]); `survey.py`
+  (EDGE_STRIDE 8→4, doorway coverage [session-review 002]);
+  `mapstore.py` + `wiring.py` (content `revision`, survey cache keyed
+  on it [session-review 003]); `run.py` (posture ParamSpec, both
+  vocabularies); `config/necro.toml` (new keys + brisk/aggressive
+  tables, commented as P5-tunable first guesses); `wiring.py`
+  (postures → module + services, park wiring); `behavior.md` (posture
+  section: classification → implemented).
+- Validated: **892 tests** (was 873; 18 new + 1 reshaped), ruff clean.
+  New coverage: posture loading incl. refusals, set_posture swap,
+  brisk hand-back, aggressive isolated-vs-group retreat, urgency hold
+  fires/expires/never-holds-hostage, budget refresh (quiet-field gate
+  untouched), parking (grace, burst deferral, paced refusal, trace),
+  step posture application + build-time unknown-name error, sighting
+  wantedness skip, seam late-filter, doorway frontier, revision bump.
+- Deviations: the urgency hold is keyed to a RECENT wall cast rather
+  than the plan's looser "may claim consecutive ticks" — same intent,
+  chosen precisely to avoid re-creating the pre-R163 passivity; the
+  sim's no-restrike assertion was reshaped to "no restrike within the
+  window" (a legal post-window restrike now occurs — designed
+  behavior the old timing merely never exhibited).

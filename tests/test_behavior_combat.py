@@ -166,3 +166,40 @@ def test_fake_combat_module_scripts_pop_in_order():
     assert module.upkeep(snap) is None
     assert module.engage_calls == 3
     assert module.upkeep_calls == 2
+
+
+# -- postures (M6 P3) ----------------------------------------------------------
+
+
+def test_the_shipped_postures_load():
+    config = load_class_config(NECRO)
+    assert set(config.postures) == {"cautious", "brisk", "aggressive"}
+    # Cautious IS the base numbers, by identity not by copy.
+    assert config.postures["cautious"] is config.combat
+    # Brisk: the corridor bubble and no lingering; everything it does not
+    # name is inherited from the base.
+    brisk = config.postures["brisk"]
+    assert brisk.engage_radius == 12 and brisk.linger is False
+    assert brisk.revive_target == config.combat.revive_target
+    # Aggressive: group-conditioned retreat, faster restrike.
+    aggressive = config.postures["aggressive"]
+    assert aggressive.retreat_group_size == 3
+    assert aggressive.restrike_s == 0.5
+    assert aggressive.linger is True  # inherited
+
+
+def test_redefining_cautious_is_refused(tmp_path):
+    text = necro_text() + "\n[combat.postures.cautious]\nrestrike_s = 0.1\n"
+    with pytest.raises(ConfigError, match="cautious"):
+        load_class_config(write(tmp_path, text))
+
+
+def test_a_posture_cannot_override_unknown_or_forbidden_keys(tmp_path):
+    text = necro_text() + "\n[combat.postures.swift]\nrestrike_x = 0.1\n"
+    with pytest.raises(ConfigError, match="unknown key"):
+        load_class_config(write(tmp_path, text))
+    # park_grace_s is executor wiring, read once at startup — a
+    # per-posture value would look tunable and silently not be.
+    text = necro_text() + "\n[combat.postures.swift]\npark_grace_s = 9.0\n"
+    with pytest.raises(ConfigError, match="unknown key"):
+        load_class_config(write(tmp_path, text))

@@ -20,6 +20,7 @@ from pd2bot.behavior.actions import (
     PickUpItem,
 )
 from pd2bot.behavior.engine import IdleBail
+from pd2bot.behavior.necro import CombatConfig
 from pd2bot.safety import ChickenExit
 from tests.simworld import (
     ARRIVAL,
@@ -201,13 +202,30 @@ def test_the_late_straggler_reset_the_settle_timer(sim):
 
 
 def test_poison_did_the_killing(sim):
-    # One strike per monster, not a flurry: a struck monster is dying, and
-    # re-stabbing it is time not spent on the next one.
+    # No flurries: a struck monster is dying, and re-stabbing it inside
+    # its restrike window is time not spent on the next one. A re-strike
+    # AFTER the window is designed behavior (restrike_s exists for it,
+    # and the M6 P3 revive-urgency hold shifts timing enough for an
+    # adjacent survivor to legitimately earn one) — what must never
+    # happen is two strikes on one monster within the window.
     run, world = sim
     run_to_completion(run, world)
-    struck = [e.action.unit_id for e in run.trace if isinstance(e.action, AttackUnit)]
+    strikes = [
+        (e.action.unit_id, e.at)
+        for e in run.trace
+        if isinstance(e.action, AttackUnit)
+    ]
+    struck = [uid for uid, _ in strikes]
     assert sorted(set(struck)) == [1, 2, 3, 4]
-    assert len(struck) == len(set(struck)), f"a monster was re-struck: {struck}"
+    window = CombatConfig().restrike_s
+    last: dict[int, float] = {}
+    for uid, at in strikes:
+        if uid in last:
+            assert at - last[uid] >= window, (
+                f"monster {uid} re-struck {at - last[uid]:.2f}s after the "
+                f"last strike (window {window})"
+            )
+        last[uid] = at
     assert sum("died of poison" in line for line in world.log) == 4
 
 

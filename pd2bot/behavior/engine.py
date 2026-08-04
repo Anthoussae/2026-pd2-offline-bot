@@ -621,6 +621,20 @@ class BehaviorEngine:
                     self._narrate(f"run complete ({self.report.summary()})")
                 self._mark_activity(self._clock())
 
+        # Executor housekeeping (M6 P3): right-skill parking today, any
+        # once-per-tick duty tomorrow. Optional by design — sims and
+        # recording executors simply do not have it — and best-effort: a
+        # refused park is the executor's own pacing problem, never a
+        # reason to disturb the tick. Deliberately NOT counted as
+        # activity: parking is maintenance, and a bot that only parks is
+        # still a bot the never-idle invariant must catch.
+        maintain = getattr(self._executor, "maintain", None)
+        if maintain is not None:
+            try:
+                maintain()
+            except SEND_DID_NOT_LAND:
+                pass
+
         self._check_idle(snap, now)
         return self.complete
 

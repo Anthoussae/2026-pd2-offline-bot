@@ -156,3 +156,21 @@ def test_repeated_sightings_with_monsters_record_once(tmp_path):
             LocalCollision([occupied((0, 0), flags_at=(cell, offsets.COLL_MONSTERS))])
         )
         assert again == 0, f"monster at {cell} was mistaken for new terrain"
+
+
+def test_the_revision_bumps_on_content_change_even_at_same_room_count(tmp_path):
+    """Session-review issue 003: a room RE-recorded with changed terrain
+    leaves the room COUNT unchanged, and a cache keyed on the count went
+    stale. The revision moves on every content change, so caches keyed
+    on it cannot (the wiring's survey-target cache is that consumer)."""
+    area = MapStore(tmp_path).open(SEED, HELL, COLD_PLAINS)
+    area.record(LocalCollision([room((0, 0), blocked=[(1, 1)])]))
+    first = area.revision
+    assert first > 0
+    # Same room, same count, byte-identical: no change, no bump.
+    area.record(LocalCollision([room((0, 0), blocked=[(1, 1)])]))
+    assert area.revision == first
+    # Same room, same count, DIFFERENT terrain: the bump the cache needs.
+    area.record(LocalCollision([room((0, 0), blocked=[(2, 1)])]))
+    assert area.room_count == 1
+    assert area.revision > first

@@ -24,7 +24,7 @@ from pd2bot.behavior.execute import (
     GameActionExecutor,
     RecordingExecutor,
 )
-from pd2bot.input import VK_1, VK_3, VK_F1, VK_F5
+from pd2bot.input import VK_1, VK_3, VK_F1, VK_F5, InputRefused
 from pd2bot.player import ActiveSkills, Player
 
 HOME = (1000, 1000)
@@ -345,3 +345,93 @@ def test_recording_executor_lets_the_world_react():
     executor.execute(DrinkPotion(1, "rejuv"))
     assert seen == [DrinkPotion(1, "rejuv")]
     assert executor.actions == [DrinkPotion(1, "rejuv")]
+
+
+# -- right-skill parking (M6 P3, user note 1) ----------------------------------
+
+
+def parked_setup(monkeypatch):
+    """An executor with parking armed and a driveable clock."""
+    clock = Clock()
+    state = {"right": offsets.SKILL_BONE_ARMOR, "switches": []}
+
+    def fake_press(session, gated, skill_id, *, hotkeys=None, **kw):
+        state["switches"].append(skill_id)
+        state["right"] = skill_id
+
+    monkeypatch.setattr("pd2bot.behavior.execute.ensure_right_skill", fake_press)
+    monkeypatch.setattr(
+        "pd2bot.behavior.execute.read_player", lambda session: player_at()
+    )
+    executor = GameActionExecutor(
+        session=None,
+        gated=FakeGated(),
+        walk_to=lambda target: None,
+        hotkeys={
+            offsets.SKILL_BONE_ARMOR: VK_F1,
+            offsets.SKILL_DESECRATE: VK_F5,
+        },
+        clock=clock,
+        sleep=lambda seconds: None,
+        park_skill_id=offsets.SKILL_BONE_ARMOR,
+        park_grace_s=2.0,
+        cast_wait_cap_s=0.0,  # no animation modelling in these tests
+    )
+    return executor, clock, state
+
+
+def test_the_right_skill_parks_after_a_quiet_grace(monkeypatch):
+    executor, clock, state = parked_setup(monkeypatch)
+    executor.execute(CastAtPoint(offsets.SKILL_DESECRATE, (1005, 1000)))
+    assert state["right"] == offsets.SKILL_DESECRATE
+    executor.maintain()  # inside the grace: nothing happens
+    assert state["right"] == offsets.SKILL_DESECRATE
+    clock.advance(2.5)
+    executor.maintain()
+    assert state["right"] == offsets.SKILL_BONE_ARMOR, "never parked"
+    from pd2bot.behavior.actions import ParkSkill
+
+    assert any(isinstance(e.action, ParkSkill) for e in executor.trace), (
+        "a park must be visible in the trace, and never as a cast"
+    )
+    # Parked once; quiet ticks after that do nothing.
+    switches = list(state["switches"])
+    executor.maintain()
+    assert state["switches"] == switches
+
+
+def test_a_cast_burst_defers_the_park(monkeypatch):
+    """Each cast pushes the deadline: a 3-revive burst finishes on the
+    revive skill and only the quiet AFTER the burst parks it (the user's
+    grace rule)."""
+    executor, clock, state = parked_setup(monkeypatch)
+    for _ in range(3):
+        executor.execute(CastAtPoint(offsets.SKILL_DESECRATE, (1005, 1000)))
+        clock.advance(1.0)  # inside the grace each time
+        executor.maintain()
+        assert state["right"] == offsets.SKILL_DESECRATE, "parked mid-burst"
+    clock.advance(2.5)
+    executor.maintain()
+    assert state["right"] == offsets.SKILL_BONE_ARMOR
+
+
+def test_a_refused_park_is_paced_not_retried_at_tick_rate(monkeypatch):
+    """The stage B run 9 rule, applied to parking: a switch that will not
+    take pushes the deadline out one grace instead of re-firing every
+    tick."""
+    executor, clock, state = parked_setup(monkeypatch)
+    executor.execute(CastAtPoint(offsets.SKILL_DESECRATE, (1005, 1000)))
+    clock.advance(2.5)
+
+    def refusing(session, gated, skill_id, *, hotkeys=None, **kw):
+        state["switches"].append(skill_id)
+        raise InputRefused("panel open")
+
+    monkeypatch.setattr("pd2bot.behavior.execute.ensure_right_skill", refusing)
+    executor.maintain()
+    attempts = len(state["switches"])
+    executor.maintain()  # immediately again: still inside the pacing
+    assert len(state["switches"]) == attempts, "retried at tick rate"
+    clock.advance(2.5)
+    executor.maintain()
+    assert len(state["switches"]) == attempts + 1  # one paced retry

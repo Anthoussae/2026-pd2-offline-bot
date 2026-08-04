@@ -84,3 +84,24 @@ def test_coverage_reports_rooms_and_open_frontier():
     assert "0 frontier" not in line  # the right edge is open
     closed = coverage(area, (0, 0, 40, 40))
     assert "0 frontier point(s) open" in closed
+
+
+def test_a_narrow_doorway_between_old_stride_samples_is_listed():
+    """Session-review issue 002's validation: a ~4-subtile doorway that
+    sat between the old 8-stride samples (wall-faced on both, thicker
+    than the inward probe) must be offered as a frontier — a premature
+    '0 frontier open' understates coverage exactly where the cellars
+    need it most."""
+    # The top rows are wall 4 deep (past PROBE_IN) except a 4-wide
+    # doorway at x=3..6 — centered between the old samples at 0 and 8.
+    walls = {
+        (x, y)
+        for x in range(16)
+        for y in range(4)
+        if not 3 <= x <= 6
+    }
+    area = area_of(room((0, 0), width=16, height=16, walls=walls))
+    targets = frontier_targets(area, (0, -50, 50, 50))
+    assert any(
+        0 <= x <= 8 and y <= 4 for x, y in targets
+    ), f"the doorway frontier never appeared: {targets}"

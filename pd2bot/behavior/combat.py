@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -144,6 +144,11 @@ class ClassConfig:
     combat: CombatConfig
     # Rung 2 — NOT the ladder's: handed to SafetyConfig by the cycle wiring.
     chicken_life_pct: float
+    # Named posture presets (M6 P3, R212 Q5): full CombatConfigs built
+    # from [combat.postures.<name>] override tables. "cautious" is always
+    # present and always IS `combat` — the base numbers are the cautious
+    # posture by definition, so it cannot be redefined.
+    postures: dict[str, CombatConfig] = field(default_factory=dict)
 
     @property
     def revive_target(self) -> int:
@@ -231,7 +236,21 @@ _COMBAT_NUMBERS: dict[str, type] = {
     "desecrate_rounds": int,
     "desecrate_settle_s": float,
     "revive_settle_s": float,
+    # M6 P3 additions.
+    "retreat_group_size": int,
+    "retreat_group_radius": int,
+    "desecrate_budget_refresh_s": float,
+    "park_grace_s": float,
 }
+
+# [combat] boolean keys (same treatment as [reflex].armor_in_town).
+_COMBAT_BOOLS = ("linger", "revive_urgency_hold")
+
+# What a [combat.postures.<name>] table may override: the behavior knobs,
+# NOT the skills (a posture is a manner, not a build) and NOT
+# park_grace_s (executor wiring reads it once at startup — a per-posture
+# value would look tunable and silently not be).
+_POSTURE_KEYS = (set(_COMBAT_NUMBERS) | set(_COMBAT_BOOLS)) - {"park_grace_s"}
 
 
 def load_class_config(path: str | Path) -> ClassConfig:
@@ -342,12 +361,18 @@ def load_class_config(path: str | Path) -> ClassConfig:
     combat_raw = _require(data, "combat", dict, where)
     _reject_unknown(
         combat_raw,
-        set(_COMBAT_NUMBERS) | {"desecrate_skill", "revive_skill"},
+        set(_COMBAT_NUMBERS)
+        | set(_COMBAT_BOOLS)
+        | {"desecrate_skill", "revive_skill", "postures"},
         f"{where}.combat",
     )
     combat_numbers = {
         key: _require(combat_raw, key, kind, f"{where}.combat")
         for key, kind in _COMBAT_NUMBERS.items()
+    }
+    combat_bools = {
+        key: _require(combat_raw, key, bool, f"{where}.combat")
+        for key in _COMBAT_BOOLS
     }
     for ref_key in ("desecrate_skill", "revive_skill"):
         ref = _require(combat_raw, ref_key, str, f"{where}.combat")
@@ -359,7 +384,33 @@ def load_class_config(path: str | Path) -> ClassConfig:
         desecrate_skill_id=skills[combat_raw["desecrate_skill"]],
         revive_skill_id=skills[combat_raw["revive_skill"]],
         **combat_numbers,
+        **combat_bools,
     )
+
+    # [combat.postures.<name>] — override tables over the base numbers
+    # (M6 P3). The base IS the cautious posture; a run step that names no
+    # posture gets it unchanged, so pre-M6 runs behave exactly as before.
+    postures: dict[str, CombatConfig] = {"cautious": combat}
+    postures_raw = combat_raw.get("postures", {})
+    if not isinstance(postures_raw, dict):
+        raise ConfigError(f"{where}.combat.postures: expected tables")
+    for posture_name, table in postures_raw.items():
+        p_where = f"{where}.combat.postures.{posture_name}"
+        if posture_name == "cautious":
+            raise ConfigError(
+                f"{p_where}: 'cautious' IS the base [combat] numbers and "
+                "cannot be redefined — tune the base instead"
+            )
+        if not isinstance(table, dict):
+            raise ConfigError(f"{p_where}: expected a table of overrides")
+        _reject_unknown(table, _POSTURE_KEYS, p_where)
+        overrides = {
+            key: _require(
+                table, key, _COMBAT_NUMBERS.get(key, bool), p_where
+            )
+            for key in table
+        }
+        postures[posture_name] = replace(combat, **overrides)
 
     return ClassConfig(
         name=name,
@@ -369,4 +420,5 @@ def load_class_config(path: str | Path) -> ClassConfig:
         reflex=reflex,
         combat=combat,
         chicken_life_pct=chicken_life_pct,
+        postures=postures,
     )

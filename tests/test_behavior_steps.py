@@ -2,12 +2,14 @@
 
 from pathlib import Path
 
+import pytest
+
 from pd2bot import offsets
 from pd2bot.behavior.actions import AttackUnit, MoveTo, PickUpItem
 from pd2bot.behavior.engine import EngineContext
 from pd2bot.behavior.execute import RecordingExecutor
 from pd2bot.behavior.necro import CombatConfig, NecroCombat
-from pd2bot.behavior.run import build_states, load_run
+from pd2bot.behavior.run import RunError, build_states, load_run
 from pd2bot.behavior.steps import RunServices, _chebyshev, build_registry
 from pd2bot.items import CarriedItems
 from pd2bot.navigate import NavigationError
@@ -272,7 +274,7 @@ def test_the_patrol_visits_every_sample_point():
     step, svc, here, _, ctx = patrolling(clock)
     assert drive(step, here, ctx, clock) is not None, "the patrol never finished"
     assert len(step._visited) == svc.patrol_points
-    for point in step.patrol_points(HOME):
+    for point in step.patrol_points(HOME, snap().area):
         assert _chebyshev(point, HOME) <= 96
 
 
@@ -582,7 +584,7 @@ def test_subtile_wobble_does_not_reset_the_patrol_budget():
         "clear_radius", svc, {"radius": 96, "center": "arrival", "patrol": True}
     )
     here = {"pos": HOME}
-    target_point = step.patrol_points(HOME)[0]
+    target_point = step.patrol_points(HOME, snap().area)[0]
     legs = {"n": 0}
 
     def react(action):
@@ -1014,7 +1016,7 @@ def test_the_sweep_walks_the_circle_while_a_sighting_is_pending():
     # The clearance saw a rune on the far side and never got it. The
     # memo entry is exactly what it would have recorded.
     rune = GroundItem(unit_id=77, kind=999, position=(1070, 1000), quality=RARE)
-    svc.wanted_seen[77] = rune.position
+    svc.wanted_seen[77] = (rune.position, rune.kind, None)
 
     def visible(pos):
         # Stand in for the client's horizon, which is what actually hides
@@ -1054,7 +1056,7 @@ def test_a_stuck_sighting_does_not_hold_the_sweep_open():
     # the ring for an item three clicks already failed to lift.
     clock = Clock()
     step, svc, here, executor, ctx = sweeping(clock)
-    svc.wanted_seen[77] = (1070, 1000)
+    svc.wanted_seen[77] = ((1070, 1000), 999, None)
     svc.stuck.add(77)
     outcome = step.step(snap(pos=here["pos"]), ctx)
     assert outcome.done and "ring walk skipped" in outcome.note
@@ -1611,3 +1613,96 @@ def test_a_confirmed_pickup_narrates_with_the_belt_census():
     step.step(snap(), ctx)  # gone from the ground: confirmed
     confirmed = [line for line in lines if "came up" in line]
     assert confirmed and "belt healing 1/8, mana 0/4, rejuv 0/4" in confirmed[0]
+
+
+# -- postures on steps (M6 P3) -------------------------------------------------
+
+
+class PosturedCombat(StubCombat):
+    def __init__(self):
+        super().__init__()
+        self.postures_set = []
+
+    def set_posture(self, name):
+        self.postures_set.append(name)
+
+
+def test_the_clearance_applies_its_posture_once():
+    clock = Clock()
+    combat = PosturedCombat()
+    svc = services(clock, combat=combat, postures=frozenset({"brisk"}))
+    step = make_step("clear_radius", svc, {"radius": 96, "posture": "brisk"})
+    ctx = context()
+    step.step(snap(), ctx)
+    step.step(snap(), ctx)
+    assert combat.postures_set == ["brisk"], "once, on the first tick"
+
+
+def test_a_step_without_a_posture_leaves_the_module_alone():
+    clock = Clock()
+    combat = PosturedCombat()
+    svc = services(clock, combat=combat, postures=frozenset({"brisk"}))
+    step = make_step("clear_radius", svc, {"radius": 96})
+    step.step(snap(), context())
+    assert combat.postures_set == []
+
+
+def test_an_unknown_posture_fails_at_build_time():
+    """The same place every other run-file mistake fails: before the bot
+    has moved, not mid-run in Hell."""
+    clock = Clock()
+    svc = services(clock, postures=frozenset({"brisk"}))
+    with pytest.raises(RunError, match="unknown posture"):
+        make_step("clear_radius", svc, {"radius": 96, "posture": "reckless"})
+    # No postures loaded at all (sims, drills): naming one is refused too.
+    bare = services(clock)
+    with pytest.raises(RunError, match="no postures"):
+        make_step("clear_radius", bare, {"radius": 96, "posture": "brisk"})
+
+
+# -- pending sightings re-ask wantedness (M6 P3, review 002) -------------------
+
+
+def test_a_sighting_that_stopped_being_wanted_skips_the_ring():
+    """The review's validation verbatim: a mana potion is sighted,
+    `belt_full` gains "mana" (and the belt really has no room), and the
+    sweep must skip its ring instead of walking for a bottle nobody
+    would pick up on arrival."""
+    clock = Clock()
+    step, svc, here, executor, ctx = sweeping(clock)
+    svc.wanted_seen[88] = ((1070, 1000), 530, "mana")
+    svc.belt_full.add("mana")
+    # carried() reports an empty belt but TEST_PICKIT's capacity for mana
+    # is what _belt_has_room checks against; force "no room" the simple
+    # way: capacity 0 via a full-looking belt is fiddly, so assert via
+    # the outcome — with capacity > 0 the mark would expire instead.
+    svc.pickit.belt_capacity["mana"] = 0
+    try:
+        outcome = step.step(snap(pos=here["pos"]), ctx)
+    finally:
+        del svc.pickit.belt_capacity["mana"]
+    assert outcome.done and "ring walk skipped" in outcome.note
+    assert not [a for a in executor.actions if isinstance(a, MoveTo)]
+
+
+# -- the seam filter and the missing first-tick area (M6 P3, review 003) -------
+
+
+def test_no_ring_is_cached_until_an_area_was_available_to_filter():
+    clock = Clock()
+    svc = services(clock)
+    step = make_step(
+        "clear_radius", svc, {"radius": 96, "center": "arrival", "patrol": True}
+    )
+    # First tick: mid-transition, no area readable. Nothing may be cached.
+    assert step.patrol_points(HOME, None) == []
+    assert step._points is None, "an unfiltered ring was cached"
+    # Second tick: a narrow area arrives; the ring is filtered against it.
+    narrow = Area(level_no=FIELD, position=(0, 0), size=(220, 500))
+    points = step.patrol_points(HOME, narrow)
+    assert points, "the ring never got planned"
+    left, top, right, bottom = narrow.bounds_subtiles
+    assert all(
+        left + 4 <= x < right - 4 and top + 4 <= y < bottom - 4
+        for x, y in points
+    ), "a seam point survived the late filter"

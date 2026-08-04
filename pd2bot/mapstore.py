@@ -55,6 +55,11 @@ class ExploredArea:
         self.area_id = area_id
         self._rooms: dict[RoomKey, RoomCollision] = dict(rooms or {})
         self._view = LocalCollision(list(self._rooms.values()))
+        # Monotonic content revision (M6 P3, session-review issue 003):
+        # bumped by every record() that changed anything — including a
+        # re-recorded room whose terrain changed but whose COUNT did not,
+        # which is exactly the update a room_count cache key misses.
+        self.revision = 0
 
     # -- Grid protocol --------------------------------------------------------
 
@@ -127,6 +132,7 @@ class ExploredArea:
                 changed += 1
         if changed:
             self._view = LocalCollision(list(self._rooms.values()))
+            self.revision += 1
             self._save()
         return changed
 

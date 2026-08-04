@@ -27,11 +27,15 @@ from pd2bot.mapstore import ExploredArea
 
 Point = tuple[int, int]
 
-# Sample spacing along a room edge, in subtiles. Rooms are typically 40
-# on a side, so this probes each edge a handful of times — enough that a
-# door cannot hide between samples of the walkable scan below, cheap
-# enough to recompute when the atlas grows.
-EDGE_STRIDE = 8
+# Sample spacing along a room edge, in subtiles. Was 8, halved to 4 for
+# the cellars (M6 P3, session-review issue 002): a doorway narrower than
+# the stride, sitting between two wall-faced samples, was never offered
+# as a frontier — an area could read "0 frontier open" with a room
+# genuinely reachable only through that door. Game doorways are ~one
+# tile (5 subtiles), so 4 cannot straddle one; the extra samples cost
+# only recompute time, and the CLUSTER collapse keeps the target list
+# the same size.
+EDGE_STRIDE = 4
 # How far past the room's edge the "is anything recorded there?" probe
 # sits. 2 rather than 1 so an off-by-one on a shared room border cannot
 # read the neighbour's own edge row as terra incognita.

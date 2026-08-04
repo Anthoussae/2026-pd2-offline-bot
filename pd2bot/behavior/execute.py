@@ -40,12 +40,18 @@ from pd2bot.behavior.actions import (
     DrinkPotion,
     GiveMercPotion,
     MoveTo,
+    ParkSkill,
     PickUpItem,
 )
 from pd2bot.input import VK_MENU, GatedInput, InputRefused
 from pd2bot.memory import GameSession
 from pd2bot.player import read_player
-from pd2bot.skills import belt_drink, belt_give_merc, ensure_right_skill
+from pd2bot.skills import (
+    SkillSwitchFailed,
+    belt_drink,
+    belt_give_merc,
+    ensure_right_skill,
+)
 from pd2bot.units import label_display_on
 
 # Where an item is actually CLICKABLE, relative to the projection of its
@@ -110,8 +116,18 @@ class GameActionExecutor:
     # one deferred action rather than the run. T48 measured 610-640 ms, so
     # 1.5 s is well past any real cast.
     cast_wait_cap_s: float = 1.5
+    # Right-skill parking (M6 P3, user note 1): after the LAST cast of a
+    # burst resolves, switch the right skill back to `park_skill_id`
+    # (bone armor). While Revive is the active right skill, ground
+    # corpses are selectable and interfere with pathing and item pickup.
+    # The grace is what lets a 3-revive burst finish without thrashing:
+    # every cast pushes the deadline out, so only quiet arms the park.
+    # None = parking off (sims, drills that build the executor bare).
+    park_skill_id: int | None = None
+    park_grace_s: float = 2.0
     trace: list[TraceEntry] = field(default_factory=list)
     _cast_deadline: float | None = None
+    _park_deadline: float | None = None
 
     def _record(self, action: Action, detail: str = "") -> None:
         self.trace.append(TraceEntry(self.clock(), action, detail))
@@ -119,6 +135,37 @@ class GameActionExecutor:
     def _cast_sent(self) -> None:
         """Remember that a cast is resolving, so the next click can wait."""
         self._cast_deadline = self.clock() + self.cast_wait_cap_s
+        if self.park_skill_id is not None:
+            self._park_deadline = self.clock() + self.park_grace_s
+
+    def maintain(self) -> None:
+        """Once-per-tick housekeeping the engine grants the executor.
+
+        Today that is exactly one duty: right-skill parking (M6 P3). When
+        the park deadline has passed with no further cast — and no cast
+        animation is still resolving — switch the right skill back to the
+        parked skill. A SWITCH only, through the verified path; no click,
+        so nothing is cast. Failures are paced, not retried at tick rate
+        (the stage B run 9 rule): a refused or dropped switch pushes the
+        deadline out one grace and the next quiet tick tries again.
+        """
+        if self.park_skill_id is None or self._park_deadline is None:
+            return
+        if self.clock() < self._park_deadline or self._still_casting():
+            return
+        try:
+            ensure_right_skill(
+                self.session, self.gated, self.park_skill_id,
+                hotkeys=self.hotkeys,
+            )
+        except (InputRefused, SkillSwitchFailed):
+            self._park_deadline = self.clock() + self.park_grace_s
+            return
+        self._park_deadline = None
+        self._record(
+            ParkSkill(self.park_skill_id),
+            f"right skill parked back to {self.park_skill_id} (no cast)",
+        )
 
     def _still_casting(self) -> bool:
         """Is our own cast animation still playing? Asked of the GAME.

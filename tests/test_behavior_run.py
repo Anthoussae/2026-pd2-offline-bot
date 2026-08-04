@@ -34,7 +34,7 @@ def test_the_shipped_cold_plains_run_validates():
     # patrol on: 150 is more than perception's 80, so the circle has to be
     # walked for the number to mean anything (2026-08-01).
     assert run.steps[2].params == {
-        "center": "arrival", "radius": 150, "patrol": True
+        "center": "arrival", "radius": 150, "patrol": True, "posture": None
     }
 
 
@@ -82,10 +82,11 @@ def test_optional_parameter_gets_its_declared_default(tmp_path):
         'name = "x"\n[[step]]\nname = "clear_radius"\nradius = 99\n',
     )
     run = load_run(path, default_registry())
-    # `patrol` joined them on 2026-08-01 and defaults off, so every run
-    # written before it behaves exactly as it did.
+    # `patrol` joined them on 2026-08-01 and defaults off; `posture`
+    # joined at M6 P3 and defaults None — either way, every run written
+    # before behaves exactly as it did.
     assert run.steps[0].params == {
-        "center": "arrival", "radius": 99, "patrol": False
+        "center": "arrival", "radius": 99, "patrol": False, "posture": None
     }
 
 

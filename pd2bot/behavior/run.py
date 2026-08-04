@@ -142,6 +142,11 @@ def default_registry() -> StepRegistry:
                 # two vocabularies that disagree would pass a run file here
                 # that the bot then refuses in Hell.
                 ParamSpec("patrol", bool, required=False, default=False),
+                # M6 P3: the combat posture for this step. The NAME is
+                # only checkable against a loaded class config, so this
+                # registry validates the type and build_registry's
+                # factory validates the value.
+                ParamSpec("posture", str, required=False, default=None),
             ),
         )
     )

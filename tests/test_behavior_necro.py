@@ -6,6 +6,8 @@ assert on the actions it returns. What is under test is the USER'S pattern
 target-selection rules that keep poison doing the killing.
 """
 
+import pytest
+
 from pd2bot import offsets
 from pd2bot.behavior.actions import AttackUnit, CastAtPoint, MoveTo
 from pd2bot.behavior.necro import CombatConfig, NecroCombat, _chebyshev
@@ -437,8 +439,9 @@ def test_corpses_alone_no_longer_refill_the_desecrate_budget():
     """R185 B, run 4's self-feeding loop: desecrate makes corpses, and
     'corpses exist' used to refill the desecrate budget — so the bound
     never bound while revive casts failed to stick. Now only a GROWING
-    revive count earns a refill."""
-    necro, clock = make()
+    revive count earns a refill (the M6 P3 time refresh is disabled here
+    to test the R185 bound pure; it has its own test below)."""
+    necro, clock = make(CombatConfig(desecrate_budget_refresh_s=0))
     desecrates = 0
     for round_no in range(6):
         action = necro.upkeep(snap(monsters=[threat()]))
@@ -514,7 +517,8 @@ def test_offense_is_released_when_there_is_nowhere_to_desecrate():
 
 
 def test_desecrate_is_bounded_when_it_produces_nothing():
-    necro, clock = make()
+    # Refresh disabled: this pins the R185 bound itself.
+    necro, clock = make(CombatConfig(desecrate_budget_refresh_s=0))
     empty = snap(monsters=[threat()])
     casts = 0
     for _ in range(10):
@@ -522,6 +526,26 @@ def test_desecrate_is_bounded_when_it_produces_nothing():
             casts += 1
         clock.advance(1.5)  # past desecrate_settle_s each time
     assert casts == 2  # desecrate_rounds, then it stops trying
+
+
+def test_the_desecrate_budget_refreshes_on_time_in_combat():
+    """M6 P3 (user note 1.5): a budget burned against the skill's own
+    cooldown recovers after `desecrate_budget_refresh_s` — bounded churn
+    in combat beats a wall that never gets built. The quiet-field gate is
+    untouched: with no hostiles, upkeep still does nothing at all."""
+    necro, clock = make(CombatConfig(desecrate_budget_refresh_s=8.0))
+    empty = snap(monsters=[threat()])
+    casts = 0
+    for _ in range(4):
+        if necro.upkeep(empty) is not None:
+            casts += 1
+        clock.advance(1.5)
+    assert casts == 2  # budget spent
+    clock.advance(8.0)  # the refresh window passes
+    assert necro.upkeep(empty) is not None, "the budget never refreshed"
+    # And never in a quiet field: the gate outranks the refresh.
+    clock.advance(20.0)
+    assert necro.upkeep(snap()) is None
 
 
 def test_the_round_budget_resets_once_the_wall_is_back_up():
@@ -581,3 +605,87 @@ def test_every_number_is_config():
     assert necro.engage(
         snap(allies=wall(), monsters=[monster(1, (1004, 1000))])
     ) == MoveTo((1002, 1000), toward=1)
+
+
+# -- postures (M6 P3, R212 Q5) -------------------------------------------------
+
+
+def test_set_posture_swaps_config_and_keeps_bookkeeping():
+    base = CombatConfig()
+    brisk = CombatConfig(engage_radius=12, linger=False)
+    necro, clock = make(base)
+    necro.postures = {"cautious": base, "brisk": brisk}
+    necro._last_strike[7] = clock()  # standing bookkeeping
+    necro.set_posture("brisk")
+    assert necro.config is brisk and necro.posture == "brisk"
+    assert 7 in necro._last_strike, "the swap must not reset the fight"
+    with pytest.raises(KeyError, match="unknown posture"):
+        necro.set_posture("reckless")
+
+
+def test_brisk_moves_on_instead_of_lingering():
+    """linger=False: with everything nearby freshly poisoned, engage says
+    None — the run step keeps walking, which is what 'brush past them
+    toward the target' means mechanically. Cautious drifts, as ever."""
+    for linger, expects_drift in ((True, True), (False, False)):
+        necro, clock = make(skirmishing(linger=linger, restrike_s=60.0))
+        prey = monster(1, (1002, 1000))
+        first = necro.engage(snap(monsters=[prey], allies=wall()))
+        assert isinstance(first, AttackUnit)  # the strike happens either way
+        necro._retreat_after_strike = False  # skip the retreat beat
+        clock.advance(0.5)  # inside the restrike window: nothing fresh
+        followup = necro.engage(snap(monsters=[prey], allies=wall()))
+        if expects_drift:
+            assert isinstance(followup, MoveTo), "cautious must drift"
+        else:
+            assert followup is None, "brisk must hand the tick back"
+
+
+def test_aggressive_skips_the_retreat_on_isolated_enemies():
+    """retreat_group_size=3: one lone monster earns a strike WITHOUT the
+    back-out; three close hostiles still trigger the full retreat — backs
+    off from groups, presses lone targets (the user's definition)."""
+    lone = [monster(1, (1002, 1000))]
+    pack = [monster(i, (1002 + i, 1000)) for i in range(1, 4)]
+    for hostiles, retreats in ((lone, False), (pack, True)):
+        necro, _ = make(skirmishing(retreat_group_size=3))
+        action = necro.engage(snap(monsters=hostiles, allies=wall()))
+        assert isinstance(action, AttackUnit)
+        assert necro._retreat_after_strike is retreats
+
+
+# -- the revive-urgency hold (M6 P3, user note 1.5) ----------------------------
+
+
+def test_offense_holds_while_a_wall_cast_is_in_the_pipeline():
+    """Wall short + a wall cast just sent -> strikes and dashes wait
+    (drift only), so the desecrate->revive casts never share the cast
+    pipeline with strike clicks. The hold expires with the pipeline."""
+    necro, clock = make(skirmishing())
+    hostiles = [monster(1, (1002, 1000))]
+    # Upkeep desecrates (no corpses, wall short): the pipeline opens.
+    cast = necro.upkeep(snap(monsters=hostiles))
+    assert cast is not None and cast.skill_id == offsets.SKILL_DESECRATE
+    held = necro.engage(snap(monsters=hostiles, allies=wall(1)))
+    assert not isinstance(held, AttackUnit), "offense struck into the pipeline"
+    # Pipeline over (settle + animation passed): offense is free again.
+    clock.advance(3.0)
+    freed = necro.engage(snap(monsters=hostiles, allies=wall(1)))
+    assert isinstance(freed, AttackUnit)
+
+
+def test_the_hold_never_fires_with_the_wall_up_or_the_build_dead():
+    necro, clock = make(skirmishing(desecrate_budget_refresh_s=0))
+    hostiles = [monster(1, (1002, 1000))]
+    # Full wall: no hold even right after a (hypothetical) cast stamp.
+    necro._last_wall_cast = clock()
+    action = necro.engage(snap(monsters=hostiles, allies=wall(3)))
+    assert isinstance(action, AttackUnit)
+    # Wall short but the build is DEAD (budget spent, no corpses, no
+    # stamp recent): _building_wall bounds the hold exactly like the
+    # approach gate, so offense must not be held hostage.
+    necro2, clock2 = make(skirmishing(desecrate_budget_refresh_s=0))
+    necro2._desecrate_rounds = 99
+    necro2._last_wall_cast = None
+    action2 = necro2.engage(snap(monsters=hostiles, allies=wall(1)))
+    assert isinstance(action2, AttackUnit)
