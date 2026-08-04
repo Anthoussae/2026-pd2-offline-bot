@@ -235,3 +235,4 @@ headings, noted in parentheses, say roughly where they fell).
 - M6 R211 [decision] Approve the M5 closeout commit · 2026-08-03 06:31
 - M6 R212 [decision] M6 plan: Q1-Q10 + phase table · 2026-08-03 06:31
 - M6 P1 R213 [decision] Merge PR #1 into main? · 2026-08-03 17:12
+- M6 P1 R214 [decision] Commit P1 and continue with P3? · 2026-08-03 20:00

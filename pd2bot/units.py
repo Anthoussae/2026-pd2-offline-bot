@@ -198,6 +198,13 @@ class Monster:
     # (Standing) because mode 0 is the Death animation — a hand-built value
     # that omitted the field would otherwise silently classify as a corpse.
     mode: int = 1
+    # Super-unique identity (M6 P1): wUniqueNo indexes superuniques.txt,
+    # wName is the display name the client renders ("The Countess"). Both
+    # read only for boss-flagged units — scan cost stays flat for the
+    # ordinary crowd — and raw otherwise: which values mean "not a
+    # super-unique" is settled by the P2 descent drill, not assumed.
+    unique_no: int | None = None
+    name: str = ""
 
     @property
     def is_alive(self) -> bool:
@@ -217,6 +224,20 @@ class Monster:
     def merc_kind(self) -> str | None:
         """Which mercenary this is, if it is one."""
         return offsets.MERC_CLASS_IDS.get(self.kind)
+
+    @property
+    def is_super_unique(self) -> bool:
+        """Boss-flagged AND carrying a display name.
+
+        PROVISIONAL heuristic (M6 P1): random champion-pack leaders also
+        set fBoss, and the working theory is that only true super-uniques
+        (superuniques.txt residents — the Countess) carry a non-empty
+        wName. The P2 descent drill logs every boss-flagged monster's
+        (unique_no, name) to confirm or correct this before anything
+        load-bearing trusts it; the endgame's kill condition additionally
+        matches the Countess's own learned unique_no, not this flag alone.
+        """
+        return self.is_boss and bool(self.name)
 
     @property
     def hp_fraction(self) -> float | None:
@@ -298,6 +319,20 @@ def _read_monster(session: GameSession, unit: int) -> Monster | None:
         return None
     data = session.ptr(unit + offsets.UNIT_DATA)
     flags = session.u8(data + offsets.MONSTER_FLAGS) if data else 0
+    # Identity fields only for boss-flagged units (M6 P1): the ordinary
+    # crowd never pays the extra reads, and a torn name read must not
+    # cost the whole monster — identity is a bonus, position is the job.
+    unique_no: int | None = None
+    name = ""
+    if data is not None and flags & offsets.MONSTER_FLAG_BOSS:
+        try:
+            unique_no = session.u16(data + offsets.MONSTER_UNIQUE_NO)
+            name = session.wstring(
+                data + offsets.MONSTER_NAME, offsets.MONSTER_NAME_CHARS
+            )
+        except Exception:  # noqa: BLE001 - identity is best-effort
+            unique_no = None
+            name = ""
     stats = read_stats(session, unit)
     return Monster(
         unit_id=session.u32(unit + offsets.UNIT_ID),
@@ -310,6 +345,8 @@ def _read_monster(session: GameSession, unit: int) -> Monster | None:
         is_champion=bool(flags & offsets.MONSTER_FLAG_CHAMPION),
         is_boss=bool(flags & offsets.MONSTER_FLAG_BOSS),
         is_minion=bool(flags & offsets.MONSTER_FLAG_MINION),
+        unique_no=unique_no,
+        name=name,
     )
 
 

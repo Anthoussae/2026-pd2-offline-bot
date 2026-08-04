@@ -345,13 +345,53 @@ COLL_FLAG_NAMES = {
     COLL_DEAD_BODIES: "dead_bodies",
 }
 
-# --- Room2 (D2Structs.h:333) — static/preset room layer --------------------
+# --- Room2 (D2Structs.h:333-356) — static/preset room layer ----------------
+# Unlike Room1 (runtime, only the player's neighbourhood loaded), Room2
+# spans the WHOLE level once the level is initialized — which is what makes
+# area-wide exit enumeration possible from anywhere in the area (M6 P1).
+# Layout cross-checked 2026-08-03 against d2mapapi_mod's independent
+# lineage (d2structs.h, struct Room2_113): field-for-field agreement.
 
+ROOM2_NEXT = 0x24  # Room2* pRoom2Next — the level-wide chain
 ROOM2_ROOM1 = 0x30
+ROOM2_POS_X = 0x34  # dwPosX, in TILES (x5 for subtiles)
+ROOM2_POS_Y = 0x38  # dwPosY
+ROOM2_SIZE_X = 0x3C  # dwSizeX
+ROOM2_SIZE_Y = 0x40  # dwSizeY
+ROOM2_ROOM_TILES = 0x4C  # RoomTile* — warp connections out of this room
 ROOM2_LEVEL = 0x58  # Level*
+ROOM2_PRESET = 0x5C  # PresetUnit* — preset npcs/objects/warp tiles
 
-# --- Level (D2Structs.h:317) -----------------------------------------------
+# --- RoomTile (D2Structs.h:159-164) — one warp connection -------------------
+# A RoomTile says "this room connects, via warp number *nNum, to pRoom2
+# (a room in the DESTINATION level)". Cross-checked against d2mapapi_mod
+# struct RoomTile113: agreement.
 
+ROOMTILE_ROOM2 = 0x00  # Room2* — destination-side room
+ROOMTILE_NEXT = 0x04  # RoomTile*
+ROOMTILE_NUM_PTR = 0x10  # DWORD* nNum — POINTER to the warp number
+
+# --- PresetUnit (D2Structs.h:307-315) — preset placements in a Room2 -------
+# Positions are RELATIVE to the room: world subtile = room2 tile pos * 5 +
+# preset pos (d2mapapi mapdata.cpp:205-206, the vendored generator's own
+# arithmetic). Cross-checked against d2mapapi_mod struct PresetUnit113.
+
+PRESET_TXT_FILE_NO = 0x04  # dwTxtFileNo
+PRESET_POS_X = 0x08  # dwPosX, subtiles within the room
+PRESET_NEXT = 0x0C  # PresetUnit* pPresetNext
+PRESET_TYPE = 0x14  # dwType
+PRESET_POS_Y = 0x18  # dwPosY
+# dwType values as d2mapapi names them (mapdata.cpp:21-23): 1 npc,
+# 2 object, 5 tile. A TILE preset is a warp — a staircase, a doorway —
+# and matching its dwTxtFileNo against a RoomTile's *nNum is how the
+# generator itself locates level exits (mapdata.cpp:217-232).
+PRESET_TYPE_NPC = 1
+PRESET_TYPE_OBJECT = 2
+PRESET_TYPE_TILE = 5
+
+# --- Level (D2Structs.h:317-331) --------------------------------------------
+
+LEVEL_ROOM2_FIRST = 0x10  # Room2* — the level-wide static room chain
 LEVEL_POS_X = 0x1C
 LEVEL_POS_Y = 0x20
 LEVEL_SIZE_X = 0x24
@@ -366,6 +406,14 @@ MONSTER_FLAG_NORMAL = 1 << 1
 MONSTER_FLAG_CHAMPION = 1 << 2
 MONSTER_FLAG_BOSS = 1 << 3
 MONSTER_FLAG_MINION = 1 << 4
+# Super-unique identity (M6 P1, the Countess). wUniqueNo indexes
+# superuniques.txt; wName carries the display name the client shows.
+# Which values mean "not a super-unique" is NOT assumed — the P2 descent
+# drill logs every boss-flagged monster's (unique_no, name) and the
+# Countess's own id gets a named constant with that drill as provenance.
+MONSTER_UNIQUE_NO = 0x26  # WORD wUniqueNo
+MONSTER_NAME = 0x2C  # wchar_t wName[28]
+MONSTER_NAME_CHARS = 28
 
 # --- ItemData (D2Structs.h:510) --------------------------------------------
 
@@ -722,9 +770,26 @@ OBJECT_KINDS = {
 # the same trust-nothing pattern as the difficulty guard.
 AREA_ROGUE_ENCAMPMENT = 1
 AREA_COLD_PLAINS = 3
+# The Countess route (M6). Ids match the T52 survey's atlas file names
+# (maps/<seed>/area-006 … area-025) — strong prior evidence, but still
+# expectations until the P2 traversal drill reads each one live (R212 Q1).
+AREA_BLACK_MARSH = 6
+AREA_FORGOTTEN_TOWER = 20
+AREA_TOWER_CELLAR_1 = 21
+AREA_TOWER_CELLAR_2 = 22
+AREA_TOWER_CELLAR_3 = 23
+AREA_TOWER_CELLAR_4 = 24
+AREA_TOWER_CELLAR_5 = 25
 AREA_NAMES = {
     AREA_ROGUE_ENCAMPMENT: "Rogue Encampment",
     AREA_COLD_PLAINS: "Cold Plains",
+    AREA_BLACK_MARSH: "Black Marsh",
+    AREA_FORGOTTEN_TOWER: "Forgotten Tower",
+    AREA_TOWER_CELLAR_1: "Tower Cellar Level 1",
+    AREA_TOWER_CELLAR_2: "Tower Cellar Level 2",
+    AREA_TOWER_CELLAR_3: "Tower Cellar Level 3",
+    AREA_TOWER_CELLAR_4: "Tower Cellar Level 4",
+    AREA_TOWER_CELLAR_5: "Tower Cellar Level 5",
 }
 
 # --- UI state (BH Constants.h:65-89) ---------------------------------------

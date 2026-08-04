@@ -9,7 +9,15 @@ from pd2bot.units import (
     read_socket_count,
     scan_units,
 )
-from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, stat_array, u32
+from tests.conftest import (
+    CLIENT_BASE,
+    FakeMemory,
+    FakeSession,
+    stat_array,
+    u16,
+    u32,
+    wchars,
+)
 
 PLAYER = 0x0B000000
 PLAYER_PATH = 0x0B000100
@@ -18,7 +26,10 @@ ROOM_B = 0x0B002000
 NEAR_ARRAY = 0x0B003000
 
 
-def add_monster(mem, address, unit_id, kind, pos, hp, max_hp, flags=0, alignment=0, mode=1):
+def add_monster(
+    mem, address, unit_id, kind, pos, hp, max_hp, flags=0, alignment=0, mode=1,
+    unique_no=None, name=None,
+):
     # mode defaults to 1 (Standing): mode 0 is the Death animation, and a
     # fake that leaves the field unwritten would read as a corpse.
     path = address + 0x100
@@ -39,7 +50,17 @@ def add_monster(mem, address, unit_id, kind, pos, hp, max_hp, flags=0, alignment
         },
     )
     mem.write_fields(path, {offsets.PATH_X: u32(pos[0])[:2], offsets.PATH_Y: u32(pos[1])[:2]})
-    mem.write_fields(data, {offsets.MONSTER_FLAGS: bytes([flags])})
+    data_fields = {offsets.MONSTER_FLAGS: bytes([flags])}
+    if unique_no is not None:
+        # A super-unique's identity block (M6 P1). Only written when the
+        # test asks: the default short buffer exercises the best-effort
+        # path (a boss whose identity reads tear yields None/"", never a
+        # lost monster).
+        data_fields[offsets.MONSTER_UNIQUE_NO] = u16(unique_no)
+        data_fields[offsets.MONSTER_NAME] = wchars(
+            name or "", offsets.MONSTER_NAME_CHARS
+        )
+    mem.write_fields(data, data_fields)
     values = {offsets.STAT_HP: hp << 8, offsets.STAT_MAX_HP: max_hp << 8}
     if alignment:
         values[offsets.STAT_ALIGNMENT] = alignment
@@ -525,3 +546,54 @@ def test_the_same_unit_listed_twice_is_still_deduped():
 
     scan = scan_units(FakeSession(mem))
     assert len(scan.objects) == 1
+
+
+def _lone_monster_scan(**monster_kwargs):
+    """One monster in the world, scanned — for the identity tests (M6 P1)."""
+    mem = FakeMemory()
+    mem.write(CLIENT_BASE + offsets.PLAYER_UNIT_PTR, u32(PLAYER))
+    mem.write_fields(PLAYER, {offsets.UNIT_PATH: u32(PLAYER_PATH)})
+    mem.write_fields(
+        PLAYER_PATH, {offsets.PATH_X: u32(100)[:2], offsets.PATH_Y: u32(200)[:2]}
+    )
+    unit = add_monster(mem, 0x0B040000, 300, 60, (105, 205), 400, 400,
+                       **monster_kwargs)
+    hash_table(mem, {offsets.UNIT_TYPE_MONSTER: [unit]})
+    return scan_units(FakeSession(mem))
+
+
+def test_super_unique_identity_read_for_boss_flagged_monsters():
+    """A boss-flagged monster with an identity block reads unique_no and
+    the display name — the Countess-detection surface (M6 P1)."""
+    scan = _lone_monster_scan(
+        flags=offsets.MONSTER_FLAG_BOSS, unique_no=27, name="The Countess"
+    )
+    monster = scan.monsters[0]
+    assert monster.is_boss
+    assert monster.unique_no == 27
+    assert monster.name == "The Countess"
+    assert monster.is_super_unique
+
+
+def test_boss_with_torn_identity_block_still_reads_as_a_monster():
+    """Identity is best-effort: the default fake's MonsterData buffer is
+    too short to hold unique_no/name, so those reads fail — the monster
+    must still arrive, with None/'' identity, and not claim super-unique
+    status."""
+    scan = _lone_monster_scan(flags=offsets.MONSTER_FLAG_BOSS)
+    monster = scan.monsters[0]
+    assert monster.is_boss
+    assert monster.unique_no is None
+    assert monster.name == ""
+    assert not monster.is_super_unique
+
+
+def test_ordinary_monsters_never_pay_the_identity_reads():
+    """No boss flag: unique_no/name stay at their defaults even when an
+    identity block exists — the crowd's scan cost stays flat."""
+    scan = _lone_monster_scan(unique_no=99, name="Ignored")
+    monster = scan.monsters[0]
+    assert not monster.is_boss
+    assert monster.unique_no is None
+    assert monster.name == ""
+    assert not monster.is_super_unique

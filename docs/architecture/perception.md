@@ -184,6 +184,34 @@ skill, not just the world:
   and SendInput alike) never update it — and clicks do not need it.
   Do not build on hover state.
 
+## What M6 added: exits and boss identity
+
+- **Level exits** (`exits.py`): where the current area's staircases and
+  doorway warps are, and which area each leads to. The read walks the
+  **static** Room2 layer — which spans the whole level once it is
+  initialized, unlike the runtime Room1 neighbourhood — so exits are
+  enumerable area-wide from anywhere inside the area. The algorithm is
+  d2mapapi's own (mapdata.cpp:217–232, the offline generator this
+  project vendors): a `PresetUnit` of type TILE names a warp
+  (`dwTxtFileNo`); the `RoomTile` whose `*nNum` matches names the
+  destination level; world position = room tile origin × 5 + preset
+  offset. Struct layouts (Room2/RoomTile/PresetUnit/Level, BH
+  D2Structs.h:159–356) are cross-checked against d2mapapi_mod's
+  independent 1.13 definitions — field-for-field agreement, the
+  collision-map acceptance bar. Walkable border seams between outdoor
+  areas are a different mechanism and deliberately not read. Probe:
+  `python -m pd2bot.dump --exits`. *(Live verification rides M6 P2's
+  traversal drills.)*
+- **Boss identity** (`units.py`): boss-flagged monsters additionally
+  read `MonsterData.wUniqueNo` (the superuniques.txt index) and the
+  rendered display name (`wName`, wchar[28]) — the surface the Countess
+  kill condition stands on. Reads are boss-only (the crowd's scan cost
+  is flat) and best-effort (a torn identity block yields None/"", never
+  a lost monster). `Monster.is_super_unique` is a **provisional**
+  heuristic (boss flag + non-empty name) until the P2 descent drill
+  logs real (unique_no, name) pairs; the Countess's own id becomes a
+  named constant with that drill as provenance.
+
 ## Knowing when it is safe to act
 
 This is the part that exists because of a specific mistake. During M1 a test

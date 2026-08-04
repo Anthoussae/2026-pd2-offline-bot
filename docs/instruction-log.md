@@ -365,6 +365,12 @@ with guardrails) — 259 tests green.
 
 ## M6 — Countess flagship
 
+### P1 — transit and boss perception
+
+| ID | Type | Title | Asked | Outcome |
+|---|---|---|---|---|
+| R214 | decision | Commit P1 and continue with P3? | P1 implemented on `m6-countess` (873 tests, ruff clean; details in the phase file's Implementation Result): exit perception (BH-cited RoomTile chain, cross-checked against d2mapapi_mod), boss identity (unique_no + name, provisional is_super_unique), area constants 6/20/21-25, the `dump --exits` probe, 9 new tests. Asked: (a) approve the P1 commit + push; (b) continue directly with P3 (postures, parking, revive urgency, review fixes — sim-only, no live time needed), leaving P2's calibrations and traversal drills for when the user is at the machine. | **Yes to both.** P2 reserved for when the user is ready; standing guidance for the stretch: do everything possible WITHOUT the bridge or game client — in-game testing comes later. P1 committed and pushed; P3 proceeds sim-only. |
+
 ### Planning
 
 | ID | Type | Title | Asked | Outcome |
