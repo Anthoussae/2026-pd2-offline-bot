@@ -199,6 +199,25 @@ comment changed), reasoning recorded in the R211 outcome.
 
 ## Future work / out of scope notes
 
+- **Hold-to-move (user discovery, 2026-08-04, R215)**: holding the left
+  button down makes the character move to the destination WITHOUT
+  picking up any items — movement that does not interact with the game
+  world. If the bot can replicate it (button-down, hold, release as a
+  distinct input primitive), travel clicks stop being able to scoop
+  items at all, retiring a whole misclick class the avoid-radius work
+  only shrank. Plan shape: (1) a cheap read-only-risk T-drill at a
+  convenient live juncture — hold LMB toward a destination across
+  deliberately dropped junk; PASS = arrival with zero pickups; (2) if
+  proven, an input primitive (`GatedInput.hold_move`?) whose new
+  territory is the GUARD: a held button spans ticks, so the contract
+  needs "release immediately when the guard goes false" — the first
+  input that outlives its own permission check; (3) adopt in the
+  navigator's travel legs (and possibly collect approaches) if the
+  drill's behavior holds under monsters/objects en route. Natural
+  junctures: alongside the P5 battery, or a spare moment in a P2/P5
+  live session. Not scheduled into a phase yet — noted for the next
+  planning pass that touches input or navigation.
+
 - Aggressive posture (full framework + runtime switching UI) — beyond
   the minimal preset of Q5.
 - Boss-identification perception (super-unique flags, monster names)

@@ -319,3 +319,8 @@ behavior layer adds, in order of likelihood to move:
   proof rides the M6 battery.
 - **The navigator label-band nudge** (optional polish, from the pickup
   arc): left as a bookmark; the offset schedule made it moot for M5.
+- **Hold-to-move** (user discovery, 2026-08-04): holding the left
+  button moves the character without interacting with the world — no
+  accidental pickups. Candidate input primitive for travel legs; needs
+  a drill first, and a guard design for an input that spans ticks. See
+  the M6 plan's notes.md future-work entry.

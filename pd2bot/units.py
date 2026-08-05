@@ -227,17 +227,21 @@ class Monster:
 
     @property
     def is_super_unique(self) -> bool:
-        """Boss-flagged AND carrying a display name.
+        """Boss-flagged with a readable superuniques.txt id. WEAK signal.
 
-        PROVISIONAL heuristic (M6 P1): random champion-pack leaders also
-        set fBoss, and the working theory is that only true super-uniques
-        (superuniques.txt residents — the Countess) carry a non-empty
-        wName. The P2 descent drill logs every boss-flagged monster's
-        (unique_no, name) to confirm or correct this before anything
-        load-bearing trusts it; the endgame's kill condition additionally
-        matches the Countess's own learned unique_no, not this flag alone.
+        The original theory — only true super-uniques carry a non-empty
+        wName — was killed by the FIRST live read (T68, Cellar 5,
+        2026-08-04): wName holds garbage wide characters on live boss
+        units, not a display name (the client evidently renders names
+        from MonStats + wUniqueNo instead). What held is wUniqueNo
+        itself: the Countess-candidate read unique_no 6, superuniques.
+        txt's Countess row. Champion-pack leaders also set fBoss and
+        their wUniqueNo semantics are uncatalogued, so anything
+        load-bearing (the endgame's kill condition) matches the
+        Countess's own learned (kind, unique_no) constants — never this
+        property alone. `name` stays readable as a raw diagnostic only.
         """
-        return self.is_boss and bool(self.name)
+        return self.is_boss and self.unique_no is not None
 
     @property
     def hp_fraction(self) -> float | None:

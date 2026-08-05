@@ -365,6 +365,14 @@ with guardrails) — 259 tests green.
 
 ## M6 — Countess flagship
 
+### P2 — waypoint tabs and traverse
+
+| ID | Type | Title | Asked | Outcome |
+|---|---|---|---|---|
+| R217 | decision | Standing mandate for the P2 live batch | The R207-shape mandate for P2's calibrations and drills, run when the user says go (they were mid-Cellar-5 at issue time): (1) the waypoint calibration battery — user opens the waypoint panel in town and hovers on chat prompts (act tabs II/V + rows Black Marsh / Arcane Sanctuary / Halls of Pain, ~2 min); (2) T-exit-read in Black Marsh (area ids asserted live, Q1); (3) T-traverse-one (Black Marsh → Tower); (4) T-descent (full chain to Cellar 5, chicken 50, super-unique catalogue en route). Per-drill OK gates waived within the batch; abort paths standing; the user tabbed in for calibrations and hands-near-controls for the traversal drills. | _(pending)_ |
+| R216 | verify | Confirm the Countess candidate with your eyes | T68's read-only probe (run while the user stood in Cellar 5) found the exit read fully working and two boss-flagged units: kind 734 unique_no 6 at (12548, 11036) — ~56 subtiles WEST of the player, and unique_no 6 is superuniques.txt's Countess row — and kind 21 unique_no 0 nearby. Asked: is the Countess visibly alive on/near your screen to the west? A yes pins (kind 734, unique_no 6) as her named constants with T68 as provenance. | _(pending)_ |
+| R215 | inform | Hold-left-click moves without interacting (user discovery) | User, 2026-08-04: holding the left button down moves the character to the destination WITHOUT picking up items — movement that does not touch the game world, usable to prevent misclicks; possibly replicable by the bot. Asked (implicitly): note it, plan it, test it, implement at an appropriate juncture. | **Recorded and planned** (M6 plan notes.md future work + behavior.md future notes): drill-first (hold LMB across dropped junk, PASS = zero pickups), then a `hold_move` input primitive whose guard design must handle an input that SPANS ticks (release-on-guard-false — new territory for the gate), then adoption in the navigator's travel legs. Natural juncture: alongside the P5 battery or a spare live-session moment; not scheduled into a phase yet. Also this exchange: the closed bridge was restarted agent-side via `Start-ScheduledTask pd2bot-bridge` (probe: elevated, alive) — the restart no longer needs the user at all. |
+
 ### P1 — transit and boss perception
 
 | ID | Type | Title | Asked | Outcome |

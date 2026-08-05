@@ -361,8 +361,10 @@ def dump_level_exits(session: GameSession) -> str:
         if monster is None or not monster.is_boss:
             continue
         boss_lines.append(
+            # ascii(): a torn or garbage wName must not crash the probe on
+            # a console codepage that cannot print it (cp1252 did, live).
             f"  kind {monster.kind:<5} unique_no {monster.unique_no!s:<6} "
-            f"name {monster.name!r:<30} at {monster.position}"
+            f"name {ascii(monster.name):<30} at {monster.position}"
             f"{'  SUPER-UNIQUE' if monster.is_super_unique else ''}"
         )
     lines.append(

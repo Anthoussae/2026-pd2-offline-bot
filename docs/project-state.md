@@ -8,12 +8,11 @@ same commit as the transition itself.
 - **Milestone:** M6 — Countess flagship
 - **Phase:** P2 — waypoint tabs and traverse (P1 and P3 are DONE; plan:
   `docs/plans/2026-08-03-m6-countess/`)
-- **Next request ID:** R215 (overall counter; R171 was never issued — a
+- **Next request ID:** R218 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
-- **Next test ID:** T68 (T67, the sparse melange, ran 2 passes on
-  2026-08-03 — an earlier note here said "next: T67" in error; check
-  `docs/drill-log.md`)
+- **Next test ID:** T69 (T68 = the Cellar 5 read-only perception probe,
+  2026-08-05; check `docs/drill-log.md`)
 
 Updated: 2026-08-03 (PR #1 MERGED per R213 — main carries all of M5;
 branch `m6-countess` is the working line, one branch per milestone
