@@ -6,69 +6,128 @@ from here — update it at every milestone or phase transition, in the
 same commit as the transition itself.
 
 - **Milestone:** M6 — Countess flagship
-- **Phase:** P4 — the countess run and the Cellar 5 endgame (P1, P2,
-  P3 all DONE; plan: `docs/plans/2026-08-03-m6-countess/`)
-- **Next request ID:** R220 (overall counter; R171 was never issued — a
+- **Phase:** P4 — the countess run and the Cellar 5 endgame (P1, P2, P3
+  DONE; plan: `docs/plans/2026-08-03-m6-countess/`)
+- **Next request ID:** R223 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
-- **Next test ID:** T71 (T70 ran 5 times; check `docs/drill-log.md`)
+- **Next test ID:** T75 (T72 ran twice, T73 twice, T74 twice; check
+  `docs/drill-log.md`)
 
-Updated: 2026-08-05 (**P2 COMPLETE, live-proven end to end**: T70 run 5
-was THE FULL DESCENT — town → Black Marsh → Forgotten Tower → Cellars
-1–5, 796 s, all 7 transitions area-id proven, clean [CVRL], chicken 50
-untriggered. `maps/exits.json` banked 11 staircases — the whole route
-in BOTH directions — so every later descent is staircase-to-staircase
-with zero searching; the ~700 s of first-visit seeking never recurs on
-this seed. The session's hard-won lessons, all committed: the tome
-misclick recurrence and its four-layer fix + post-mortem
-(`docs/reviews/2026-08-05-tome-misclick-feedback.md`); the
-preset-loading limit — Room2 preset/warp data only exists for rooms the
-client has loaded around the player, so exit scans are
-position-dependent — and the seek-and-remember answer (kolbot's
-moveToExit shape once ExitMemory is warm); the navigation diagnosis
-refuting "the bot has no readable map" with evidence
-(`docs/plans/2026-08-03-m6-countess/navigation-diagnosis.md`); T69's
-calibrations incl. HALLS_OF_PAIN=123 read live against classic lore.
-Countess identity pinned: kind 734, unique_no 6. OPEN observations for
-later, logged in drill-log + performance-notes: the bot IGNORED a
-dropped Thul rune on Cellar 4 (traverse has no pickup logic — the
-prime suspect; decide opportunistic-collect vs by-design before the
-first real farm run) and residual dithering/corner-walking (speed
-pass; capture a warm-descent trace first). 906 tests, ruff clean.)
-NEXT: **P4 implemented, gate pending (R219)** — `runs/countess.toml`,
-the `clear_countess` step (neighborhood clear via composed
-ClearRadiusStep; atlas-derived north staging, blackboard-recorded;
-revive-brake advance; kill condition = pinned identity dead OR
-provably absent after the budgeted 15 s sweep, alive-and-unreachable
-a LOUD stop), the T70 Thul question RESOLVED as opportunistic-collect
-in traverse (shared mixin, combat-declined ticks only), and full sim
-coverage (countess + blinded-read scenarios; 921 tests, ruff clean).
-Gate artifacts in the plan dir: `p4-sim-trace-countess.md`,
-`p4-sim-trace-absent.md`, `p4-staging-derivation.md`.
+Updated: 2026-08-06. Branch `m6-countess`, pushed, **PR #2 open**
+(`https://github.com/Anthoussae/2026-pd2-offline-bot/pull/2`). 1000
+tests, ruff clean. The repo has no CI workflows — local validation is
+the gate.
 
-**R219 answered** (2026-08-05): screen-north convention CONFIRMED; the
-staging point DEFERRED to live judgment (coordinates on a grid were the
-wrong instrument — show the behavior, don't describe it); GO given.
+## Where things actually stand
 
-**T71 run 1 FAILED and the endgame is still unproven live.** It never
-reached Cellar 5: the run died at the SECOND transition, in the
-Forgotten Tower, clicking the Cellar 1 staircase 5 times from 11
-subtiles away without the area changing. Run 2 was cancelled before it
-started (debugging). What the investigation established, in order of
-confidence: the atlas and pathfinding are PROVEN INNOCENT (area 20 is a
-fully-recorded 19x19 walkable box; A* returns one leg; seed matches;
-routing was never even invoked because 11 <= click_range 18). The real
-defect is that **TraverseStep recorded 5 of ~150 decisions**, so the
-artifact could not say what the bot was doing — now fixed with a
-run-length-collapsed decision trace carrying position and
-distance-to-stairs. Two earlier diagnoses ("the fight owned the ticks",
-"the staircase was contested") are recorded as UNSUPPORTED, not fixed;
-the `exit_block_radius` rule they produced is kept on its own merits
-only. Leading untested hypothesis: `InteractObject` clicks the raw tile
-projection with no offset, while T63 measured tile clicks missing
-sprites ~29/30 — so a staircase click may be executing as a walk order.
-Evidence: `t71-tower-decision-log.md`, `navigation-diagnosis.md`
-addendum. NEXT LIVE ACT: re-run T71 and read the trace — it
-distinguishes the three candidate causes by the position column alone.
-Then P5 (battery; warm-descent measurement) and P6 (closeout). PR #1
-merged; branch `m6-countess` is the working line. 924 tests, ruff clean.
+**The bot can cross the template room.** T72 run 2 (2026-08-06): town →
+Black Marsh → Forgotten Tower → Tower Cellar 1, 51 s, clean `[CVRL]`,
+both transitions. The Forgotten Tower crossing itself was **4.3 s / 16
+ticks** — it had been 173 s / 184 ticks and a loud give-up.
+
+**Two things landed this session, and the second explains the first.**
+
+### 1. The run event log (new, `docs/architecture/run-log.md`)
+
+Every run writes `logs/runs/<stamp>-<runname>/events.jsonl` — schema'd,
+append-only, **always on**. Read it with:
+
+```bash
+~/.venvs/pd2bot/Scripts/python.exe -m pd2bot.runlog
+```
+
+Envelope: monotonic `seq`, ISO wall clock, seconds-since-start, area id
++ name. Every spatial field carries three frames — world, area-local
+(`local`), and character-relative (`rel`/`dist`/`bearing`, screen
+compass, R219). Event families: `tick` (with a
+snapshot/ladder/step/maintain timing split and hostile/ally/critter/item
+counts), `step.decision` (every decision, not just noted ones),
+`action.*`, `item.*`, `stash.*`, `npc.*`, `waypoint.*`,
+`area.transition`, `combat.write_off`, `chicken`, `death`, `refusal`,
+`reflex`. Rules: never raises, never blocks, never interprets, honest
+absence. ADR: `docs/adr/2026-08-05-run-event-log.md` (**proposed** —
+T72 run 2 is the evidence for accepting it).
+
+### 2. The phantom-hostile fix
+
+T71/T72 attacked two units 23 times each in a room the operator states
+never contains hostiles. They were **decorative bats** (kind 159,
+MonStats code `B9`). The bot's hostility test was "did it prove it is
+friendly?" — and real monsters do not prove that either: all 39
+hostiles in Cellar 1 lack the alignment stat exactly as the bats do.
+
+Discriminator, MEASURED (T74): **a combatant carries combat stats.**
+Fallen/Goatman/merc carry level, resistances, experience; the bat
+carries hp, max-hp and three animation rates and nothing else.
+`offsets.COMBAT_RATED_STATS` records the measurement;
+`Monster.combat_rated` and `UnitScan.critters` implement it —
+non-combatants are reported, never targeted. Backed by a futile-strike
+write-off in `necro.py` (`futile_strikes`) for the family nobody has met
+yet; both its signatures are transient, nothing is remembered across
+runs.
+
+## NEXT: the first live Countess run
+
+Everything upstream of the Countess is now live-proven. The endgame is
+not.
+
+- `runs/countess.toml` + `clear_countess` are **sim-proven only** — both
+  the seen-kill path and the blinded-read sweep. Never run against the
+  game.
+- R219 answered: screen-north confirmed, staging point (12531, 11036)
+  **deferred to live judgment** — the operator watches the approach and
+  says whether it reads right. That judgement is still outstanding.
+- Chicken **35** for a proper run (R212 Q8); 50 for cellar drills.
+- The run will be the first live exercise of `stash.*` and `npc.*`
+  (T72's preamble had nothing to deposit).
+
+Drill to write: T75, the full countess run. `drills/t71_countess.py`
+already does this — re-check its success criteria against review 001's
+lesson (it must not pass on a partial run) before launching.
+
+## After that
+
+- **P5 battery** — the warm-descent timing measurement is its first live
+  act, and it now has real instrumentation to measure with.
+- **Speed pass** — `docs/plans/2026-08-03-m6-countess/performance-notes.md`
+  holds the evidence, including the newest: ~3 of the Tower's 4.3 s is
+  the staircase retry window held while standing on the stairs. It
+  carries a warning not to "fix" it without a measurement, because the
+  eager version of that retry was T70's original bug.
+- **Deferred, deliberately**: enemy-death events (R220 Q6),
+  `item.accidental`, the collision recorder writing rooms under the
+  wrong area id during an area flip (seen in `area-020.json` and
+  `area-025.json`).
+
+## Hard-won facts (do not re-derive)
+
+- The atlas and A* are correct. Area 20 is a 19x19 walkable box; arrival
+  and staircase both known and walkable; A* returns one leg. Proven
+  twice — `navigation-diagnosis.md` and its T71 addendum.
+- Monsters re-roll **per game**; the map is fixed per
+  character+difficulty. "That room is empty" is not a property any run
+  can rely on — but the Forgotten Tower genuinely never has hostiles,
+  and the bats are what earlier runs were fighting.
+- Hell "immunity" is 100% resistance, **not** invulnerability: mixed
+  damage, poison-resistance pierce, and the merc's Pus Spitter casting
+  Lower Resist all break it. Nothing is durably unkillable.
+- Countess identity: kind 734, unique_no 6 (T68 + R216, in `offsets.py`).
+- `maps/exits.json` holds 11 staircases — the whole route both
+  directions, so warm descents never search.
+- Room2 preset/warp data only exists for rooms the client has loaded
+  around the player, so exit scans are position-dependent (T70).
+- Tomes 533/534 are UNMOVABLE like the Cube (the twice-hit misclick —
+  `docs/reviews/2026-08-05-tome-misclick-feedback.md`).
+- HALLS_OF_PAIN=123 read live; ARCANE_SANCTUARY=74 is still an
+  expectation.
+
+## Live protocol
+
+Bridge auto-starts at logon; if closed, `Start-ScheduledTask -TaskName
+pd2bot-bridge` and probe. Drills announce in GAME chat — launch only
+when the operator says they are tabbed in. Launch via queue files with a
+`.timeout` sidecar; wait with a background until-loop. Abort paths:
+`abort` in chat, ESC/Enter in the field, `tools/drill-cancel.ps1`, or
+the mouse. **The cancel file is sticky — clear it after use.**
+Partyline is ON.
