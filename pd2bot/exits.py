@@ -27,7 +27,9 @@ during a transition can still tear.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from pd2bot import offsets
 from pd2bot.memory import GameSession
@@ -182,3 +184,66 @@ def read_level_exits(session: GameSession) -> ExitScan | None:
         rooms_walked=rooms_walked,
         skipped=skipped,
     )
+
+
+class ExitMemory:
+    """Remembered exit positions, persisted like the atlas (M6 P2).
+
+    The live read (`read_level_exits`) is the authority — it works with
+    no memory at all. What this buys is the FIRST leg of a traversal in
+    an area whose exit was already discovered on an earlier run: the
+    step can start walking toward the remembered position immediately,
+    before deciding anything else, instead of standing still while a
+    mid-load read sorts itself out. Keyed by (seed, difficulty, area,
+    dest) — the atlas's own staleness guard: a re-rolled map changes the
+    seed and simply misses.
+
+    One JSON file for all seeds (`maps/exits.json` by default): exits
+    are a handful of coordinates per area, not room grids, and one file
+    keeps the save-data footprint obvious. Corrupt or unreadable files
+    load as empty rather than raising — this is a cache of rediscoverable
+    facts, never the truth.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._known: dict[str, tuple[int, int]] = {}
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            self._known = {
+                key: (int(value[0]), int(value[1]))
+                for key, value in raw.items()
+                if isinstance(value, (list, tuple)) and len(value) == 2
+            }
+        except (OSError, ValueError):
+            self._known = {}
+
+    @staticmethod
+    def _key(seed: int, difficulty: int, area: int, dest: int) -> str:
+        return f"{seed:08x}-d{difficulty}-a{area}-to-{dest}"
+
+    def recall(
+        self, seed: int, difficulty: int, area: int, dest: int
+    ) -> tuple[int, int] | None:
+        return self._known.get(self._key(seed, difficulty, area, dest))
+
+    def remember(
+        self,
+        seed: int,
+        difficulty: int,
+        area: int,
+        dest: int,
+        position: tuple[int, int],
+    ) -> None:
+        key = self._key(seed, difficulty, area, dest)
+        if self._known.get(key) == tuple(position):
+            return  # nothing new: no rewrite churn
+        self._known[key] = (int(position[0]), int(position[1]))
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(
+                json.dumps(self._known, indent=1, sort_keys=True),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass  # a cache that cannot save is still a working cache

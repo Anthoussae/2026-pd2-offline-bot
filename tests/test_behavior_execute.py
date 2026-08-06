@@ -435,3 +435,13 @@ def test_a_refused_park_is_paced_not_retried_at_tick_rate(monkeypatch):
     clock.advance(2.5)
     executor.maintain()
     assert len(state["switches"]) == attempts + 1  # one paced retry
+
+
+def test_interact_object_clicks_plain_left_no_shift(monkeypatch):
+    from pd2bot.behavior.actions import InteractObject
+
+    executor, gated, walked, state = make(monkeypatch)
+    executor.execute(InteractObject((5300, 5700)))
+    assert gated.world_clicks == [((5300, 5700), "left", False)], (
+        "a staircase click must be a bare left click — SHIFT would attack"
+    )

@@ -1706,3 +1706,124 @@ def test_no_ring_is_cached_until_an_area_was_available_to_filter():
         left + 4 <= x < right - 4 and top + 4 <= y < bottom - 4
         for x, y in points
     ), "a seam point survived the late filter"
+
+
+# -- the traverse step (M6 P2) -------------------------------------------------
+
+
+def _exit_scan(area, exits):
+    from pd2bot.exits import ExitScan, LevelExit
+
+    return ExitScan(
+        exits=tuple(LevelExit(position=p, dest_area=d) for p, d in exits),
+        area=area,
+    )
+
+
+def traversing(clock, *, here=20, dest=21, exit_pos=(1060, 1000),
+               recall=None, combat=None):
+    """A traverse step over a scripted world: clicking the staircase
+    flips the area after a beat, like the client's walk + load."""
+    world = {"area": here, "pos": HOME, "flip_at": None}
+    remembered = []
+    svc = services(
+        clock,
+        combat=combat if combat is not None else StubCombat(),
+        level_exits=lambda: _exit_scan(
+            world["area"], [(exit_pos, dest)] if world["area"] == here else []
+        ),
+        exit_recall=(lambda a, d: recall) if recall is not None else None,
+        exit_remember=lambda a, d, p: remembered.append((a, d, p)),
+    )
+    step = make_step("traverse", svc, {"dest": dest})
+
+    def react(action):
+        from pd2bot.behavior.actions import InteractObject
+
+        if isinstance(action, MoveTo):
+            world["pos"] = action.target
+        if isinstance(action, InteractObject):
+            world["flip_at"] = clock() + 1.0  # the walk + load beat
+
+    executor = RecordingExecutor(clock=clock, on_execute=react)
+    ctx = context(executor)
+
+    def tick():
+        if world["flip_at"] is not None and clock() >= world["flip_at"]:
+            world["area"] = dest
+            world["flip_at"] = None
+        return step.step(snap(pos=world["pos"], area=world["area"]), ctx)
+
+    return step, world, remembered, executor, ctx, tick
+
+
+def test_traverse_walks_clicks_and_proves_arrival_by_area_id():
+    from pd2bot.behavior.actions import InteractObject
+
+    clock = Clock()
+    step, world, remembered, executor, ctx, tick = traversing(clock)
+    outcome = None
+    for _ in range(60):
+        outcome = tick()
+        clock.advance(0.5)
+        if outcome.done:
+            break
+    assert outcome is not None and outcome.done
+    assert "arrived in Tower Cellar Level 1" in outcome.note
+    assert ctx.notes["arrival"] == world["pos"]
+    moves = [a for a in executor.actions if isinstance(a, MoveTo)]
+    assert moves, "it never walked toward the exit"
+    clicks = [a for a in executor.actions if isinstance(a, InteractObject)]
+    assert len(clicks) == 1 and clicks[0].position == (1060, 1000)
+    # First discovery is written back to the memory.
+    assert remembered == [(20, 21, (1060, 1000))]
+
+
+def test_traverse_starts_from_memory_and_reclicks_are_paced():
+    from pd2bot.behavior.actions import InteractObject
+
+    clock = Clock()
+    # Memory already knows the exit; put the player right beside it so
+    # the first tick clicks. The scripted flip is DISABLED (flip_at
+    # cleared each react) by recreating the world without a flip: here
+    # we just never advance past flip because the click sets flip 1.0s
+    # out and we tick faster than that at first.
+    step, world, remembered, executor, ctx, tick = traversing(
+        clock, exit_pos=(1004, 1000), recall=(1004, 1000)
+    )
+    tick()  # click 1 (from memory, no walking needed)
+    clicks = lambda: [  # noqa: E731
+        a for a in executor.actions
+        if isinstance(a, InteractObject)
+    ]
+    assert len(clicks()) == 1
+    clock.advance(1.0)  # still inside exit_retry_s
+    world["flip_at"] = None  # the transition never resolves this time
+    tick()
+    assert len(clicks()) == 1, "re-clicked inside the retry window"
+    clock.advance(5.0)
+    tick()
+    assert len(clicks()) == 2, "the paced re-click never came"
+
+
+def test_traverse_raises_loudly_when_no_exit_leads_there():
+    clock = Clock()
+    step, world, remembered, executor, ctx, tick = traversing(clock, dest=99)
+    # The scan answers for area 20 but its only exit leads to 21, not 99:
+    # the run file asked for a transition this map does not have.
+    step.services.level_exits = lambda: _exit_scan(20, [((1060, 1000), 21)])
+    with pytest.raises(NavigationError, match="no exit"):
+        tick()
+
+
+def test_traverse_lets_the_fight_own_the_tick():
+    clock = Clock()
+    fighting = StubCombat(script=[MoveTo((1002, 1002))])  # one combat decision
+    step, world, remembered, executor, ctx, tick = traversing(
+        clock, combat=fighting
+    )
+    outcome = tick()
+    assert outcome.acted and not outcome.done
+    # The one action sent was the COMBAT's, not a traverse leg (the
+    # combat move and a route leg differ: the leg aims at the exit).
+    assert executor.actions == [MoveTo((1002, 1002))]

@@ -54,6 +54,20 @@ class CastAtPoint:
 
 
 @dataclass(frozen=True)
+class InteractObject:
+    """Left-click a world object — a staircase, a level-exit doorway.
+
+    The M6 traversal gesture (R212 Q3: cellar connections are a single
+    click). Distinct from `MoveTo` because the click must land ON the
+    object's position (the client walks the character there and takes
+    the transition), and distinct from `AttackUnit` because SHIFT would
+    turn it into an attack on the spot.
+    """
+
+    position: tuple[int, int]
+
+
+@dataclass(frozen=True)
 class ParkSkill:
     """A verified right-skill SWITCH with no cast (M6 P3).
 

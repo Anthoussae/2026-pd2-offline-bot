@@ -30,7 +30,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from pd2bot import offsets
-from pd2bot.behavior.actions import MoveTo, PickUpItem
+from pd2bot.behavior.actions import InteractObject, MoveTo, PickUpItem
 from pd2bot.behavior.engine import EngineContext, StepOutcome
 from pd2bot.behavior.run import ParamSpec, StepRegistry, StepSpec
 from pd2bot.items import CarriedItems
@@ -406,6 +406,17 @@ class RunServices:
     # the step finishes immediately rather than guessing.
     survey_targets: Callable[[], list[tuple[int, int]]] | None = None
     survey_coverage: Callable[[], str] | None = None
+    # -- the traverse step (M6 P2) -----------------------------------------
+    #
+    # Wired closures over the exit reader and the exit memory, so the
+    # step never learns what a GameSession or an ExitMemory is (the
+    # survey-closure treatment). None = unavailable in this environment;
+    # the step waits on the reader and treats missing memory as cold.
+    level_exits: Callable[[], object | None] | None = None  # -> ExitScan
+    exit_recall: Callable[[int, int], tuple[int, int] | None] | None = None
+    exit_remember: (
+        Callable[[int, int, tuple[int, int]], None] | None
+    ) = None
     # -- the route service (R181) ------------------------------------------
     #
     # `route_to(target)` plans A* over the navigator's grid (atlas + live
@@ -1990,6 +2001,163 @@ class SurveyStep(_PickupMixin):
 # -- the registry ---------------------------------------------------------------
 
 
+@dataclass
+class TraverseStep(_PickupMixin):
+    """Walk out of the current area into `dest` through its staircase.
+
+    The M6 traversal gesture (R212 Q3): every connection on the Countess
+    route — Black Marsh into the Forgotten Tower, each cellar into the
+    next — is a single-click warp. The step routes to the exit via the
+    atlas in capped legs (the ladder gets its look between them), clicks
+    the staircase, and then trusts NOTHING about the click: arrival is
+    proven by the area id reading `dest`, the waypoint.py discipline.
+
+    The exit position comes from memory first (`ExitMemory`, recorded on
+    first discovery), refined by the live RoomTile read when it answers
+    (`exits.read_level_exits` — the authority; the memory only buys the
+    first legs while a mid-load read sorts itself out). A readable scan
+    that shows NO exit toward `dest` is a loud `NavigationError`: the run
+    file asked for a transition this map does not have, and walking
+    hopefully is the failure mode this project never picks.
+
+    Combat en route belongs to the posture (M6 P3): the module's
+    `engage` owns any tick it wants — brisk makes that "only what
+    obstructs the corridor" — and this step simply does not advance on
+    those ticks (the approach-refusal pattern).
+    """
+
+    services: RunServices = None  # type: ignore[assignment]
+    dest: int = 0
+    posture: str | None = None
+    name: str = "traverse"
+    # Close enough to click the staircase: safely on screen (T50: the
+    # nearest screen edge is 19-38 subtiles out) and inside the
+    # loaded-room horizon, so the click projects and resolves.
+    click_range: int = 18
+    # A click that produced no area change within this long earns a
+    # re-click (loads take a beat; the click may also have been eaten).
+    exit_retry_s: float = 5.0
+    # Re-clicks are BOUNDED: past this, the staircase is not taking us
+    # anywhere and the run must say so loudly rather than click forever.
+    click_budget: int = 5
+    _posture_applied: bool = False
+    _exit: tuple[int, int] | None = None
+    _from_memory: bool = False
+    _clicked_at: float | None = None
+    _clicks: int = 0
+    _announced: bool = False
+
+    def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
+        if self.posture is not None and not self._posture_applied:
+            set_posture = getattr(self.services.combat, "set_posture", None)
+            if set_posture is not None:
+                set_posture(self.posture)
+                self.services.narrate(f"combat posture: {self.posture}")
+            self._posture_applied = True
+
+        # Arrival first: the only exit condition, proven by the area id.
+        if snap.area is not None and snap.area.level_no == self.dest:
+            arrival = snap.player.position if snap.player is not None else None
+            if arrival is not None:
+                ctx.notes["arrival"] = arrival
+            name = offsets.AREA_NAMES.get(self.dest, f"area {self.dest}")
+            return StepOutcome(
+                done=True, acted=True, note=f"arrived in {name} at {arrival}"
+            )
+        if snap.player is None or snap.area is None:
+            # Mid-load — very likely OUR transition resolving. A declared
+            # wait: deliberate, and still bounded by wait_bail_s.
+            return StepOutcome(done=False, waiting=True)
+        if self.recover_panels(snap):
+            return StepOutcome(done=False, acted=True, note="closed a stray panel")
+
+        here = snap.area.level_no
+        # The fight owns any tick it claims; the posture decides how much
+        # fighting that is (brisk: only what obstructs the corridor).
+        action = self.services.combat.engage(snap, ctx)
+        if action is not None:
+            self.send(ctx, action)
+            return StepOutcome(done=False, acted=True)
+
+        self._locate_exit(here)
+        if self._exit is None:
+            # No memory and the live read has not answered yet (mid-load
+            # scan): wait the tick out rather than walk anywhere blind.
+            return StepOutcome(done=False, waiting=True)
+        if not self._announced:
+            self.services.narrate(
+                f"traverse: exit toward "
+                f"{offsets.AREA_NAMES.get(self.dest, self.dest)} at "
+                f"{self._exit}"
+                + (" (remembered)" if self._from_memory else "")
+            )
+            self._announced = True
+
+        origin = snap.player.position
+        now = self.services.clock()
+        if _chebyshev(origin, self._exit) <= self.click_range:
+            if (
+                self._clicked_at is not None
+                and now - self._clicked_at < self.exit_retry_s
+            ):
+                # Clicked; the walk-to-stairs + load is resolving.
+                return StepOutcome(done=False, waiting=True)
+            if self._clicks >= self.click_budget:
+                raise NavigationError(
+                    f"clicked the staircase at {self._exit} {self._clicks} "
+                    f"times without the area changing from {here} — the "
+                    "transition is not taking; giving the run up loudly"
+                )
+            self._clicks += 1
+            self._clicked_at = now
+            self.send(ctx, InteractObject(self._exit))
+            return StepOutcome(
+                done=False, acted=True,
+                note=f"clicked the staircase (attempt {self._clicks})",
+            )
+
+        leg = _route_leg(self.services, origin, self._exit)
+        if leg is None:
+            raise NavigationError(
+                f"no route from {origin} to the exit at {self._exit} in "
+                f"area {here} — the atlas has no path (survey the area, "
+                "or the exit read misfired)"
+            )
+        self.send(ctx, MoveTo(leg))
+        return StepOutcome(done=False, acted=True)
+
+    def _locate_exit(self, here: int) -> None:
+        """Fill `_exit`: memory immediately, the live read when it answers.
+
+        The live read REPLACES a remembered position when they disagree
+        (the memory is a cache of this very read), and its answer is also
+        written back so the next run starts warm.
+        """
+        if self._exit is None and self.services.exit_recall is not None:
+            remembered = self.services.exit_recall(here, self.dest)
+            if remembered is not None:
+                self._exit = remembered
+                self._from_memory = True
+        if self._exit is None or self._from_memory:
+            reader = self.services.level_exits
+            scan = reader() if reader is not None else None
+            if scan is not None and getattr(scan, "area", None) == here:
+                found = scan.toward(self.dest)
+                if found:
+                    self._exit = found[0].position
+                    self._from_memory = False
+                    if self.services.exit_remember is not None:
+                        self.services.exit_remember(here, self.dest, self._exit)
+                elif not self._from_memory:
+                    raise NavigationError(
+                        f"area {here} has no exit toward area {self.dest} "
+                        f"({len(scan.exits)} exit(s) read: "
+                        f"{[(e.dest_area, e.position) for e in scan.exits]}) "
+                        "— the run file asks for a transition this map "
+                        "does not have"
+                    )
+
+
 def _checked_posture(services: RunServices, name: str | None) -> str | None:
     """Validate a step's posture name at BUILD time (M6 P3).
 
@@ -2046,6 +2214,20 @@ def build_registry(services: RunServices) -> StepRegistry:
                 radius=p["radius"],
                 centre_note=p["center"],
                 patrol=p["patrol"],
+                posture=_checked_posture(services, p["posture"]),
+            ),
+        )
+    )
+    registry.register(
+        StepSpec(
+            "traverse",
+            params=(
+                ParamSpec("dest", int),
+                ParamSpec("posture", str, required=False, default=None),
+            ),
+            factory=lambda p: TraverseStep(
+                services,
+                dest=p["dest"],
                 posture=_checked_posture(services, p["posture"]),
             ),
         )

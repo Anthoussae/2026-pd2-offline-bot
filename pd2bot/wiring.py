@@ -46,6 +46,7 @@ from pd2bot.behavior.runner import BehaviorRunner
 from pd2bot.behavior.steps import RunServices, build_registry
 from pd2bot.chat import Chat
 from pd2bot.cycle import GameCycle
+from pd2bot.exits import ExitMemory, read_level_exits
 from pd2bot.input import GatedInput
 from pd2bot.items import read_carried_items
 from pd2bot.mapstore import MapStore
@@ -401,11 +402,34 @@ class LiveBot:
             escape_stamp["at"] = self.clock()
             self.town.close_panels()
 
+        # The traverse services (M6 P2): the live exit reader, and the
+        # exit memory keyed by (seed, difficulty, area, dest) — the seed
+        # read live per call so the closures never go stale across games.
+        exit_memory = ExitMemory(self.store.root / "exits.json")
+
+        def exit_recall(area: int, dest: int) -> tuple[int, int] | None:
+            seed = read_map_seed(session)
+            if seed is None:
+                return None
+            return exit_memory.recall(seed, self.difficulty, area, dest)
+
+        def exit_remember(
+            area: int, dest: int, position: tuple[int, int]
+        ) -> None:
+            seed = read_map_seed(session)
+            if seed is not None:
+                exit_memory.remember(
+                    seed, self.difficulty, area, dest, position
+                )
+
         services = RunServices(
             run_preamble=self.town.run_preamble,
             travel_to=self.waypoint.take,
             combat=combat,
             postures=frozenset(self.class_config.postures),
+            level_exits=lambda: read_level_exits(session),
+            exit_recall=exit_recall,
+            exit_remember=exit_remember,
             pickit=self.pickit,
             carried=lambda: read_carried_items(session, with_sockets=False),
             clock=self.clock,

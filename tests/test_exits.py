@@ -194,3 +194,31 @@ def test_none_when_not_in_a_game():
     mem = FakeMemory()
     mem.write(CLIENT_BASE + offsets.PLAYER_UNIT_PTR, u32(0))
     assert read_level_exits(FakeSession(mem)) is None
+
+
+# -- the exit memory (M6 P2) ---------------------------------------------------
+
+
+def test_exit_memory_round_trips_and_survives_reload(tmp_path):
+    from pd2bot.exits import ExitMemory
+
+    path = tmp_path / "exits.json"
+    memory = ExitMemory(path)
+    assert memory.recall(0x4E52715F, 2, 20, 21) is None  # cold
+    memory.remember(0x4E52715F, 2, 20, 21, (12635, 11061))
+    assert memory.recall(0x4E52715F, 2, 20, 21) == (12635, 11061)
+    # A fresh instance (next session) reads the same answer from disk.
+    assert ExitMemory(path).recall(0x4E52715F, 2, 20, 21) == (12635, 11061)
+    # A different seed misses — the atlas's own staleness guard.
+    assert ExitMemory(path).recall(0x12345678, 2, 20, 21) is None
+
+
+def test_exit_memory_loads_corrupt_files_as_empty(tmp_path):
+    from pd2bot.exits import ExitMemory
+
+    path = tmp_path / "exits.json"
+    path.write_text("{not json", encoding="utf-8")
+    memory = ExitMemory(path)  # must not raise: a cache, not the truth
+    assert memory.recall(1, 2, 3, 4) is None
+    memory.remember(1, 2, 3, 4, (10, 20))  # and it heals on first write
+    assert ExitMemory(path).recall(1, 2, 3, 4) == (10, 20)

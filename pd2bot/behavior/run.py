@@ -150,6 +150,17 @@ def default_registry() -> StepRegistry:
             ),
         )
     )
+    registry.register(
+        # Must stay in step with build_registry's copy (the standing
+        # rule): the linter validates run files against THIS vocabulary.
+        StepSpec(
+            "traverse",
+            params=(
+                ParamSpec("dest", int),
+                ParamSpec("posture", str, required=False, default=None),
+            ),
+        )
+    )
     registry.register(StepSpec("pickup"))
     # Must stay in step with build_registry's copy (same rule as
     # clear_radius's params above): this schema is what the run linter

@@ -107,3 +107,32 @@ sim-tested (scripted world with a fake exit + area flip) and
 live-proven by T-descent reaching Cellar 5; exit store persisting;
 Countess's super-unique id captured if she was seen (else deferred to
 P5's first full run); review gate answered.
+
+## Implementation Result (code half — live half pending R217)
+
+Status: code half done; calibrations + drills await the user's go
+Completed (code): 2026-08-05
+Commit: pending
+
+- Changed: `actions.py` (`InteractObject` — the single-click staircase
+  gesture); `execute.py` (plain left click, no SHIFT, cast-in-flight
+  respected); `exits.py` (`ExitMemory` — persisted exit positions keyed
+  (seed, difficulty, area, dest) in `maps/exits.json`, corrupt-safe);
+  `steps.py` (`TraverseStep`: posture on first tick, arrival proven by
+  area id only, combat owns any tick it claims, exit from memory
+  first + live RoomTile read as authority with write-back, route legs
+  via `_route_leg`, paced + bounded staircase re-clicks, loud
+  `NavigationError` on no-exit / no-route; registry entries in both
+  vocabularies); `wiring.py` (exit closures, seed read live per call).
+- Validated: **899 tests** (7 new: traverse walk/click/arrival with
+  blackboard + memory write-back, memory-first + paced re-clicks,
+  loud no-exit, combat-owns-tick, exit-memory round-trip/corrupt-file,
+  InteractObject click shape), ruff clean.
+- Early live wins banked out of order (T68, read-only, 2026-08-05):
+  the exit read proven in Cellar 5 (area 25 named, staircase to 24
+  located); Countess candidate kind 734 / unique_no 6 pending the
+  user's eye (R216); the wName heuristic found dead and reworked.
+- Remaining for the live half: the calibration battery (act tabs II/V,
+  Black Marsh / Arcane Sanctuary / Halls of Pain rows), T-exit-read in
+  Black Marsh (Q1 area-id asserts), T-traverse-one, T-descent — all
+  under the R217 standing mandate; then this phase's review gate.

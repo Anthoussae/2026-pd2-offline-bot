@@ -39,6 +39,7 @@ from pd2bot.behavior.actions import (
     CastSelf,
     DrinkPotion,
     GiveMercPotion,
+    InteractObject,
     MoveTo,
     ParkSkill,
     PickUpItem,
@@ -262,6 +263,16 @@ class GameActionExecutor:
             # of melee range walks us into the pack instead of striking.
             self.gated.click_world(*action.position, stand_still=True)
             self._record(action, f"unit {action.unit_id} at {action.position}")
+            return
+
+        if isinstance(action, InteractObject):
+            # A plain left click at the object's position: the client walks
+            # the character to it and interacts (a staircase transitions).
+            # No SHIFT (that would attack the spot), and the arrival is
+            # never trusted from the click — the traverse step polls the
+            # area id, the waypoint.py discipline.
+            self.gated.click_world(*action.position)
+            self._record(action, f"object at {action.position}")
             return
 
         if isinstance(action, PickUpItem):
