@@ -112,3 +112,24 @@ posture brushing past non-blockers — is the real baseline for the
 any optimization work. Watch also: `reflex upkeep fired 25x` mid-seek
 (wall maintenance churn while walking through hostile rooms — the P3
 urgency hold working, but worth pricing).
+
+## User observations from the descent run (2026-08-05, from the chair)
+
+1. **A dropped Thul rune on Cellar 4's floor was ignored.** Almost
+   certainly not a pickit or perception failure: the `traverse` step
+   has no pickup logic at all — collection belongs to `clear_radius`
+   and `pickup`, and the descent run file contains neither. A wanted
+   rune on a traversal floor is invisible to *behavior* even while
+   perception lists it. For the Countess run this matters: runes are
+   the point. Options when picked up (P4 or the optimization pass):
+   give traverse the clearance's opportunistic-collect (bounded by
+   `pickup_radius`, only when no hostile owns the tick), or declare
+   traversal floors no-pickup by design and accept the cost. The first
+   matches the user's expectations; investigate before choosing.
+2. **The bot still dithers and walks into corners** at times. To
+   troubleshoot when speed work begins — suspects, in order: seek legs
+   aiming at room centres that sit near walls (nearest_walkable
+   correction produces corner targets), combat drift's lateral steps in
+   tight cellar corridors, and CastInFlight contention stealing
+   movement ticks. First move: capture a warm-descent trace and read
+   the MoveTo targets against the atlas.
