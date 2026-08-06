@@ -1419,10 +1419,54 @@ class TownLayer:
     # `send_until`: a single click that goes missing must never be read as a
     # fact about the game.
 
+    def _cursor_is_armed(self) -> bool:
+        """Is something on the cursor that will eat the next click?
+
+        Reads the drag slot (`Inventory.pCursorItem`, R52 drill C). It
+        catches a half-completed pick-up; it does NOT catch a cursor
+        armed by a USED item (the identify scroll), which is a mode
+        rather than a held unit — hence `_clear_cursor` below, which
+        does not depend on being able to see the problem.
+        """
+        try:
+            return self._carried(self.session).cursor_item is not None
+        except Exception:  # noqa: BLE001 - a failed read must not halt a step
+            return False
+
+    def _clear_cursor(self) -> None:
+        """Blind recovery between failed transfer attempts (T70 run 2).
+
+        A right-click that USED an item instead of moving it leaves the
+        cursor armed — the identify scroll waiting for a target — and
+        every subsequent click feeds that instead of the stash. The loop
+        then sees "the item never left" over and over and reports a full
+        stash, which is how one misclick came to look like a resource
+        problem twice (R112/R113, then T70 run 2).
+
+        ESC clears an armed cursor. It also closes the stash, so the
+        panel is reopened afterwards — the retry costs a couple of
+        seconds, and it is spent only when something already refused.
+        Verified by its effect the way every other town send is: the
+        stash is reopened through the same `open_object_panel` that
+        proves the panel edge.
+        """
+        self.close_panels()
+        self._sleep(self.config.panel_settle_s)
+        self.open_object_panel(offsets.OBJ_STASH, "the stash", offsets.UI_STASH)
+
     def _attempt_deposit(self, item: CarriedItem, *, attempts: int, verify_s: float) -> bool:
         """Shift+right-click one item toward the stash. Did it leave?"""
-        for _ in range(attempts):
+        for attempt in range(attempts):
             self._check_stop()
+            if attempt:
+                # Every retry starts from a clean cursor. Unconditional
+                # rather than gated on `_cursor_is_armed`, because the
+                # state that matters most (an armed identify cursor) is
+                # exactly the one that read cannot see — and a retry that
+                # repeats the failed click unchanged is not a retry at
+                # all, the rule this project keeps relearning (object
+                # clicks R161, patrol points, pathing R162).
+                self._clear_cursor()
             self.panel.click(
                 offsets.UI_STASH, *self._grid_pixel(item.position),
                 button="right", shift=True,
@@ -2141,20 +2185,40 @@ class TownLayer:
         self.close_panels()
 
         if refused:
-            # Survived both tabs, so the tab is not the explanation any more.
-            # The message names all three remaining causes rather than
-            # guessing: the materials tab cannot be counted (T45), so "which
-            # container is full" is not a question this layer can answer.
-            self._alert(
-                f"{len(refused)} item(s) would not go into the stash on "
-                "EITHER tab — a stash is full (the materials tab cannot be "
-                "measured, so it may be that one), or the grid calibration "
-                "is wrong"
-            )
-            raise StashFull(
+            # Survived both tabs — but "refused" is NOT "the stash is
+            # full", and asserting that cost two live sessions (R112 and
+            # T70 run 2, both a misclicked tome). The evidence is right
+            # here and was never consulted: if other items deposited in
+            # this same visit, the stash plainly had room, so the item is
+            # the problem, not the container. This is the belt-full
+            # lesson (T56/T57) applied to the stash, fifteen days late —
+            # there, "would not come up after 3 clicks" was diagnosed as
+            # a full belt until it was evidence-checked against live
+            # counts, and the same shape sat here untouched.
+            kinds = sorted({i.kind for i in refused})
+            detail = (
                 f"{len(refused)} item(s) left in the inventory after both "
-                f"deposit passes (kinds {sorted({i.kind for i in refused})})"
+                f"deposit passes (kinds {kinds})"
             )
+            if report.deposited:
+                # Not a full stash: things went in. Notice and continue —
+                # the run is not worth ending over one stubborn item, the
+                # policy the user set for the belt-short case (R208).
+                self._alert(
+                    f"{len(refused)} item(s) (kinds {kinds}) would not "
+                    f"stash, but {report.deposited} other item(s) did — so "
+                    "the stash has room and these items are the problem "
+                    "(a right-click side effect, or a grid mis-read). "
+                    "Leaving them in the inventory and carrying on."
+                )
+                report.log.append(f"stash: {detail} — carried on")
+                return
+            self._alert(
+                f"{detail}, and NOTHING deposited this visit — a stash is "
+                "full (the materials tab cannot be measured, so it may be "
+                "that one), or the grid calibration is wrong"
+            )
+            raise StashFull(detail)
 
     def press_inventory_open(self) -> None:
         """Open the inventory panel, verified, retried like every other send."""

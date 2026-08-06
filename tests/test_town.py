@@ -126,6 +126,11 @@ class Town:
         self.charsi_present = True
         self.heal_on_interact = True
         self.deposit_works = True
+        # Kinds the game refuses to stash while accepting everything else
+        # — the T70 run 2 shape, where ONE item stuck and the layer called
+        # it a full stash. `deposit_works = False` is the all-or-nothing
+        # version and cannot express it.
+        self.refuse_kinds: set[int] = set()
         # A world click on an object that does NOT open its panel — the
         # live 2026-08-01 failure, which the fake could not express.
         self.object_click_works = True
@@ -314,6 +319,8 @@ class Town:
         elif panel_id == offsets.UI_STASH and shift and button == "right":
             index, item = self._item_at_pixel(sx, sy)
             if item is None or not self.deposit_works:
+                return
+            if item.kind in self.refuse_kinds:
                 return
             # The GAME decides what the materials tab accepts — that is the
             # whole point of R75's design, so the fake refuses the rest
@@ -2344,3 +2351,84 @@ def test_walking_near_without_a_minimum_is_unchanged(town):
     town.pos = target
     layer(town)._walk_near(target)
     assert town.walked == []
+
+
+# -- the tome misclick and the stash-full misdiagnosis (T70 run 2) ------------
+
+
+def test_tomes_are_never_right_clicked():
+    """A tome's plain right-click USES it (identify cursor, or a town
+    portal), and a lost SHIFT turns the transfer gesture into exactly
+    that — twice now, on the same item (R112/R113, then T70 run 2). The
+    settle made the race rare; this makes the hazard absent, the way the
+    Cube's has always been."""
+    for kind in (
+        offsets.TOME_OF_IDENTIFY_KIND,
+        offsets.TOME_OF_TOWN_PORTAL_KIND,
+        offsets.CUBE_KIND,
+    ):
+        assert not loot(1, (0, 0), kind=kind).is_movable
+
+
+def test_a_tome_is_left_alone_and_never_clicked(town):
+    town.inventory = [
+        loot(1, (0, 0), kind=offsets.TOME_OF_IDENTIFY_KIND),
+        loot(2, (2, 0), kind=522),
+    ]
+    full_belt(town)
+    report = PreambleReport()
+    layer(town).manage_inventory(report)
+    # The ordinary item stashed; the tome stayed, untouched.
+    assert [i.unit_id for i in town.inventory] == [1]
+    tome_pixel = cell_pixel((0, 0))
+    assert all(
+        (c[1], c[2]) != tome_pixel
+        for c in town.panel_clicks
+        if c[0] == offsets.UI_STASH
+    ), "the tome was clicked at all — the one thing that must never happen"
+
+
+def test_one_stubborn_item_does_not_end_the_run_when_others_stashed(town):
+    """The evidence was always there and was never consulted: if other
+    items went in, the stash HAS room, so a refusal is about the item.
+    Notice and continue (the R208 belt-short policy), never StashFull."""
+    town.inventory = [loot(1, (0, 0), kind=522), loot(2, (2, 0), kind=523)]
+    town.refuse_kinds = {523}  # one item the game will not take
+    full_belt(town)
+    report = PreambleReport()
+
+    layer(town).manage_inventory(report)  # must NOT raise
+
+    assert report.deposited == 1
+    assert [i.unit_id for i in town.inventory] == [2]
+    assert any("carried on" in line for line in report.log)
+    assert any(
+        "other item(s) did" in a and "stash has room" in a for a in town.alerts
+    ), f"the alert must say the stash is not the problem: {town.alerts}"
+
+
+def test_nothing_deposited_at_all_is_still_a_full_stash(town):
+    """The genuine case keeps its loud halt: no evidence of room, so the
+    container really is a candidate."""
+    town.inventory = [loot(1, (0, 0), kind=522)]
+    town.deposit_works = False
+    full_belt(town)
+    with pytest.raises(StashFull, match="both deposit passes"):
+        layer(town).manage_inventory(PreambleReport())
+    assert any("NOTHING deposited this visit" in a for a in town.alerts)
+
+
+def test_a_retry_clears_the_cursor_before_re_clicking(town):
+    """A retry that repeats the same click unchanged is not a retry: an
+    armed cursor eats every one of them. The second attempt must close
+    and reopen the panel first (ESC clears the cursor)."""
+    town.inventory = [loot(1, (0, 0), kind=522)]
+    town.deposit_works = False
+    full_belt(town)
+    with pytest.raises(StashFull):
+        layer(town).manage_inventory(PreambleReport())
+    # The stash chest was clicked more than once: opened, and reopened
+    # after the recovery.
+    assert town.world_clicks.count(STASH_POS) > 1, (
+        "the panel was never reopened, so no retry ever cleared the cursor"
+    )

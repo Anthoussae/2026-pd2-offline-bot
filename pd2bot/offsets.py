@@ -700,7 +700,30 @@ GOLD_KIND = 538
 # future change ever makes the cube movable again, it still must not be
 # droppable or depositable without a fresh user decision.
 CUBE_KIND = 564
-UNMOVABLE_KINDS = frozenset({CUBE_KIND})
+# The TOMES join it, and the reason is the same one the paragraph above
+# invited ("add them as they are met, with the reason") — met twice now,
+# on the same item, fifteen days apart:
+#
+#   R112/R113 (2026-07-31): a Tome of Identify would not stash. The user
+#     watched it happen: the right-click USED the tome instead of moving
+#     it, the identify cursor then ate every retry, and the loop reported
+#     a full stash. Fixed as a same-frame modifier RACE (_MODIFIER_SETTLE_S).
+#   T70 run 2 (2026-08-05): the identical failure, on the identical item,
+#     with the settle in place. A settle makes the race rare; rare is not
+#     never, and 400+ deposits later one attempt lost it again.
+#
+# So the settle was the right fix for the wrong layer. A tome's plain
+# right-click ARMS A CURSOR (identify) or OPENS A PORTAL (town portal) —
+# side effects that outlive the click and poison everything after it —
+# which is exactly the Cube's property, not a potion's. The Cube is not
+# right-clicked at all, and neither are these. Both tomes are useful
+# items worth keeping in the inventory anyway (2 slots), so nothing is
+# lost by never transferring them.
+TOME_OF_IDENTIFY_KIND = 534  # R112 + T38 (72 charges)
+TOME_OF_TOWN_PORTAL_KIND = 533  # T38 (64 charges)
+UNMOVABLE_KINDS = frozenset(
+    {CUBE_KIND, TOME_OF_IDENTIFY_KIND, TOME_OF_TOWN_PORTAL_KIND}
+)
 
 # --- Town NPCs and objects (Act 1, M5) --------------------------------------
 #
