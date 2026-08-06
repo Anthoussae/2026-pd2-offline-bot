@@ -142,6 +142,30 @@ class PickUpItem:
     kind: int | None = field(default=None, compare=False)
 
 
+# Where an item is actually CLICKABLE, relative to the projection of its
+# ground tile — measured by T63 (2026-08-03), the drill that ended a
+# five-drill hunt: position clicks DO pick items (no hover state needed;
+# the hover pointer was a red herring for clicks), but the sprite draws
+# UPWARD from its tile, so the tile projection itself misses ~29 times in
+# 30 (T57). T63's direct-click matrix landed at (0, -28) with labels off
+# and (-16, -40) with labels on. One offset per retry, best guesses
+# first: the schedule is what makes retry N differ from retry N-1.
+#
+# It lives HERE rather than in the executor because `PickUpItem.attempt`
+# is an index into it — the action's own contract — and because the step
+# that writes an item off has to report WHICH aim points were spent
+# (P1 of the pickup-reliability plan). A schedule only the executor
+# could see made "all 8 attempts failed" an unanswerable statement.
+PICKUP_AIM_POINTS: tuple[tuple[int, int], ...] = (
+    (0, -28), (-16, -40), (16, -28), (0, -16), (-16, -28), (0, -40),
+    (16, -40), (0, -48),  # the LABEL band (T65 v4): small classes —
+    # runes, gems, charms — are effectively label-clicked; their ground
+    # sprites survived 58-147 direct probes while both v4 hits landed
+    # at y=-48. Labels are ensured ON by the executor, so the tail can
+    # reach them.
+)
+
+
 Action = (
     DrinkPotion
     | GiveMercPotion

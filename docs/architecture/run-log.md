@@ -126,7 +126,20 @@ as "0 away".
 |---|---|---|
 | `item.dropped` | a **wanted** item is seen for the first time this run | `unit_id`, `item`, `item_kind`, `quality`, `sockets`, `rule`, `position` |
 | `item.collected` | a clicked item provably left the ground | `unit_id`, `item`, `potion`, `position`, `took_s`, `accidental` |
-| `item.abandoned` | an item is written off | `unit_id`, `item`, `reason`, `walks` |
+| `item.abandoned` | an item is written off | `unit_id`, `item`, `reason`, and then either `walks` (walk budget) or `clicks` + `aim_points` + `neighbours` + `position` (click budget) |
+
+`item.abandoned` covers **both** write-off paths. The walk-budget one
+("walks kept arriving short") has always fired; the **click**-budget one
+was silent until 2026-08-06, and its silence is why T71 run 4's thirteen
+misses — a Nef rune and a flawless emerald among them — could only be
+found by correlating `action.pickup_attempt` against `item.collected` by
+unit id in a throwaway script. Its `reason` mirrors the decision the
+step is making rather than second-guessing it: `clicks did not land`,
+`belt full for <type>`, or `inventory full (inferred from persistence)`.
+`aim_points` is the slice of `actions.PICKUP_AIM_POINTS` actually spent,
+so "all 8 attempts failed" is a statement with contents. `neighbours`
+counts other ground items within 2 subtiles, because item density is the
+leading hypothesis for why these clicks miss.
 
 `item.dropped` fires on the transition into the wanted set, so a rune
 lying on the floor for thirty ticks is one event. Pair it with
@@ -164,6 +177,33 @@ say what you left.
 
 A target that strikes have provably achieved nothing against:
 `unit_id`, `kind`, `strikes`, `hp`, `signature`.
+
+### `nav.failed`
+
+One walk the navigator gave up on, absorbed by a step rather than
+ending the run: `where` (the step), `action`, `target` (three-frame),
+`toward`, `elapsed_s`, `detail` (the navigator's own trail).
+
+`_PickupMixin.send` has always swallowed `NavigationError` — correct,
+because one unreachable target is information about that target, not a
+reason to end a game — but until 2026-08-06 it swallowed the event too.
+T71 run 4's endgame spent **four ticks of 25–35 s each** in exactly this
+path, visible only as tick durations with nothing inside them. The
+absorb behaviour is unchanged; the silence is not.
+
+## Reading a run
+
+Beyond the timeline, `--pickup` prints the pickup census — wanted
+against collected, per floor, with each miss's click count, neighbour
+count and write-off reason, plus the attempts histogram:
+
+```bash
+~/.venvs/pd2bot/Scripts/python.exe -m pd2bot.runlog --pickup
+```
+
+It derives from the **attempt** stream (a click is proof the pickit
+wanted the item), so it works on logs written before the newer events
+existed and reports missing fields as unknown rather than as zero.
 
 - `no-contact` — our mana did not move, so the strike never connected
   (a phantom, a wall, a miss).

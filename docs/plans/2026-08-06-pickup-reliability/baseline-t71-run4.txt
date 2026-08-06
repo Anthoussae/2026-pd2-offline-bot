@@ -1,0 +1,24 @@
+﻿# logs\runs\20260806-025952-countess
+PICKUP  18/31 collected (58%)
+  by floor
+    Tower Cellar Level 1     6/10
+    Tower Cellar Level 2     7/9
+    Tower Cellar Level 3     2/4
+    Tower Cellar Level 4     2/2
+    Tower Cellar Level 5     1/6
+  MISSED (13)
+    mana_611           (12529, 5193)      Tower Cellar Level 1    8 clicks  neighbours unknown   -> no write-off event
+    flawless_emerald   (12644, 5146)      Tower Cellar Level 1    8 clicks  neighbours unknown   -> no write-off event
+    healing_606        (12668, 5144)      Tower Cellar Level 1    8 clicks  neighbours unknown   -> no write-off event
+    healing_606        (12667, 5145)      Tower Cellar Level 1    8 clicks  neighbours unknown   -> no write-off event
+    mana_610           (12619, 6645)      Tower Cellar Level 2    8 clicks  neighbours unknown   -> no write-off event
+    healing_606        (12613, 6598)      Tower Cellar Level 2    8 clicks  neighbours unknown   -> no write-off event
+    healing_606        (12595, 8098)      Tower Cellar Level 3    8 clicks  neighbours unknown   -> no write-off event
+    healing_606        (12594, 8099)      Tower Cellar Level 3    8 clicks  neighbours unknown   -> no write-off event
+    kind 605           (12635, 11071)     Tower Cellar Level 5    1 clicks  neighbours unknown   -> no write-off event
+    healing_606        (12545, 11090)     Tower Cellar Level 5    8 clicks  neighbours unknown   -> no write-off event
+    healing_606        (12543, 11090)     Tower Cellar Level 5    1 clicks  neighbours unknown   -> walks kept arriving short
+    kind 605           (12544, 11091)     Tower Cellar Level 5    8 clicks  neighbours unknown   -> no write-off event
+    nef_rune           (12544, 11084)     Tower Cellar Level 5    3 clicks  neighbours unknown   -> no write-off event
+  attempts histogram: 1:3 2:13 3:2 6:2 8:10 16:1
+  16 item(s) took <=2 clicks; 11 spent 8 or more

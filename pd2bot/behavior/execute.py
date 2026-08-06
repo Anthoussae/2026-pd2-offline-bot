@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 
 from pd2bot import mapframe, offsets
 from pd2bot.behavior.actions import (
+    PICKUP_AIM_POINTS,
     Action,
     AttackUnit,
     CastAtPoint,
@@ -56,21 +57,11 @@ from pd2bot.skills import (
 )
 from pd2bot.units import label_display_on
 
-# Where an item is actually CLICKABLE, relative to the projection of its
-# ground tile — measured by T63 (2026-08-03), the drill that ended a
-# five-drill hunt: position clicks DO pick items (no hover state needed;
-# the hover pointer was a red herring for clicks), but the sprite draws
-# UPWARD from its tile, so the tile projection itself misses ~29 times in
-# 30 (T57). T63's direct-click matrix landed at (0, -28) with labels off
-# and (-16, -40) with labels on. One offset per retry, best guesses
-# first: the schedule is what makes retry N differ from retry N-1.
-_PICKUP_OFFSETS: tuple[tuple[int, int], ...] = (
-    (0, -28), (-16, -40), (16, -28), (0, -16), (-16, -28), (0, -40),
-    (16, -40), (0, -48),  # the LABEL band (T65 v4): small classes —
-    # runes, gems, charms — are effectively label-clicked; their ground
-    # sprites survived 58-147 direct probes while both v4 hits landed
-    # at y=-48. Labels are ensured ON below, so the tail can reach them.
-)
+# The aim schedule now lives beside the action whose `attempt` field
+# indexes it (`actions.PICKUP_AIM_POINTS`), so the step that writes an
+# item off can report which points were actually spent. Aliased here
+# because this module is where it is consumed.
+_PICKUP_OFFSETS = PICKUP_AIM_POINTS
 
 
 class ExecutionError(RuntimeError):

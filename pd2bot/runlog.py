@@ -393,6 +393,105 @@ def summarize(events: list[dict]) -> list[str]:
     return lines
 
 
+def _world(field) -> tuple | None:
+    """The world coordinate out of a three-frame spatial field."""
+    if isinstance(field, dict):
+        got = field.get("world")
+        return tuple(got) if got else None
+    if isinstance(field, (list, tuple)):
+        return tuple(field)
+    return None
+
+
+def pickup_report(events: list[dict]) -> list[str]:
+    """The pickup census: what the pickit wanted, and what we actually got.
+
+    Written because answering "were any whitelisted items not picked up"
+    on 2026-08-06 took a throwaway correlation script — eleven of that
+    run's thirteen misses emitted no event at all, so the only honest
+    census was `action.pickup_attempt` joined to `item.collected` by
+    unit id. That join belongs in the tool, not in a script somebody has
+    to rewrite each time.
+
+    Deliberately derives from the ATTEMPT stream rather than from
+    `item.dropped`: a click is proof the pickit wanted the item, and the
+    report has to work on logs written before the newer events existed
+    (the baseline run is one). Fields that are absent are reported as
+    absent — the log's honest-absence rule — never defaulted to zero.
+    """
+    attempts: dict = {}
+    for e in events:
+        if e.get("kind") != "action.pickup_attempt":
+            continue
+        uid = e.get("unit_id")
+        row = attempts.setdefault(uid, {
+            "item": e.get("item"), "area": e.get("area_name"),
+            "pos": _world(e.get("target")), "clicks": 0,
+        })
+        row["clicks"] += 1
+    collected = {
+        e.get("unit_id"): e for e in events if e.get("kind") == "item.collected"
+    }
+    abandoned = {
+        e.get("unit_id"): e for e in events if e.get("kind") == "item.abandoned"
+    }
+    if not attempts:
+        return ["PICKUP  no pickup attempts in this log"]
+
+    got = [u for u in attempts if u in collected]
+    lines = [
+        f"PICKUP  {len(got)}/{len(attempts)} collected "
+        f"({100 * len(got) // len(attempts)}%)"
+    ]
+
+    by_area: dict = {}
+    for uid, row in attempts.items():
+        hit, total = by_area.setdefault(row["area"], [0, 0])
+        by_area[row["area"]] = [hit + (1 if uid in collected else 0), total + 1]
+    lines.append("  by floor")
+    for area, (hit, total) in by_area.items():
+        lines.append(f"    {str(area):<24} {hit}/{total}")
+
+    missed = [(u, r) for u, r in attempts.items() if u not in collected]
+    if missed:
+        lines.append(f"  MISSED ({len(missed)})")
+        for uid, row in missed:
+            gave = abandoned.get(uid) or {}
+            reason = gave.get("reason", "no write-off event")
+            near = gave.get("neighbours")
+            near = f"{near} neighbour(s)" if near is not None else "neighbours unknown"
+            lines.append(
+                f"    {str(row['item']):<18} {str(row['pos']):<18} "
+                f"{str(row['area']):<22} {row['clicks']:>2} clicks  "
+                f"{near:<20} -> {reason}"
+            )
+    else:
+        lines.append("  MISSED (0) — everything attempted came up")
+
+    histogram: dict = {}
+    for row in attempts.values():
+        histogram[row["clicks"]] = histogram.get(row["clicks"], 0) + 1
+    lines.append(
+        "  attempts histogram: "
+        + " ".join(f"{k}:{histogram[k]}" for k in sorted(histogram))
+    )
+    # The bimodality is the finding that says "systematic, not flaky",
+    # so the report states it rather than leaving it to be re-noticed.
+    quick = sum(n for c, n in histogram.items() if c <= 2)
+    lines.append(
+        f"  {quick} item(s) took <=2 clicks; "
+        f"{sum(n for c, n in histogram.items() if c >= 8)} spent 8 or more"
+    )
+    stray = [u for u in collected if u not in attempts]
+    if stray:
+        lines.append(
+            f"  NOTE: {len(stray)} item(s) came up with no attempt recorded "
+            "(picked up by a click aimed at something else, or before "
+            "attempt logging began)"
+        )
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
     """`python -m pd2bot.runlog [run-dir] [--kind P] [--since S] [--raw]`"""
     import argparse
@@ -405,6 +504,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
     parser.add_argument("--raw", action="store_true", help="pass JSON through")
     parser.add_argument(
         "--no-collapse", action="store_true", help="one line per event"
+    )
+    parser.add_argument(
+        "--pickup", action="store_true",
+        help="the pickup census: wanted vs collected, and why not",
     )
     args = parser.parse_args(argv)
 
@@ -421,6 +524,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
         events = [e for e in events if float(e.get("t", 0)) <= args.until]
 
     print(f"# {run}", flush=True)
+    if args.pickup:
+        for line in pickup_report(events):
+            print(line, flush=True)
+        return 0
     if args.raw:
         for event in events:
             print(json.dumps(event, default=str), flush=True)

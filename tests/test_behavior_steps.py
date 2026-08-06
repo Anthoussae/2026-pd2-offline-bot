@@ -1940,6 +1940,114 @@ def test_traverse_reclicks_only_when_the_walk_stalls():
     assert len(clicks()) == 2, "a stalled walk never earned its re-click"
 
 
+def _runlog(tmp_path, clock):
+    from pd2bot.runlog import RunLog
+
+    return RunLog("t", root=tmp_path, clock=clock, wall=lambda: 1786000000.0)
+
+
+def _events(log, kind):
+    from pd2bot.runlog import load
+
+    return [e for e in load(log.directory) if e["kind"] == kind]
+
+
+def test_a_spent_click_budget_says_why_and_what_it_tried(tmp_path):
+    """T71 run 4 wrote eleven items off this way in silence, a Nef rune
+    and a flawless emerald among them. The budget being spent is the
+    single most informative moment in the pickup path and it emitted
+    nothing at all."""
+    from pd2bot.behavior.actions import PICKUP_AIM_POINTS
+
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    step, svc, here, executor, ctx = sweeping(clock, runlog=log)
+    potion = GroundItem(unit_id=910, kind=HEAL, position=(1001, 1000), quality=2)
+    svc.attempts[910] = svc.pickup_click_attempts  # the budget is spent
+
+    step.collect(snap(pos=HOME, items=[potion]), ctx, potion)
+
+    gave = _events(log, "item.abandoned")
+    assert len(gave) == 1, gave
+    assert gave[0]["unit_id"] == 910
+    assert gave[0]["clicks"] == svc.pickup_click_attempts
+    # The belt is empty, so this is NOT a belt-full case: the honest
+    # diagnosis is that the clicks missed.
+    assert gave[0]["reason"] == "clicks did not land"
+    assert len(gave[0]["aim_points"]) == svc.pickup_click_attempts
+    assert gave[0]["aim_points"][0] == list(PICKUP_AIM_POINTS[0])
+    assert gave[0]["position"]["world"] == [1001, 1000]
+
+
+def test_a_write_off_counts_the_neighbours_that_could_have_stolen_the_click(
+    tmp_path,
+):
+    # The density correlation is the leading hypothesis (misses averaged
+    # 1.6 neighbours within 2 subtiles against 0.9 for successes), so the
+    # number rides on the event rather than being re-derived later.
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    step, svc, here, executor, ctx = sweeping(clock, runlog=log)
+    target = GroundItem(unit_id=911, kind=HEAL, position=(1001, 1000), quality=2)
+    crowd = [
+        target,
+        GroundItem(unit_id=912, kind=HEAL, position=(1002, 1000), quality=2),
+        GroundItem(unit_id=913, kind=HEAL, position=(1001, 1001), quality=2),
+        GroundItem(unit_id=914, kind=HEAL, position=(1040, 1040), quality=2),
+    ]
+    svc.attempts[911] = svc.pickup_click_attempts
+
+    step.collect(snap(pos=HOME, items=crowd), ctx, target)
+
+    gave = _events(log, "item.abandoned")
+    assert gave[0]["neighbours"] == 2, "only the two within 2 subtiles count"
+
+
+def test_a_belt_full_write_off_is_still_reported_as_belt_full(tmp_path):
+    # The belt-full vs click-missed distinction is load-bearing (T56's
+    # starvation loop). P1 reports it; it must not re-decide it.
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    step, svc, here, executor, ctx = sweeping(clock, runlog=log)
+    full = svc.pickit.belt_capacity.get("healing", 8)
+    svc.carried = lambda: carried_with_belt(
+        *(belt_potion(800 + i, HEAL, i) for i in range(full))
+    )
+    potion = GroundItem(unit_id=915, kind=HEAL, position=(1001, 1000), quality=2)
+    svc.attempts[915] = svc.pickup_click_attempts
+
+    step.collect(snap(pos=HOME, items=[potion]), ctx, potion)
+
+    gave = _events(log, "item.abandoned")
+    assert gave[0]["reason"] == "belt full for healing"
+
+
+def test_a_swallowed_navigation_error_is_recorded(tmp_path):
+    """`send` absorbs NavigationError so one unreachable target cannot end
+    a run — correct, and until now completely invisible. T71 run 4 spent
+    four ticks of 25-35 s each here with nothing in the log but the tick
+    durations."""
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    svc = services(clock, runlog=log)
+    step = make_step("pickup", svc)
+
+    def refuse(action):
+        if isinstance(action, MoveTo):
+            raise NavigationError("gave up after 5 plan cycles without progress")
+
+    ctx = context(RecordingExecutor(clock=clock, on_execute=refuse))
+    assert step.send(ctx, MoveTo((1050, 1050), toward=42)) is False
+
+    failed = _events(log, "nav.failed")
+    assert len(failed) == 1, failed
+    assert failed[0]["action"] == "MoveTo"
+    assert failed[0]["target"]["world"] == [1050, 1050]
+    assert failed[0]["toward"] == 42
+    assert "5 plan cycles" in failed[0]["detail"]
+    assert failed[0]["elapsed_s"] >= 0
+
+
 def test_a_wanted_item_on_a_traversal_floor_is_logged(tmp_path):
     """T71 run 4's hole, and the operator's fix request (2026-08-06).
 

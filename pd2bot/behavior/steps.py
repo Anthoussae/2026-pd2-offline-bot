@@ -30,7 +30,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from pd2bot import mapframe, offsets
-from pd2bot.behavior.actions import InteractObject, MoveTo, PickUpItem
+from pd2bot.behavior.actions import (
+    PICKUP_AIM_POINTS,
+    InteractObject,
+    MoveTo,
+    PickUpItem,
+)
 from pd2bot.behavior.engine import EngineContext, StepOutcome
 from pd2bot.behavior.run import ParamSpec, StepRegistry, StepSpec
 from pd2bot.items import CarriedItems
@@ -849,6 +854,61 @@ class _PickupMixin:
             position=mapframe.describe(item.position, frame=frame),
         )
 
+    def _log_click_write_off(
+        self,
+        snap: GameSnapshot,
+        item: GroundItem,
+        attempts: int,
+        potion: str | None,
+    ) -> None:
+        """Say why the click budget was spent without the item coming up.
+
+        The reason MIRRORS the decision the caller is about to make —
+        this reports, it does not decide (P1's constraint: the
+        belt-full/inventory-full reasoning is load-bearing and was paid
+        for by T56's starvation loop).
+
+        `neighbours` rides along because the density correlation is the
+        leading hypothesis for why these clicks miss (T71 run 4: misses
+        averaged 1.6 items within 2 subtiles against 0.9 for successes,
+        and 9 of 13 had a COLLECTED neighbour that close). Carrying the
+        number means the next investigation reads it instead of
+        re-deriving it.
+        """
+        log = getattr(self.services, "runlog", None)
+        if log is None or not getattr(log, "enabled", False):
+            return
+        if potion is not None:
+            reason = (
+                "clicks did not land"
+                if self._belt_has_room(potion)
+                else f"belt full for {potion}"
+            )
+        else:
+            # What the caller concludes, stated as the inference it is —
+            # item sizes are unreadable, so persistence is the only
+            # signal available and it cannot tell a full grid from a
+            # missed click. P4 of the pickup plan splits these.
+            reason = "inventory full (inferred from persistence)"
+        near = 0
+        for other in snap.ground_items:
+            if other.unit_id == item.unit_id:
+                continue
+            if _chebyshev(other.position, item.position) <= 2:
+                near += 1
+        frame = self.services.frame() if self.services.frame else None
+        log.event(
+            "item.abandoned",
+            unit_id=item.unit_id,
+            item=self._logged_name(item.kind),
+            item_kind=item.kind,
+            reason=reason,
+            clicks=attempts,
+            aim_points=[list(p) for p in PICKUP_AIM_POINTS[:attempts]],
+            neighbours=near,
+            position=mapframe.describe(item.position, frame=frame),
+        )
+
     def _logged_name(self, kind: int) -> str:
         """Code-anchored name or an honest `kind <n>` (R144)."""
         table = getattr(self.services.pickit, "item_table", None)
@@ -983,6 +1043,13 @@ class _PickupMixin:
         if attempts >= self.services.pickup_click_attempts:
             self.services.stuck.add(item.unit_id)
             potion = potion_type_of(item)
+            # The click budget is spent. Whatever the diagnosis below
+            # concludes, SAY SO — until 2026-08-06 every branch here
+            # returned silently, and T71 run 4's eleven click-budget
+            # write-offs (a Nef rune and a flawless emerald among them)
+            # left no event at all. "Which wanted items did we fail to
+            # get" then needed unit-id correlation in a throwaway script.
+            self._log_click_write_off(snap, item, attempts, potion)
             if potion is not None:
                 # A potion routes to the BELT, so a potion that will not come
                 # up says the belt is full for its type — NOT that the
@@ -1083,13 +1150,44 @@ class _PickupMixin:
         Deliberately narrow: `InputRefused` and `SkillSwitchFailed` still
         propagate to the engine, which absorbs them and re-decides.
         """
+        started = self.services.clock()
         try:
             ctx.executor.execute(action)
         except NavigationError as exc:
             self.services.log(f"could not walk: {exc}")
+            # A swallowed walk failure used to leave NOTHING in the run
+            # log. T71 run 4's endgame spent four ticks of 25-35 s each
+            # this way — visible only as tick durations with nothing
+            # inside them, which is precisely the vacuum the event log
+            # exists to fill. The absorb behaviour is unchanged; this
+            # only says it happened.
+            self._log_nav_failure(action, exc, self.services.clock() - started)
             _note_unsurveyed(self.services, exc)
             return False
         return True
+
+    def _log_nav_failure(self, action, exc: Exception, elapsed: float) -> None:
+        """Record one absorbed `NavigationError`. Never raises."""
+        log = getattr(self.services, "runlog", None)
+        if log is None or not getattr(log, "enabled", False):
+            return
+        target = getattr(action, "target", None) or getattr(
+            action, "position", None
+        )
+        frame = self.services.frame() if self.services.frame else None
+        log.event(
+            "nav.failed",
+            where=getattr(self, "name", type(self).__name__),
+            action=type(action).__name__,
+            target=(
+                mapframe.describe(target, frame=frame)
+                if target is not None
+                else None
+            ),
+            toward=getattr(action, "toward", None),
+            elapsed_s=round(elapsed, 2),
+            detail=str(exc),
+        )
 
     def recover_panels(self, snap: GameSnapshot) -> bool:
         """Close a blocking panel that opened outside town. Returns whether.

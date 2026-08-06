@@ -250,3 +250,77 @@ def test_latest_run_finds_the_newest_directory(tmp_path):
 
 def test_loading_a_missing_run_returns_nothing_rather_than_raising(tmp_path):
     assert load(tmp_path / "nope") == []
+
+
+# -- the pickup census ----------------------------------------------------------
+#
+# Answering "were any whitelisted items not picked up" took a throwaway
+# correlation script on 2026-08-06, because eleven of that run's thirteen
+# misses emitted no event. The join belongs in the tool.
+
+
+def attempt(uid, item, area, pos, n=1):
+    return [
+        {
+            "kind": "action.pickup_attempt", "unit_id": uid, "item": item,
+            "area_name": area, "target": {"world": list(pos)}, "attempt": i,
+        }
+        for i in range(n)
+    ]
+
+
+def test_the_pickup_report_counts_wanted_against_collected():
+    from pd2bot.runlog import pickup_report
+
+    events = (
+        attempt(1, "hel_rune", "Cellar 5", (10, 10), n=2)
+        + attempt(2, "nef_rune", "Cellar 5", (11, 10), n=8)
+        + [{"kind": "item.collected", "unit_id": 1, "item": "hel_rune",
+            "position": {"world": [10, 10]}}]
+    )
+    text = "\n".join(pickup_report(events))
+    assert "1/2 collected (50%)" in text
+    assert "nef_rune" in text and "8 clicks" in text
+    assert "MISSED (1)" in text
+
+
+def test_the_pickup_report_carries_the_write_off_reason_and_neighbours():
+    from pd2bot.runlog import pickup_report
+
+    events = attempt(2, "nef_rune", "Cellar 5", (11, 10), n=8) + [
+        {"kind": "item.abandoned", "unit_id": 2, "item": "nef_rune",
+         "reason": "clicks did not land", "clicks": 8, "neighbours": 3},
+    ]
+    text = "\n".join(pickup_report(events))
+    assert "clicks did not land" in text
+    assert "3 neighbour(s)" in text
+
+
+def test_the_pickup_report_is_honest_about_what_an_older_log_lacks():
+    """The baseline run predates the write-off event, and a report that
+    defaulted its absence to zero would invent the very number the fix is
+    measured against."""
+    from pd2bot.runlog import pickup_report
+
+    text = "\n".join(pickup_report(attempt(2, "nef_rune", "C5", (11, 10), n=8)))
+    assert "no write-off event" in text
+    assert "neighbours unknown" in text
+    assert "0 neighbour" not in text
+
+
+def test_the_pickup_report_notices_an_item_that_came_up_unattempted():
+    # The "clicked A, got B" tell, at report level.
+    from pd2bot.runlog import pickup_report
+
+    events = attempt(1, "potion", "C1", (10, 10), n=8) + [
+        {"kind": "item.collected", "unit_id": 99, "item": "rune",
+         "position": {"world": [11, 10]}},
+    ]
+    text = "\n".join(pickup_report(events))
+    assert "no attempt recorded" in text
+
+
+def test_the_pickup_report_says_so_when_there_is_nothing_to_report():
+    from pd2bot.runlog import pickup_report
+
+    assert pickup_report([]) == ["PICKUP  no pickup attempts in this log"]
