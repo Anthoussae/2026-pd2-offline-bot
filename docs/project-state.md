@@ -90,18 +90,55 @@ test was itself the false path and now genuinely walks.
   the phase dispatch in `ClearCountessStep.step` and owned every tick
   from the neighborhood clearance to her death: 22 of 27 `clear_countess`
   decisions are the bare `acted` with no note that only the engage
-  branch produces. So **R219(b) is still owed and is currently
-  unobservable** — with hostiles in perception the step cannot reach
-  `_stage_tick`, and the Countess always has a court. Decide whether
-  staging-before-contact is a real tactic (it must then pre-empt engage
-  under some condition) or a beat that only ever fires on an empty
-  approach — do not just re-run and hope.
+  branch produces. With hostiles in perception the step cannot reach
+  `_stage_tick`, and the Countess always has a court.
+
+  **CLOSED by the operator, 2026-08-06 — deferred, low priority.** They
+  watched the run and reported the bot approached from *"what I would
+  call the south, not the north, but it worked out fine"*, and asked for
+  the preferred approach direction to be registered as low priority and
+  deferred. So R219(b) needs no further judgement: the tactic is not
+  load-bearing. If it is ever revived, the question is a design one —
+  does staging-before-contact need to pre-empt `engage`, or is it a beat
+  that only fires on an empty approach? Do not re-run to observe it; it
+  cannot occur as written.
 - **`stash.*` and `npc.*` are still unexercised.** Zero of each: the
   inventory held only the three unmovables, so there was nothing to
   deposit. Same gap T72 had.
 - **The kill was almost entirely poison.** One `action.attack` in the
   whole endgame (13 in the run). She and her court died to poison, the
   revives and the merc.
+
+### Wanted items were left on the floor (asked 2026-08-06, from the log)
+
+**13 items the pickit wanted were clicked and never came up**, against
+18 collected. Every `action.pickup_attempt` is by definition a wanted
+item, so that stream — not `item.dropped` — is the honest census. Two
+were valuable:
+
+- **Flawless emerald** (kind 691), Tower Cellar Level 1 at
+  (12644, 5146) — 8 click attempts, never collected.
+- **Nef rune** (kind 702), Tower Cellar Level 5 at (12544, 11084) — 3
+  attempts, never collected. A Hel rune two subtiles away (unit 840,
+  (12545, 11083)) *was* collected, so this is not a pickit miss.
+
+The other 11 were potions: C1 ×3, C2 ×2, C3 ×2, C4 ×1, C5 ×3. Most
+show exactly 8 attempts — `pickup_click_attempts`, i.e. the budget
+spent — and **11 of the 13 emitted no `item.abandoned` at all**: only
+the two walk-based write-offs ("walks kept arriving short") are logged.
+A click-budget write-off is silent, so the log cannot currently answer
+"what did we fail to pick up" without correlating attempts against
+collections by unit id.
+
+**Worse, `item.dropped` has a blind spot covering four of the five
+floors.** It fires only from `note_wanted_sightings`, which
+`ClearRadiusStep`, `PickupStep` and `ClearCountessStep` call and
+**`TraverseStep` does not** — yet traverse is what collects on the
+descent (the P4 opportunistic-collect). So all 4 `item.dropped` events
+in this run are Cellar 5, and the traversal floors formally record no
+wanted drops at all. That is a missing instrument, not an absence — and
+it is precisely the T70 Thul signature the event was written to catch,
+now unable to catch it on the floors where the Thul was found.
 
 ### The numbers (see `performance-notes.md` for the evidence)
 
@@ -138,7 +175,14 @@ note in this file was paid for four times already.
 - **Deferred, deliberately**: enemy-death events (R220 Q6),
   `item.accidental`, the collision recorder writing rooms under the
   wrong area id during an area flip (seen in `area-020.json` and
-  `area-025.json`).
+  `area-025.json`), and — **new, operator's call 2026-08-06, LOW
+  priority** — the Countess's preferred approach direction (they watched
+  the run approach from the south and judged it fine).
+- **Two instrument gaps worth closing before the speed pass**, both
+  found by questions the log could not answer: a silent click-budget
+  write-off (no `item.abandoned`), and `item.dropped` never firing on
+  traversal floors because `TraverseStep` does not call
+  `note_wanted_sightings`. Add these rather than reason around them.
 
 ## Hard-won facts (do not re-derive)
 
