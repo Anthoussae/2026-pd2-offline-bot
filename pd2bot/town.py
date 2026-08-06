@@ -667,18 +667,23 @@ class TownLayer:
                 )
             )
             found.append(names)
-            # Nothing opens a panel on purpose except us, so one being
-            # open that we did not ask for IS an accident (R220 Q7). The
-            # recovery has existed since R85; only now does it say so.
-            self.runlog.event(
-                "npc.accidental", panels=names,
-                ids=sorted(stray), requested=False,
-            )
             try:
                 self.menu.press_escape()
             except Exception:  # noqa: BLE001 - recovery must not raise
                 break
             self._sleep(self.config.panel_settle_s)
+        # ONE event per accident, not per retry (review 003). Nothing in
+        # the field opens a panel on purpose, so an unrequested one IS an
+        # accident (R220 Q7) — but a panel that took three ESCs to close
+        # is ONE accident, and emitting inside the loop would inflate the
+        # very count this event exists to answer (`item.dropped` fires on
+        # the transition for the same reason). Carries whether the
+        # recovery actually worked, which a per-retry emit could not say.
+        if found:
+            self.runlog.event(
+                "npc.accidental", panels=found[0], attempts=len(found),
+                cleared=not self._any_panel_open(), requested=False,
+            )
         return "; ".join(found)
 
     def _walk_near(

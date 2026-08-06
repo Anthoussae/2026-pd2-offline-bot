@@ -709,3 +709,30 @@ def test_resistances_alone_qualify_a_unit_as_a_combatant():
     scan = scan_units(FakeSession(mem))
     assert [m.unit_id for m in scan.monsters] == [900]
     assert not scan.critters
+
+
+def test_a_dead_critter_is_not_revive_fuel():
+    """Review 002: the corpse test used to run FIRST, so a dead bat filed
+    as a corpse — and corpses are revive fuel. The bot could have raised
+    decorative scenery into the wall its combat design depends on."""
+    mem = FakeMemory()
+    mem.write(CLIENT_BASE + offsets.PLAYER_UNIT_PTR, u32(PLAYER))
+    mem.write_fields(PLAYER, {offsets.UNIT_PATH: u32(PLAYER_PATH)})
+    mem.write_fields(
+        PLAYER_PATH,
+        {offsets.PATH_ROOM1: u32(ROOM_A),
+         offsets.PATH_X: u32(100)[:2], offsets.PATH_Y: u32(200)[:2]},
+    )
+    dead_bat = add_monster(
+        mem, 0x0B034000, 650373, 159, (101, 201), 0, 100,
+        level=None, mode=offsets.MONSTER_MODE_DEAD,
+    )
+    mem.write_fields(
+        ROOM_A,
+        {offsets.ROOM1_UNIT_FIRST: u32(dead_bat),
+         offsets.ROOM1_ROOMS_NEAR: u32(0), offsets.ROOM1_ROOMS_NEAR_COUNT: u32(0)},
+    )
+    hash_table(mem, {offsets.UNIT_TYPE_MONSTER: [dead_bat]})
+    scan = scan_units(FakeSession(mem))
+    assert [c.unit_id for c in scan.critters] == [650373]
+    assert not scan.corpses, "a dead critter was filed as revive fuel"

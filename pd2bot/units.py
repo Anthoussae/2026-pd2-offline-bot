@@ -569,11 +569,7 @@ def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitSca
             monster = _read_monster(session, unit)
             if monster is not None and near(monster.position):
                 seen.add(key)
-                if monster.is_corpse:
-                    corpses.append(monster)
-                elif monster.is_ally:
-                    allies.append(monster)
-                elif not monster.combat_rated:
+                if not monster.combat_rated:
                     # Scenery, not an enemy (T74). The bot spent 173 s of
                     # T72 attacking two decorative bats 23 times each
                     # because "did not prove itself friendly" was the
@@ -581,7 +577,16 @@ def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitSca
                     # dropped: the run log should be able to show what
                     # was in the room, and a filter that hides its own
                     # work is how the next phantom goes unnoticed.
+                    # Tested BEFORE the corpse check (review 002): a dead
+                    # critter would otherwise file as a corpse, and corpses
+                    # are revive fuel — the bot could raise a decorative bat
+                    # into the wall its whole combat design depends on.
+                    # Scenery is scenery whether it is standing or not.
                     critters.append(monster)
+                elif monster.is_corpse:
+                    corpses.append(monster)
+                elif monster.is_ally:
+                    allies.append(monster)
                 else:
                     monsters.append(monster)
         except Exception:

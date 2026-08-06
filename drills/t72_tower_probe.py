@@ -162,14 +162,21 @@ def make_drill() -> tuple[Drill, object]:
             + f"; traverses {traverses}/2; tower ticks {tower_ticks}"
             + f"; ended: {landed}; events: {events}"
         )
-        # NOT a failure when the transition fails: this run is a probe,
-        # and a reproduced failure WITH a full event log is the outcome it
-        # was launched for. Only a run that never reached the tower has
-        # told us nothing.
         if traverses < 1:
             raise RuntimeError(f"never reached the Forgotten Tower: {result}")
+        # Both transitions REQUIRED (review 001, 2026-08-06). This drill
+        # once passed on a reproduced failure, which was right while the
+        # event log was the deliverable — a failure WITH a log was the
+        # outcome it existed to produce. The fix has since landed and been
+        # verified live (run 2: 4.3 s, 2/2, clean), so a failed crossing is
+        # now a REGRESSION. A drill that can pass without doing the thing
+        # it tests is the shape this repo keeps paying for.
         if traverses < 2:
-            result = f"REPRODUCED the tower-stairs failure (log captured) — {result}"
+            raise RuntimeError(
+                "the tower-stairs transition FAILED — fixed on 2026-08-06 "
+                "(T72 run 2: 4.3 s, 16 ticks, 2/2), so this is a "
+                f"REGRESSION; the event log has the detail: {result}"
+            )
         return result
 
     return drill, body
