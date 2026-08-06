@@ -91,3 +91,24 @@ writes for every run. When the optimization pass starts, the first move
 is to re-read a fresh descent trace rather than trusting these
 numbers — they are one run each, and monster density alone moves
 clearance times by tens of seconds.
+
+## T70 descent rerun — the seek run (2026-08-05)
+
+**796 s total, PASS, clean.** First-visit costs dominated: the four
+cellar seeks (198 + 221 + 57 + 220 s) were the once-per-seed discovery
+walks, now banked in `maps/exits.json` (11 staircases, both
+directions). The numbers that carry forward:
+
+| segment | first visit | expected warm |
+|---|---|---|
+| preamble + waypoint | 19 s | ~19 s |
+| → Tower | 16 s | ~10-15 s |
+| → Cellar 1 | 58 s | walk + fight only |
+| → C2/C3/C4/C5 | 198/221/57/220 s (seeking) | walk + fight only |
+
+The warm descent — staircase-to-staircase over remembered exits, brisk
+posture brushing past non-blockers — is the real baseline for the
+5–6 min Countess budget and should be measured on the next run before
+any optimization work. Watch also: `reflex upkeep fired 25x` mid-seek
+(wall maintenance churn while walking through hostile rooms — the P3
+urgency hold working, but worth pricing).
