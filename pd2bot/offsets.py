@@ -724,6 +724,18 @@ TOME_OF_TOWN_PORTAL_KIND = 533  # T38 (64 charges)
 UNMOVABLE_KINDS = frozenset(
     {CUBE_KIND, TOME_OF_IDENTIFY_KIND, TOME_OF_TOWN_PORTAL_KIND}
 )
+_UNMOVABLE_REASONS = {
+    CUBE_KIND: "the Horadric Cube — right-click opens it",
+    TOME_OF_IDENTIFY_KIND: "a Tome of Identify — right-click arms the "
+    "identify cursor",
+    TOME_OF_TOWN_PORTAL_KIND: "a Tome of Town Portal — right-click opens "
+    "a portal",
+}
+
+
+def unmovable_reason(kind: int) -> str:
+    """Why this kind is never transferred, for operator-facing reports."""
+    return _UNMOVABLE_REASONS.get(kind, f"kind {kind}")
 
 # --- Town NPCs and objects (Act 1, M5) --------------------------------------
 #

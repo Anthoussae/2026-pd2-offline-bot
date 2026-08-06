@@ -1,0 +1,62 @@
+﻿exit: 0
+--- stdout ---
+chat> [claude] TEST T70 — traversal — one transition — town to the Forgotten Tower [bot control] (M6 P2)
+chat> [claude] THE BOT PLAYS: it may leave THIS game and create its own,
+chat> [claude] run the town chores, waypoint out, and walk into the staircases.
+chat> [claude] Watch the transitions — each one is proven by the area id.
+chat> [claude] IT ENDS ON ITS OWN. Stop early: 'abort' in chat, ESC/Enter in
+chat> [claude] the field, tools\drill-cancel.ps1, or take the mouse.
+chat> [claude] The bot WILL SEND INPUT during this test — hands off keyboard and mouse.
+chat> [claude] Test ready — type OK in chat to begin.
+chat> [claude] TEST LIVE
+class      necromancer (necro.toml)
+run        m6-traverse-one.toml: town_preamble, waypoint, traverse, done
+clearance  no clear_radius step in this run
+sweep      no clearance to follow; sweeps from where it stands
+pickit     16 rules, 0 pending name(s)
+cleanse    ENABLED
+belt       ('mana', 'rejuv', 'healing', 'healing') -> capacity {'healing': 8, 'mana': 4, 'rejuv': 4}
+minimums   healing 4, mana 2, rejuv 0
+chicken    50% life
+idle bail  10s (declared wait 30s), refusal limit 50
+» run: town_preamble -> waypoint -> traverse -> done
+» heal: skipped (hp 100%, mana 100%, merc 100%) (0.0s)
+» repair: nothing damaged (8 worn item(s) checked) (0.0s)
+» belt: 0 moved; cleanse: 4 item(s) in the inventory, 0 judged junk, 4 kept; nothing to drop; belt: minimums hold; stash: 1 deposited on the displayed tab; stash: 370 items stashed; stash: skipped 3 unmovable (cube/quest); gold: none carried (2.2s)
+» merc: alive (0.0s)
+» town_preamble: done after 3s — heal: skipped (hp 100%, mana 100%, merc 100%); repair: nothing damaged (8 worn item(s) checked); belt: 0 moved; cleanse: KEEP kind 564 quality 2 sockets None at (0, 0) — unmovable (the Cube); cleanse: KEEP kind 533 quality 2 sockets 0 at (0, 2) — unmovable (the Cube); cleanse: KEEP kind 558 quality 2 sockets 0 at (1, 2) — protected: predates this bot session; cleanse: KEEP kind 534 quality 2 sockets 0 at (2, 0) — unmovable (the Cube); cleanse: 4 item(s) in the inventory, 0 judged junk, 4 kept; nothing to drop; belt: minimums hold; stash: 1 deposited on the displayed tab; stash: 370 items stashed; stash: skipped 3 unmovable (cube/quest); gold: none carried; merc: alive
+» waypoint: done after 7s — arrived at (15218, 5788), stepped off to (15208, 5798)
+» combat posture: brisk
+» traverse: exit toward Forgotten Tower at (15251, 5785)
+» traverse: done after 16s — arrived in Forgotten Tower at (10006, 8002)
+» done: done after 0s — run complete
+» run complete (ticks: 58, reflex fires: 5, steps done: town_preamble, waypoint, traverse, done)
+
+cycles: 1, clean: 1
+  #1: [CVRL]
+
+--- game 1: ticks: 58, reflex fires: 5, steps done: town_preamble, waypoint, traverse, done ---
+  reflex upkeep: armor absorb 0% < 75%
+  step town_preamble done: heal: skipped (hp 100%, mana 100%, merc 100%); repair: nothing damaged (8 worn item(s) checked); belt: 0 moved; cleanse: KEEP kind 564 quality 2 sockets None at (0, 0) — unmovable (the Cube); cleanse: KEEP kind 533 quality 2 sockets 0 at (0, 2) — unmovable (the Cube); cleanse: KEEP kind 558 quality 2 sockets 0 at (1, 2) — protected: predates this bot session; cleanse: KEEP kind 534 quality 2 sockets 0 at (2, 0) — unmovable (the Cube); cleanse: 4 item(s) in the inventory, 0 judged junk, 4 kept; nothing to drop; belt: minimums hold; stash: 1 deposited on the displayed tab; stash: 370 items stashed; stash: skipped 3 unmovable (cube/quest); gold: none carried; merc: alive
+  step waypoint done: arrived at (15218, 5788), stepped off to (15208, 5798)
+  reflex upkeep: combat-module upkeep
+  step traverse: send did not land — CastInFlight: a cast is still resolving; MoveTo would land inside the animation and spend it — re-deciding next tick instead
+  reflex upkeep: combat-module upkeep
+  step traverse: send did not land — CastInFlight: a cast is still resolving; MoveTo would land inside the animation and spend it — re-deciding next tick instead
+  reflex upkeep: combat-module upkeep
+  step traverse: send did not land — CastInFlight: a cast is still resolving; MoveTo would land inside the animation and spend it — re-deciding next tick instead
+  reflex upkeep: combat-module upkeep
+  step traverse: send did not land — CastInFlight: a cast is still resolving; MoveTo would land inside the animation and spend it — re-deciding next tick instead
+  step traverse: clicked the staircase (attempt 1)
+  step traverse: clicked the staircase (attempt 2)
+  step traverse: clicked the staircase (attempt 3)
+  step traverse done: arrived in Forgotten Tower at (10006, 8002)
+  step done done: run complete
+chat> [claude] TEST T70 CONCLUDED — PASS
+chat> (never delivered)
+
+TEST T70 CONCLUDED — PASS: 35s; cycles: 1, clean: 1
+  #1: [CVRL]; game 1: ticks: 58, reflex fires: 5, steps done: town_preamble, waypoint, traverse, done; ended: not in a game (the run left, as designed); traverses 1/1 (target area 20)
+
+--- stderr ---
+

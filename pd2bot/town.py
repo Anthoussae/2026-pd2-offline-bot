@@ -1993,7 +1993,13 @@ class TownLayer:
         kept: list[tuple[object, str]] = []
         for item in carried:
             if not item.is_movable:
-                kept.append((item, "unmovable (the Cube)"))
+                # Name the actual member: the set holds the Cube AND the
+                # tomes now, and "unmovable (the Cube)" printed against a
+                # tome reads like a bug in the report (T70 run 3 did
+                # exactly that, three times in one preamble).
+                kept.append(
+                    (item, f"unmovable ({offsets.unmovable_reason(item.kind)})")
+                )
             elif item.kind in offsets.RIGHT_CLICK_HAZARD_KINDS:
                 kept.append((item, "right-click hazard (potion/tome)"))
             elif item.unit_id in protected:
