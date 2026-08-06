@@ -245,3 +245,4 @@ headings, noted in parentheses, say roughly where they fell).
 - M6 P4 R221 [execute] Stand in the Forgotten Tower for the hostile census (T73) · 2026-08-06 01:35
 - M6 P4 R222 [execute] Second census with real monsters (T73 run 2) · 2026-08-06 01:52
 - M6 P4 R223 [verify] Launch the first live Countess run (T71 run 3) + judge the staging approach · 2026-08-06 02:51
+- M6 P4 R224 [decision] Approve the pickup-reliability plan: phase table + measure-first gate · 2026-08-06 05:21
