@@ -7,12 +7,16 @@ same commit as the transition itself.
 
 - **Milestone:** M6 — Countess flagship
 - **Phase:** P4 — the countess run and the Cellar 5 endgame (P1, P2, P3
-  DONE; plan: `docs/plans/2026-08-03-m6-countess/`)
+  DONE; plan: `docs/plans/2026-08-03-m6-countess/`). **Active side
+  workstream: pickup reliability**, `docs/plans/2026-08-06-pickup-reliability/`
+  — approved R224, precedes the M6 P5 acceptance battery. P1 done; P2
+  (live calibration) written and **waiting on game time**.
 - **Next request ID:** R224 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
-- **Next test ID:** T75 (T71 has now run 4 times — the harness counts
-  every row with the id; T72 twice, T73 twice, T74 twice; check
+- **Next test ID:** T77 (T75 unused; **T76 is written and unlaunched** —
+  the pickup calibration. T71 has now run 4 times; the harness counts
+  every row with the id; T72/T73/T74 twice each; check
   `docs/drill-log.md`)
 
 Updated: 2026-08-06. Branch `m6-countess`, pushed, **PR #2 open**
@@ -159,7 +163,35 @@ failed emits **no run-log event** — those four ticks are visible only as
 durations with nothing inside them. Close that gap first; the method
 note in this file was paid for four times already.
 
-## NEXT: pickup reliability — a new M6 phase, BEFORE the P5 acceptance
+## IN FLIGHT: pickup reliability (plan approved R224, 2026-08-06)
+
+`docs/plans/2026-08-06-pickup-reliability/` — 5 phases, `md`.
+
+**P1 DONE** (no game needed): a spent click budget now emits
+`item.abandoned` with reason, click count, the aim points actually
+spent, and the neighbour count; `send()` swallowing a `NavigationError`
+now emits `nav.failed`; `runlog --pickup` prints the census.
+`item.collected` also carries `attributed_to` when another item's click
+produced it — the "clicked A, got B" case as a standing metric (P4
+pulled forward, telemetry only, zero behaviour change). Baseline
+captured and reproduced by the tool: **18/31 (58%)**, in
+`baseline-t71-run4.txt`.
+
+**P2 WRITTEN, NOT LAUNCHED** — `drills/t76_pickup_calibration.py`, per
+the operator's instruction to stop at the live boundary. It stages
+solo/pair/pile arrangements across item classes, walks the aim schedule
+against each target, and records *which unit* each click produced. Its
+verdict logic is unit-tested, including the criterion that it **cannot
+PASS on solo rounds alone** (the T72 lesson, in the criteria rather than
+a comment). Round 0 is a read-only probe for whether label geometry is
+readable — the highest-value five minutes in the plan.
+
+Deliberately NOT done without the game: the behavioural half of P4
+(splitting "inventory full" from "the click missed"). It changes what
+the bot does, it cannot be validated here, and stacking unvalidated
+behaviour changes is the band the stage-B review was called over.
+
+### Why this precedes the M6 P5 acceptance
 
 Recommended 2026-08-06 after reviewing the plans. **Do not go straight
 to P5's acceptance stages.** The reasoning, so it can be argued with:

@@ -482,6 +482,19 @@ def pickup_report(events: list[dict]) -> list[str]:
         f"  {quick} item(s) took <=2 clicks; "
         f"{sum(n for c, n in histogram.items() if c >= 8)} spent 8 or more"
     )
+    stolen = [
+        e for e in collected.values() if e.get("attributed_to") is not None
+    ]
+    if stolen:
+        # The "clicked A, got B" rate, as a standing number rather than a
+        # forensic finding. Every one of these is a click that spent
+        # itself on the wrong item while its real target stayed put.
+        lines.append(f"  CLICKED-THE-NEIGHBOUR ({len(stolen)})")
+        for e in stolen:
+            lines.append(
+                f"    {str(e.get('item')):<18} came up from a click aimed at "
+                f"unit {e.get('attributed_to')} at {e.get('attributed_aim')}"
+            )
     stray = [u for u in collected if u not in attempts]
     if stray:
         lines.append(

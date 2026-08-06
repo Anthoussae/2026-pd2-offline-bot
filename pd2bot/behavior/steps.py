@@ -335,6 +335,12 @@ class RunServices:
     # (T56's log showed the same coordinates "picked" twice and the belt
     # still short, and nobody could say what really happened).
     pending_pickup: dict[int, tuple] = field(default_factory=dict)
+    # What the most recent pickup click was aimed at: (unit_id, position,
+    # when). Telemetry for the "clicked A, got B" case — T71 run 4 had 9
+    # of its 13 misses sitting within 2 subtiles of an item that DID come
+    # up, so the click was landing on the neighbour. Knowing that turns a
+    # one-off forensic finding into a standing measurement.
+    last_click: tuple[int, tuple[int, int], float] | None = None
     cleanse_safe_radius: int = 40
     # -- cleanse drop hygiene (R175, user-diagnosed live) ------------------
     #
@@ -810,6 +816,7 @@ class _PickupMixin:
                 position=mapframe.describe(position, frame=frame),
                 took_s=round(now - clicked, 2),
                 accidental=False,
+                **self._attribution(unit_id, position, now),
             )
             if potion is not None:
                 if census is None:
@@ -824,6 +831,38 @@ class _PickupMixin:
                 )
             else:
                 self.services.narrate(f"pickup: kind {kind} at {position} came up")
+
+    def _attribution(
+        self, unit_id: int, position: tuple[int, int], now: float
+    ) -> dict:
+        """Which click actually produced this pickup, when it was not this
+        item's own — the "clicked A, got B" measurement.
+
+        T71 run 4: nine of thirteen misses lay within 1-2 subtiles of an
+        item that DID come up, the sharpest case being a Nef rune missed
+        at (12544, 11084) while a Hel rune one subtile away came up. The
+        bot recorded a clean success for the neighbour and kept spending
+        clicks on the target, learning nothing from the strongest signal
+        in the run.
+
+        Deliberately conservative — it only speaks when the most recent
+        click was aimed at a DIFFERENT unit, was recent enough to still
+        be resolving, and was close enough that the sprites could
+        plausibly overlap. Anything else returns nothing rather than a
+        guess: an attribution that fires loosely would poison the very
+        measurement it exists to produce.
+        """
+        aimed = self.services.last_click
+        if aimed is None:
+            return {}
+        target_id, target_at, when = aimed
+        if target_id == unit_id:
+            return {}  # its own click; nothing to attribute
+        if now - when > self.services.pickup_retry_s * 2:
+            return {}  # too stale to blame
+        if _chebyshev(target_at, position) > 2:
+            return {}  # too far apart for one click to have hit both
+        return {"attributed_to": target_id, "attributed_aim": list(target_at)}
 
     def _log_drop(self, item: GroundItem, rule: str | None = None) -> None:
         """One `item.dropped` per wanted item, ever (P7).
@@ -1123,6 +1162,9 @@ class _PickupMixin:
         self.services.pending_pickup[item.unit_id] = (
             item.kind, potion_type_of(item), item.position, now,
         )
+        # What this click was AIMED at, so a pickup that lands on the
+        # neighbour can say so (`confirm_pickups`). Pure telemetry.
+        self.services.last_click = (item.unit_id, item.position, now)
         ctx.executor.execute(
             PickUpItem(
                 item.unit_id, item.position, attempt=attempts, kind=item.kind

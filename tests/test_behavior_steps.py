@@ -2022,6 +2022,66 @@ def test_a_belt_full_write_off_is_still_reported_as_belt_full(tmp_path):
     assert gave[0]["reason"] == "belt full for healing"
 
 
+def test_a_pickup_that_lands_on_the_neighbour_says_so(tmp_path):
+    """The sharpest signal in T71 run 4 and the bot learned nothing from
+    it: a Nef rune missed at (12544, 11084) while a Hel rune ONE subtile
+    away came up. Nine of thirteen misses had that shape."""
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    step, svc, here, executor, ctx = sweeping(clock, runlog=log)
+    target = GroundItem(unit_id=920, kind=HEAL, position=(1001, 1000), quality=2)
+    neighbour = GroundItem(unit_id=921, kind=HEAL, position=(1002, 1000), quality=2)
+
+    # We clicked the TARGET...
+    step.collect(snap(pos=HOME, items=[target, neighbour]), ctx, target)
+    # ...and had also clicked the neighbour a moment before, so both are
+    # pending. The neighbour is what leaves the ground.
+    svc.pending_pickup[921] = (HEAL, "healing", (1002, 1000), clock())
+    clock.advance(0.5)
+    step.confirm_pickups(snap(pos=HOME, items=[target]))
+
+    got = _events(log, "item.collected")
+    assert len(got) == 1 and got[0]["unit_id"] == 921
+    assert got[0]["attributed_to"] == 920, "the click was aimed at 920"
+    assert got[0]["attributed_aim"] == [1001, 1000]
+
+
+def test_attribution_stays_quiet_when_the_item_was_its_own_target(tmp_path):
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    step, svc, here, executor, ctx = sweeping(clock, runlog=log)
+    item = GroundItem(unit_id=922, kind=HEAL, position=(1001, 1000), quality=2)
+    step.collect(snap(pos=HOME, items=[item]), ctx, item)
+    clock.advance(0.5)
+    step.confirm_pickups(snap(pos=HOME))
+
+    got = _events(log, "item.collected")
+    assert "attributed_to" not in got[0], "an ordinary pickup needs no blame"
+
+
+def test_attribution_refuses_to_guess_across_distance_or_time(tmp_path):
+    # A loose attribution would poison the measurement it exists to make.
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    step, svc, here, executor, ctx = sweeping(clock, runlog=log)
+    far = GroundItem(unit_id=923, kind=HEAL, position=(1001, 1000), quality=2)
+    step.collect(snap(pos=HOME, items=[far]), ctx, far)
+
+    # Same moment, but 30 subtiles away: one click cannot have hit both.
+    svc.pending_pickup[924] = (HEAL, "healing", (1030, 1030), clock())
+    clock.advance(0.2)
+    step.confirm_pickups(snap(pos=HOME))
+    got = [e for e in _events(log, "item.collected") if e["unit_id"] == 924]
+    assert "attributed_to" not in got[0]
+
+    # Close enough, but long after the click stopped resolving.
+    svc.pending_pickup[925] = (HEAL, "healing", (1002, 1000), clock())
+    clock.advance(svc.pickup_retry_s * 2 + 1)
+    step.confirm_pickups(snap(pos=HOME))
+    got = [e for e in _events(log, "item.collected") if e["unit_id"] == 925]
+    assert "attributed_to" not in got[0]
+
+
 def test_a_swallowed_navigation_error_is_recorded(tmp_path):
     """`send` absorbs NavigationError so one unreachable target cannot end
     a run — correct, and until now completely invisible. T71 run 4 spent

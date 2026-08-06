@@ -125,7 +125,7 @@ as "0 away".
 | kind | when | fields |
 |---|---|---|
 | `item.dropped` | a **wanted** item is seen for the first time this run | `unit_id`, `item`, `item_kind`, `quality`, `sockets`, `rule`, `position` |
-| `item.collected` | a clicked item provably left the ground | `unit_id`, `item`, `potion`, `position`, `took_s`, `accidental` |
+| `item.collected` | a clicked item provably left the ground | `unit_id`, `item`, `potion`, `position`, `took_s`, `accidental`, and `attributed_to` + `attributed_aim` when another item's click produced it |
 | `item.abandoned` | an item is written off | `unit_id`, `item`, `reason`, and then either `walks` (walk budget) or `clicks` + `aim_points` + `neighbours` + `position` (click budget) |
 
 `item.abandoned` covers **both** write-off paths. The walk-budget one
@@ -140,6 +140,17 @@ step is making rather than second-guessing it: `clicks did not land`,
 so "all 8 attempts failed" is a statement with contents. `neighbours`
 counts other ground items within 2 subtiles, because item density is the
 leading hypothesis for why these clicks miss.
+
+`item.collected`'s **`attributed_to`** names the unit a click was aimed
+at when a *different* item came up — the "clicked A, got B" case. Nine
+of T71 run 4's thirteen misses lay within 1–2 subtiles of an item that
+did come up (a Nef rune missed while a Hel rune one subtile away was
+collected), and the bot booked a clean success for the neighbour while
+continuing to spend clicks on the target. The attribution is
+deliberately conservative — it speaks only when the most recent click
+targeted a different unit, is recent enough to still be resolving, and
+was within 2 subtiles — because a loose attribution would poison the
+measurement it exists to produce.
 
 `item.dropped` fires on the transition into the wanted set, so a rune
 lying on the floor for thirty ticks is one event. Pair it with
