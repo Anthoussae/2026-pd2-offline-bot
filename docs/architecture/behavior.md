@@ -279,6 +279,39 @@ the executor's safety rules do not move. A posture changes offense, not
 survival — that boundary is the architecture's whole point, and it is
 what made runtime switching safe to build.
 
+## The Countess endgame (M6 P4: `clear_countess`)
+
+One ticked step (`steps.py::ClearCountessStep`) encodes the user's
+tactics for the Cellar 5 chamber, in four beats: a **neighborhood
+clearance** around the arrival staircase (a composed `ClearRadiusStep`
+— the same machinery and budgets, a modest radius, no patrol) so the
+encounter has no gaggle; a **staging point screen-north of the chamber
+anchor**, derived from the atlas at run time (`_screen_north_point`:
+walkable candidates bearing-north-first, distance descending) and
+recorded on the blackboard under `countess` for the drill to display;
+a **short-leg advance** through the combat module's own `approach`,
+held by the revive brake (no advancing while the wall is shorter than
+`approach_with_revives`, bounded by `advance_revive_patience` so a
+cellar with nothing to raise cannot hang the run); and the **kill
+condition** — her pinned identity (kind 734 / unique_no 6, T68+R216)
+read with a dead mode, or *provably absent* after the budgeted
+(`sweep_budget_s`, 15 s) chamber sweep, one in-and-out pass that runs
+in both outcomes (after a seen kill it doubles as drop
+reconnaissance). The chamber anchor comes from the run file
+(T68-measured, per seed) and yields to the live boss read the moment
+she is in perception — the exits' memory-first/live-authority rule
+again. **Alive and unreachable is a loud stop**, never a write-off:
+the step is the run's objective, so it alerts and raises rather than
+finishing around her. On confirmation the chamber region (her corpse's
+position when seen) is published as the `cleared` circle, which the
+existing `pickup` step adopts unchanged.
+
+The same phase also settled the T70 Thul lesson: `traverse` now
+collects wanted items en route through the shared pickup mixin —
+bounded by `pickup_radius`, only on ticks combat declined, holding the
+walk only while a click is resolving — so a rune on a traversal floor
+is no longer invisible to behavior while perception lists it.
+
 ## Re-verification drill after a patch
 
 Same spirit as perception.md's and game-cycle.md's drills; the

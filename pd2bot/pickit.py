@@ -103,6 +103,29 @@ class ItemTable:
     pending: frozenset[str]
     groups: dict[str, tuple[str, ...]]
 
+    def name_for(self, kind: int) -> str | None:
+        """The verified name for a kind id, or None (the run-event-log
+        plan, P3).
+
+        The reverse of `ids`, for the log: an event saying "picked up a
+        Thul Rune" is worth reading and one saying "picked up kind 702"
+        is not. None rather than a guess is the whole contract — the
+        caller renders `kind <n>`, because a name invented for a
+        diagnostic log is indistinguishable from a real one, and R144
+        (six wrong elite armours approved by eyeballing numbers; a Wire
+        Fleece picked up as a Kraken Shell) is what that costs.
+
+        Ambiguity is reported rather than silently resolved: several
+        names can legitimately cover one kind, so the answer is stable
+        (sorted) and says so.
+        """
+        matches = sorted(n for n, ids in self.ids.items() if kind in ids)
+        if not matches:
+            return None
+        if len(matches) > 1:
+            return f"{matches[0]} (also {', '.join(matches[1:])})"
+        return matches[0]
+
     def known(self, name: str) -> bool:
         return (
             name in self.ids
@@ -392,6 +415,14 @@ class Pickit:
     belt_capacity: dict[str, int] = field(
         default_factory=lambda: dict(DEFAULT_BELT_CAPACITY)
     )
+    # The vocabulary the rules were resolved against, RETAINED so the run
+    # log can name what the bot reached for (the run-event-log plan, P3).
+    # It was previously consumed at load time and dropped, which left the
+    # log with numbers; and a second naming table built for the log would
+    # be exactly the divergence R144 was paid for. None = no table in
+    # this environment (hand-built pickits in tests), and the log falls
+    # back to `kind <n>` rather than guessing.
+    item_table: ItemTable | None = None
 
     @property
     def pending_names(self) -> frozenset[str]:
@@ -626,4 +657,5 @@ def load_pickit(
     return Pickit(
         rules=tuple(rules),
         belt_capacity=dict(belt_capacity or DEFAULT_BELT_CAPACITY),
+        item_table=item_table,
     )

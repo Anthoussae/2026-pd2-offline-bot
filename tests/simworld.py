@@ -38,6 +38,7 @@ from pd2bot.behavior.actions import (
     CastAtPoint,
     CastSelf,
     DrinkPotion,
+    InteractObject,
     MoveTo,
     PickUpItem,
 )
@@ -48,9 +49,12 @@ from pd2bot.behavior.necro import NecroCombat
 from pd2bot.behavior.reflex import ReflexLadder
 from pd2bot.behavior.run import build_states, load_run
 from pd2bot.behavior.steps import RunServices, build_registry
+from pd2bot.exits import ExitScan, LevelExit
 from pd2bot.items import CarriedItem, CarriedItems
+from pd2bot.mapframe import MapFrame
 from pd2bot.pickit import Pickit, Rule
 from pd2bot.player import ActiveSkills, Player
+from pd2bot.runlog import NullRunLog
 from pd2bot.safety import SafetyConfig, SafetyMonitor
 from pd2bot.snapshot import GameSnapshot
 from pd2bot.units import GroundItem, Monster
@@ -83,6 +87,14 @@ class SimMonster:
     hp: int = 100
     poisoned_at: float | None = None
     drops: tuple[tuple[int, int], ...] = ()  # (kind, quality) left on death
+    # Multi-area worlds (M6 P4): which area this monster stands in. None
+    # keeps the M5 behavior — visible wherever the player is — so every
+    # pre-M6 scenario reads exactly as it always did.
+    area: int | None = None
+    # Identity, for the Countess (kind 734 / unique_no 6) and her court.
+    kind: int = 50
+    is_boss: bool = False
+    unique_no: int | None = None
 
 
 @dataclass
@@ -114,6 +126,18 @@ class ColdPlains:
     junk_kinds: set[int] = field(default_factory=set)
     # An item the game will never let us have (inventory full).
     unpickable: set[int] = field(default_factory=set)
+    # -- multi-area worlds (M6 P4) ----------------------------------------
+    # Staircases: area -> [(dest area, position)]. Clicking one within
+    # reach flips the area id and drops the player at the destination's
+    # arrival point — the client's own transition, minus the loading.
+    exits: dict[int, list[tuple[int, tuple[int, int]]]] = field(default_factory=dict)
+    # Where the player lands on entering each area (waypoint or stairs).
+    arrivals: dict[int, tuple[int, int]] = field(default_factory=dict)
+    # The warm ExitMemory (maps/exits.json's shape): (area, dest) -> pos.
+    exit_memory: dict[tuple[int, int], tuple[int, int]] = field(default_factory=dict)
+    # Which area a corpse or ground item lives in. Absent = visible
+    # everywhere, which is the M5 single-area behavior.
+    unit_areas: dict[int, int] = field(default_factory=dict)
     # Records, for assertions.
     ticks: int = 0
     log: list[str] = field(default_factory=list)
@@ -137,6 +161,11 @@ class ColdPlains:
     def area_obj(self, session=None) -> Area:
         return Area(level_no=self.area, position=(0, 0), size=(5000, 5000))
 
+    def _here(self, unit_id: int) -> bool:
+        """Area filter for corpses and ground items (M5 entries pass)."""
+        area = self.unit_areas.get(unit_id)
+        return area is None or area == self.area
+
     def snapshot(self) -> GameSnapshot:
         return GameSnapshot(
             in_game=True,
@@ -145,15 +174,17 @@ class ColdPlains:
             area=self.area_obj(),
             monsters=tuple(
                 Monster(
-                    unit_id=m.unit_id, kind=50, position=m.position, hp=m.hp,
-                    max_hp=100, is_champion=False, is_boss=False,
-                    is_minion=False,
+                    unit_id=m.unit_id, kind=m.kind, position=m.position,
+                    hp=m.hp, max_hp=100, is_champion=False,
+                    is_boss=m.is_boss, is_minion=False,
+                    unique_no=m.unique_no,
                 )
                 for m in self.monsters
+                if m.area is None or m.area == self.area
             ),
             allies=tuple(self.revives),
-            corpses=tuple(self.corpses),
-            ground_items=tuple(self.ground),
+            corpses=tuple(c for c in self.corpses if self._here(c.unit_id)),
+            ground_items=tuple(g for g in self.ground if self._here(g.unit_id)),
         )
 
     def carried(self, session=None) -> CarriedItems:
@@ -199,12 +230,15 @@ class ColdPlains:
                 self.monsters.remove(monster)
                 self.corpses.append(
                     Monster(
-                        unit_id=monster.unit_id, kind=50,
+                        unit_id=monster.unit_id, kind=monster.kind,
                         position=monster.position, hp=0, max_hp=100,
-                        is_champion=False, is_boss=False, is_minion=False,
-                        mode=offsets.MONSTER_MODE_DEAD,
+                        is_champion=False, is_boss=monster.is_boss,
+                        is_minion=False, mode=offsets.MONSTER_MODE_DEAD,
+                        unique_no=monster.unique_no,
                     )
                 )
+                if monster.area is not None:
+                    self.unit_areas[monster.unit_id] = monster.area
                 for kind, quality in monster.drops:
                     self._next_id += 1
                     self.ground.append(
@@ -213,6 +247,8 @@ class ColdPlains:
                             position=monster.position, quality=quality,
                         )
                     )
+                    if monster.area is not None:
+                        self.unit_areas[self._next_id] = monster.area
                 self.log.append(f"t{self.ticks}: monster {monster.unit_id} died of poison")
 
         if self.ticks in self.damage_at:
@@ -246,6 +282,26 @@ class ColdPlains:
 
         if isinstance(action, MoveTo):
             self.position = action.target
+            return
+
+        if isinstance(action, InteractObject):
+            # A staircase click within reach takes the transition; one
+            # from too far or on empty ground does nothing — a click
+            # that "always works" would prove only that the code can ask.
+            for dest, position in self.exits.get(self.area, ()):
+                if (
+                    position == action.position
+                    and max(
+                        abs(self.position[0] - position[0]),
+                        abs(self.position[1] - position[1]),
+                    ) <= 20
+                ):
+                    self.area = dest
+                    self.position = self.arrivals.get(dest, ARRIVAL)
+                    self.log.append(
+                        f"t{self.ticks}: took the stairs to area {dest}"
+                    )
+                    return
             return
 
         if isinstance(action, AttackUnit):
@@ -364,8 +420,30 @@ class ColdPlains:
     def travel_to(self, dest: int) -> None:
         self.travels.append(dest)
         self.area = dest
-        self.position = ARRIVAL
+        self.position = self.arrivals.get(dest, ARRIVAL)
         self.log.append(f"t{self.ticks}: waypoint to area {dest}")
+
+    # -- the traverse seam (M6 P4): exits read like the live scan ---------
+
+    def level_exits(self) -> ExitScan:
+        """The current area's staircases, ExitScan-shaped. Every exit is
+        visible level-wide — the sim does not model the preset-loading
+        horizon, so it proves the traverse WALKS and CLICKS, while the
+        seek path's honesty was proven live (T70 run 5)."""
+        found = tuple(
+            LevelExit(position=position, dest_area=dest)
+            for dest, position in self.exits.get(self.area, ())
+        )
+        return ExitScan(
+            exits=found, area=self.area, rooms_walked=len(found),
+            rooms=tuple(e.position for e in found),
+        )
+
+    def exit_recall(self, here: int, dest: int) -> tuple[int, int] | None:
+        return self.exit_memory.get((here, dest))
+
+    def exit_remember(self, here: int, dest: int, position: tuple[int, int]) -> None:
+        self.exit_memory[(here, dest)] = position
 
 
 class SimGated:
@@ -434,7 +512,7 @@ class SimRun:
 
     def report(self) -> str:
         """The decision trace, as the review gate reads it."""
-        lines = ["# P5 sim decision trace", ""]
+        lines = ["# Sim decision trace", ""]
         lines.append(f"ticks: {self.engine.report.ticks}")
         lines.append(f"steps completed: {', '.join(self.engine.report.steps_completed)}")
         lines.append(f"reflex fires: {len(self.engine.report.reflex_fires)}")
@@ -460,6 +538,7 @@ def build_sim(
     alert=None,
     run_file: str = "cold-plains.toml",
     narrate=None,
+    runlog=None,
 ) -> SimRun:
     """Assemble the real stack over `world`.
 
@@ -487,6 +566,9 @@ def build_sim(
                  potion_reserve=2, potion_type="rejuv"),
             Rule(name="quality loot", action="keep",
                  qualities=frozenset({5, 6, 7, 8})),
+            # The rune rule (M6 P4, the T70 Thul): kind 702 is the id the
+            # T67 accuracy melange validated for "all runes" live.
+            Rule(name="runes", action="keep", kinds=frozenset({702})),
         ),
         belt_capacity={"healing": 8, "mana": 4, "rejuv": 4},
     )
@@ -501,6 +583,11 @@ def build_sim(
         monkeypatch.setattr("pd2bot.skills.time.sleep", lambda s: None)
 
     gated = SimGated(world, config.hotkeys)
+    log = runlog if runlog is not None else NullRunLog()
+
+    def area_frame():
+        return MapFrame.from_area(world.area_obj())
+
     executor = SimExecutor(
         world,
         session=None,
@@ -511,12 +598,19 @@ def build_sim(
         # The hover probe ring sleeps between cursor moves; in the sim
         # those are real seconds nobody is simulating. No time passes.
         sleep=lambda seconds: None,
+        # The run event log (the run-event-log plan): the sim drives the
+        # PRODUCTION emit path, so "does the log agree with what the bot
+        # did?" is a question the test suite can answer.
+        runlog=log,
+        frame=area_frame,
+        skill_names={sid: name for name, sid in config.skills.items()},
     )
 
     combat = NecroCombat(
         config=config.combat,
         is_walkable=world.is_walkable,
         clock=world.clock,
+        postures=config.postures,
     )
     ladder = ReflexLadder(
         config.reflex,
@@ -545,6 +639,15 @@ def build_sim(
         # world through it would shift every scripted spawn instead.
         sleep=lambda seconds: None,
         cleanse=world.cleanse_inventory,
+        # The loaded posture names (M6 P3): countess.toml names brisk and
+        # aggressive, and a sim that could not validate them would refuse
+        # the very run file the gate exists to prove.
+        postures=frozenset(config.postures),
+        # The traverse seam (M6 P4): the world plays the exit reader and
+        # the exit memory, the same closures wiring.py builds live.
+        level_exits=world.level_exits,
+        exit_recall=world.exit_recall,
+        exit_remember=world.exit_remember,
         **({"alert": alert} if alert is not None else {}),
         **({"narrate": narrate} if narrate is not None else {}),
     )
@@ -569,6 +672,8 @@ def build_sim(
             ),
         ),
         clock=world.clock,
+        runlog=log,
+        frame=area_frame,
         # The engine's inter-tick sleep IS the world's clock: one tick of
         # bot time is one tick of world time, so poison, damage and
         # cooldowns all advance together.
@@ -642,23 +747,123 @@ def patrol_scenario() -> ColdPlains:
     return world
 
 
+def countess_route(world: ColdPlains) -> None:
+    """The descent's scripted geography, shared by the P4 scenarios.
+
+    Areas 6 -> 20 -> 21 ... 25, arrival and staircase per area, the exit
+    memory pre-warmed — the WARM-descent shape, which is every run after
+    T70 run 5 banked the staircases. Area 25 uses the real seed's own
+    numbers (T68/T70): arrival by the up-staircase at (12635, 11061),
+    the chamber anchor at (12548, 11036) — so the sim's staging geometry
+    is the live run's staging geometry, not a convenient invention.
+    """
+    world.belt = [
+        (MANA_KIND, 0), (REJUV_KIND, 1),
+        (HEAL_KIND, 2), (HEAL_KIND, 2), (HEAL_KIND, 3),
+    ]
+    route = [6, 20, 21, 22, 23, 24, 25]
+    world.arrivals = {
+        6: (1000, 1000), 20: (1200, 1200), 21: (1400, 1400),
+        22: (1600, 1600), 23: (1800, 1800), 24: (2000, 2000),
+        25: (12635, 11061),
+    }
+    for here, dest in zip(route, route[1:], strict=False):
+        stairs = (
+            world.arrivals[here][0] + 35, world.arrivals[here][1] + 35,
+        )
+        world.exits.setdefault(here, []).append((dest, stairs))
+        world.exit_memory[(here, dest)] = stairs
+        # The stairs back up, for honesty (nothing uses them here).
+        world.exits.setdefault(dest, []).append((here, world.arrivals[dest]))
+
+
+def countess_scenario() -> ColdPlains:
+    """The flagship, end to end: the choreography the P4 gate reviews.
+
+    A Thul-shaped rune on a traversal floor (the T70 run 5 miss — it must
+    be collected en route now), a corridor straggler that obstructs, the
+    champion pack by the Cellar 5 stairs (the neighborhood clearance's
+    reason), and the Countess herself in her chamber — pinned identity,
+    poison-killed like everything else, dropping a rune and a unique
+    that the chamber-region pickup must lift.
+    """
+    world = ColdPlains()
+    countess_route(world)
+    # The T70 miss, restaged: a wanted rune beside the Cellar 2 path.
+    world.ground.append(
+        GroundItem(unit_id=880, kind=702, position=(1615, 1612), quality=2)
+    )
+    world.unit_areas[880] = 22
+    world.monsters = [
+        # A corridor straggler close enough to obstruct (brisk bubble 12).
+        SimMonster(40, (1820, 1818), area=23),
+        # The gaggle at the stairs: the boss-flagged champion T68 read
+        # beside her floor's arrival, plus a courtier.
+        SimMonster(
+            65, (12614, 11056), area=25, kind=21, is_boss=True, unique_no=0
+        ),
+        SimMonster(64, (12620, 11050), area=25),
+        # The Countess: the pinned identity, at her T68-read position.
+        SimMonster(
+            66, (12548, 11036), area=25, kind=734, is_boss=True, unique_no=6,
+            drops=((999, 7), (702, 2)),
+        ),
+    ]
+    return world
+
+
+def countess_absent_scenario() -> ColdPlains:
+    """The blinded-boss-read path: she is never in perception at all.
+
+    The kill condition's fallback must walk the budgeted chamber sweep
+    and conclude PROVABLY ABSENT — loudly distinct from a seen kill —
+    rather than waiting forever on a read that will never answer.
+    """
+    world = ColdPlains()
+    countess_route(world)
+    world.monsters = [
+        SimMonster(
+            65, (12614, 11056), area=25, kind=21, is_boss=True, unique_no=0
+        ),
+    ]
+    return world
+
+
 def main() -> int:  # pragma: no cover - the artifact generator
-    """Print the decision trace. `python -m tests.simworld > trace.md`"""
+    """Print the decision trace. `python -m tests.simworld > trace.md`,
+    or `python -m tests.simworld countess` for the M6 P4 gate artifact
+    (`countess-absent` for the blinded-read sweep path)."""
+    import sys
+
     import pd2bot.behavior.execute as execute_mod
     import pd2bot.skills as skills_mod
 
-    world = cold_plains_scenario()
+    which = sys.argv[1] if len(sys.argv) > 1 else "cold-plains"
+    world, run_file, budget = {
+        "cold-plains": (cold_plains_scenario, "cold-plains.toml", 400),
+        "countess": (countess_scenario, "countess.toml", 900),
+        "countess-absent": (countess_absent_scenario, "countess.toml", 900),
+    }[which]
+    world = world()
     skills_mod.read_active_skills = world.active_skills
     execute_mod.read_player = world.player
     skills_mod.time.sleep = lambda s: None
 
     alerts: list[str] = []
-    sim = build_sim(world, alert=alerts.append)
-    for _ in range(400):
+    narrations: list[str] = []
+    sim = build_sim(
+        world, alert=alerts.append, run_file=run_file,
+        narrate=narrations.append,
+    )
+    for _ in range(budget):
         if sim.engine.tick():
             break
         world.advance_tick(0.5)
     report = sim.report()
+    if narrations:
+        report += "\n\n## Narrative (R179)\n" + "\n".join(
+            f"- {line}" for line in narrations
+        )
     if alerts:
         report += "\n\n## Alerts raised\n" + "\n".join(f"- {a}" for a in alerts)
     print(report)

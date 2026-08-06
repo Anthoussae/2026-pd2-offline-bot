@@ -1,0 +1,38 @@
+# The Forgotten Tower probe — the P5 diagnostic run.
+#
+# Town -> Black Marsh -> Forgotten Tower -> Tower Cellar 1, and stop.
+# Deliberately SHORT: the open question is why the bot cannot cross an
+# empty 19x19-subtile room with the staircase eleven subtiles from the
+# arrival point (T71 run 1: 144 s, five clicks, then a loud give-up), and
+# a two-minute run that reaches that room is worth more than a five-minute
+# one that has to survive everything else first.
+#
+# The Countess is not involved. Nothing here is new behaviour — this run
+# file exists so the NEW EVENT LOG has something to describe, and so the
+# same failure can be reproduced cheaply and repeatedly.
+#
+# Read the result with:
+#   python -m pd2bot.runlog
+#   python -m pd2bot.runlog --kind step.decision
+
+name = "m6-tower-probe"
+
+[[step]]
+name = "town_preamble"
+
+[[step]] # act I tab -> Black Marsh row (T69 calibration)
+name = "waypoint"
+dest = 6
+
+[[step]] # Black Marsh -> Forgotten Tower (this one has always worked)
+name = "traverse"
+dest = 20
+posture = "brisk"
+
+[[step]] # Forgotten Tower -> Cellar 1: THE transition under investigation
+name = "traverse"
+dest = 21
+posture = "brisk"
+
+[[step]]
+name = "done"

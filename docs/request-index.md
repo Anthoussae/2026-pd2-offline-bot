@@ -240,3 +240,7 @@ headings, noted in parentheses, say roughly where they fell).
 - M6 P2 R216 [verify] Confirm the Countess candidate by eye · 2026-08-05 06:20
 - M6 P2 R217 [decision] Standing mandate for the P2 live batch · 2026-08-05 06:20
 - M6 P2 R218 [execute] Clear stash space (preamble halts) · 2026-08-05 18:40
+- M6 P4 R219 [decision] Go/no-go: the countess run (sim + staging) · 2026-08-05 21:21
+- M6 P4 R220 [decision] Run-log design confirmations Q1-Q11 · 2026-08-05 22:30
+- M6 P4 R221 [execute] Stand in the Forgotten Tower for the hostile census (T73) · 2026-08-06 01:35
+- M6 P4 R222 [execute] Second census with real monsters (T73 run 2) · 2026-08-06 01:52

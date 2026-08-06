@@ -107,3 +107,134 @@ static, never tested against a level bigger than the player's loaded
 neighbourhood. The Forgotten Tower (3 rooms, all loaded at once) passed
 T68 and stage one and hid the limit completely. Corrected in the module
 docstring with the evidence.
+
+---
+
+# Addendum — T71, the Forgotten Tower (2026-08-05)
+
+*User observation, watching T71 run 1: "bot got stuck in a tiny square
+room with one exit and one entrance (the forgotten tower). There's no
+way that it knows the layout & the stair location, or if it does,
+something is horribly wrong with the pathfinding. I have a bad feeling
+that the agent is hallucinating that the bot knows the layout."*
+
+The suspicion is fair and the answer is the same as last time, tested
+the same way — but this addendum exists mainly to record the thing the
+first diagnosis missed, which is that **the artifact could not answer
+the question at all**.
+
+## The map: KNOWN, again, and this time it is the whole room
+
+Area 20 from the atlas, live data, no mocks, using the bot's own
+`MapStore` loader and its own `astar`:
+
+    rooms stored: 3 (see contamination note below)
+    the Tower's own room: origin (10000, 8000), 40x40 subtiles
+    arrival (10006, 8002):  known YES  walkable YES
+    staircase (10002, 8013): known YES  walkable YES
+    walkable cells: 361 of 1600
+    nearest_walkable(exit) -> (10002, 8013)   (the exit tile itself)
+    astar(arrival -> exit) -> 12 steps, simplified to [(10006,8002),(10002,8013)]
+
+Rendered, the Tower is a 19x19-subtile walkable box — exactly the
+"tiny square room" the user describes — with the arrival and the
+staircase 11 subtiles apart inside it, and one straight leg between
+them. The bot had a complete floorplan and a valid one-hop route the
+entire time. **Pathfinding is not implicated: in T71 the step never
+called it**, because 11 <= `click_range` 18, so the step goes straight
+to clicking without ever planning a walk.
+
+The map seed also matches (`maps/4e52715f-d2/` is the only seed
+directory, and `area-020.json` was rewritten at 21:30, during the run),
+so the atlas being stale or mis-keyed is ruled out too.
+
+### Contamination noted in passing
+
+`area-020.json` holds three 40x40 rooms, and only one of them is the
+Tower's: the others sit at (12500, 5160) — Cellar 1's arrival — and
+(15240, 5770) — Black Marsh's waypoint. Same shape as the stray C4
+room found in `area-025.json`: the collision recorder writes under the
+area id it read at that moment, and an area flip mid-read files a
+neighbour's room in the wrong atlas. Harmless here (disconnected
+patches, no route crosses them) but it is a real recorder bug and
+belongs in the speed/robustness pass.
+
+## What the bot actually did in the room: UNKNOWN, and that is the bug
+
+144 seconds in that room. **Five log lines**, all of them "clicked the
+staircase (attempt N)". At the run's measured ~1.05 s per tick (193
+ticks / 203 s) the room cost roughly 140-170 ticks, so ~165 decisions
+were made and recorded nowhere.
+
+Every other return path in `TraverseStep` was silent — the fight
+branch, the collect branch, the walk legs, the click pacing all
+returned `acted`/`waiting` with **no note**, and the engine only logs a
+tick that carries one. So the honest answer to "what was it deciding?"
+was: the artifact does not say, and no amount of re-reading it will
+make it say.
+
+Two stories were floated from that silence and **neither is supported**:
+
+- *"The entrance fight owned the ticks."* The run logged **6 reflex
+  fires total**, none in the Tower, and no upkeep there at all. A
+  continuous fight would have fired upkeep repeatedly.
+- *"The staircase was contested by monsters."* Possible, but a
+  contested staircase would still have clicked every 3 s after its
+  hold, giving ~48 clicks, not 5.
+
+The `exit_block_radius` rule added in response to the first story was
+**REVERTED** on 2026-08-05 (R220 Q10), and the reason matters more than
+the rule did. The user supplied the fact that killed it outright:
+
+> *"There were no monsters in the forgotten tower floor, and there
+> never are. It is just an empty square with an entrance and an exit."*
+
+An empty room does not merely weaken the contested-staircase story — it
+removes its subject. And it sharpens the arithmetic into something no
+surviving hypothesis explains: with no hostiles and no ground items,
+`TraverseStep` should fall through to the click branch on **every**
+tick and click every `exit_retry_s` (3 s) — roughly 48 clicks in 144 s.
+It made **five**, one per ~29 s. Some ~26 s per cycle goes somewhere
+that nothing in this codebase records.
+
+That gap is now the open question, and the answer is being built rather
+than guessed: `docs/plans/2026-08-05-run-event-log/` (structured event
+log, tick timing, per-decision records), with
+`docs/adr/2026-08-05-run-event-log.md` recording why instrumentation
+stopped being optional.
+
+## The instrumentation fix (the actual deliverable)
+
+`TraverseStep.step` is now a thin wrapper over `_decide`, and every
+previously-silent return path carries a note naming the decision.
+Consecutive identical decisions collapse into one line with a tick
+count and a duration, and the position + distance-to-stairs ride along:
+
+    traverse[21]: clicked the staircase (attempt 1) [at (10006, 8002), 11 from the stairs] — 1 tick(s) over 0.8s
+    traverse[21]: waiting out the last click (10 away) [at (10005, 8003), 10 from the stairs] — 4 tick(s) over 3.4s
+
+A healthy traverse costs a handful of lines; a stuck one prints the
+exact shape of its stall, including whether the character is moving.
+The trace is flushed before every loud give-up, so the failure message
+now arrives with the history that produced it.
+
+## The leading hypothesis to test next (NOT yet evidence)
+
+`InteractObject` clicks the **raw tile projection**
+(`gated.click_world(*action.position)`, execute.py) with no offset. Two
+hundred lines above it in the same file sits T63's measured finding for
+items: the tile projection misses a sprite roughly **29 times in 30**,
+because sprites draw *upward* from their tile — which is why pickup has
+an eight-point offset schedule and object clicks never got one.
+
+If a staircase click lands on the floor short of the stairs, the client
+reads it as a **walk order**, and the observed behaviour follows: the
+character shuffles a couple of subtiles, stops, is re-clicked, shuffles
+again — "clicking around randomly" — and the transition only fires on
+the runs where a walk happens to end on the warp tile (which is how
+T70 run 5 and this run's own Black Marsh -> Tower hop succeeded).
+
+The decision trace answers this directly on the next run: if the
+position moves a little after each click, the click is a walk order,
+and the fix is an aim schedule for objects (or walking onto the warp
+outright) rather than anything to do with maps or monsters.

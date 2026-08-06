@@ -209,6 +209,18 @@ revive_search_radius = 15
 # recasting forever — every one of those ticks is a tick not fighting.
 # The settle delays stop the bot re-casting before the last cast resolved.
 desecrate_rounds = 2
+# Strikes on ONE unit that move neither its health nor our mana before it
+# stops being a target (T72, 2026-08-06). That run put 23 strikes each
+# into two decorative bats over 173 seconds and nothing in the code could
+# notice. Two readings, both required: a poison strike costs mana, so
+# mana that does not move means the strike never connected at all, while
+# mana spent with the target's health static means it landed and has not
+# shown yet. NEITHER is permanent: Hell "immunity" is 100% resistance,
+# not invulnerability, and this character pierces poison resistance while
+# the merc's Pus Spitter casts Lower Resist on striking. Raise this if
+# tough-but-killable monsters are being abandoned; the write-off already
+# expires the instant a target's health moves.
+futile_strikes = 4
 desecrate_settle_s = 1.0
 revive_settle_s = 0.6
 # A budget burned against desecrate's own cooldown refreshes after this

@@ -53,12 +53,14 @@ def monster(uid, pos):
     )
 
 
-def snap(pos=HOME, monsters=(), items=(), allies=(), objects=(), ui=None, area=FIELD):
+def snap(pos=HOME, monsters=(), items=(), allies=(), objects=(), ui=None,
+         area=FIELD, corpses=()):
     return GameSnapshot(
         in_game=True, taken_at=0.0, player=player(pos),
         area=Area(level_no=area, position=(0, 0), size=(500, 500)),
         monsters=tuple(monsters), ground_items=tuple(items),
         allies=tuple(allies), objects=tuple(objects), ui=ui,
+        corpses=tuple(corpses),
     )
 
 
@@ -1934,3 +1936,191 @@ def test_traverse_reclicks_only_when_the_walk_stalls():
     clock.advance(4.0)
     tick_unflipped()
     assert len(clicks()) == 2, "a stalled walk never earned its re-click"
+
+
+def test_traverse_collects_a_wanted_item_en_route():
+    """The T70 run 5 Thul, at unit scale: a wanted item on a traversal
+    floor wins the tick (combat declined it), and the walk resumes once
+    the ground is clean."""
+    from pd2bot.behavior.actions import InteractObject
+
+    clock = Clock()
+    step, world, remembered, executor, ctx, tick = traversing(
+        clock, exit_pos=(1060, 1000), recall=(1060, 1000)
+    )
+    rune = GroundItem(unit_id=880, kind=606, position=(1002, 1000), quality=2)
+    outcome = step.step(snap(pos=world["pos"], area=20, items=[rune]), ctx)
+    assert outcome.acted and not outcome.done
+    picks = [a for a in executor.actions if isinstance(a, PickUpItem)]
+    assert len(picks) == 1 and picks[0].unit_id == 880
+    assert not [a for a in executor.actions if isinstance(a, InteractObject)]
+    # The click resolving holds the walk (a march away from a click in
+    # flight would orphan it) ...
+    outcome = step.step(snap(pos=world["pos"], area=20, items=[rune]), ctx)
+    assert outcome.waiting
+    # ... and a clean floor hands the tick straight back to the traversal.
+    clock.advance(2.0)
+    step.step(snap(pos=world["pos"], area=20), ctx)
+    assert [a for a in executor.actions if isinstance(a, MoveTo)], (
+        "the walk never resumed after the pickup"
+    )
+
+
+# -- the countess endgame (M6 P4) ------------------------------------------------
+
+
+COUNTESS_KIND, COUNTESS_NO = 734, 6
+CHAMBER = (1100, 1100)
+
+
+def countess_monster(pos=CHAMBER, mode=1):
+    return Monster(
+        unit_id=66, kind=COUNTESS_KIND, position=pos, hp=100, max_hp=100,
+        is_champion=False, is_boss=True, is_minion=False,
+        unique_no=COUNTESS_NO, mode=mode,
+    )
+
+
+def countess_corpse(pos=CHAMBER):
+    return Monster(
+        unit_id=66, kind=COUNTESS_KIND, position=pos, hp=0, max_hp=100,
+        is_champion=False, is_boss=True, is_minion=False,
+        unique_no=COUNTESS_NO, mode=offsets.MONSTER_MODE_DEAD,
+    )
+
+
+def countess_step(clock, *, combat=None, alerts=None, **svc_kw):
+    svc = services(clock, combat=combat, alerts=alerts, **svc_kw)
+    step = make_step(
+        "clear_countess", svc,
+        {"chamber_x": CHAMBER[0], "chamber_y": CHAMBER[1],
+         "neighborhood_radius": 30, "chamber_radius": 20},
+    )
+    return step, svc
+
+
+def settle_neighborhood(step, clock, ctx, make_snap):
+    """Drive the composed clearance to done on an empty arrival pocket."""
+    step.step(make_snap(), ctx)  # settle timer starts
+    clock.advance(6.0)  # past clear_settle_s
+    outcome = step.step(make_snap(), ctx)
+    assert "neighborhood clear" in (outcome.note or ""), outcome
+    return outcome
+
+
+def test_countess_corpse_confirms_and_publishes_the_chamber_region():
+    # The primary kill condition: her pinned identity with a dead mode.
+    # The sweep still runs (the sanity pass doubles as drop recon), then
+    # the chamber circle goes on the blackboard for pickup to adopt.
+    clock = Clock()
+    step, svc = countess_step(clock)
+    ctx = context()
+    ctx.notes["arrival"] = HOME
+    dead = countess_corpse((1102, 1101))
+    make_snap = lambda: snap(corpses=[dead])  # noqa: E731
+    settle_neighborhood(step, clock, ctx, make_snap)
+    outcome = None
+    for _ in range(40):
+        outcome = step.step(make_snap(), ctx)
+        clock.advance(0.5)
+        if outcome.done:
+            break
+    assert outcome is not None and outcome.done, "the kill never confirmed"
+    assert "down" in outcome.note
+    cleared = ctx.notes["cleared"]
+    assert cleared["centre"] == (1102, 1101)  # her corpse, not the anchor
+    assert cleared["radius"] == 20 and cleared["patrol"] is True
+
+
+def test_countess_provably_absent_after_the_sweep():
+    # The fallback: never seen, never dead — the sweep walks its pass and
+    # concludes absence rather than waiting on a read that cannot answer.
+    clock = Clock()
+    step, svc = countess_step(clock)
+    ctx = context()
+    ctx.notes["arrival"] = HOME
+    make_snap = lambda: snap()  # noqa: E731
+    settle_neighborhood(step, clock, ctx, make_snap)
+    outcome = None
+    for _ in range(60):
+        outcome = step.step(make_snap(), ctx)
+        clock.advance(0.4)
+        if outcome.done:
+            break
+    assert outcome is not None and outcome.done, "absence never concluded"
+    assert "provably absent" in outcome.note
+    assert ctx.notes["cleared"]["centre"] == CHAMBER
+
+
+def test_countess_alive_and_unreachable_is_a_loud_stop():
+    # The run's whole objective: alive, in sight, and every walk to her
+    # failing must END the run loudly — never a silent write-off.
+    clock = Clock()
+    alerts = []
+    combat = StubCombat(approach_script=[
+        MoveTo((1010, 1010), toward=66), MoveTo((1010, 1010), toward=66),
+    ])
+    step, svc = countess_step(clock, combat=combat, alerts=alerts)
+
+    def refuse_walks(action):
+        if isinstance(action, MoveTo):
+            raise NavigationError("no way through")
+
+    executor = RecordingExecutor(clock=clock, on_execute=refuse_walks)
+    ctx = context(executor)
+    ctx.notes["arrival"] = HOME
+    her = countess_monster()
+    make_snap = lambda: snap(monsters=[her])  # noqa: E731
+    settle_neighborhood(step, clock, ctx, make_snap)
+    with pytest.raises(NavigationError, match="alive and unreachable"):
+        for _ in range(30):
+            step.step(make_snap(), ctx)
+            clock.advance(0.5)
+    assert any("COUNTESS UNRESOLVED" in a for a in alerts)
+
+
+def test_countess_advance_holds_for_the_revive_wall_then_releases():
+    # The user's tactic as a brake, with the bound that keeps it a tactic:
+    # a cellar with nothing to raise can never grow a wall, and the hold
+    # must release loudly rather than hang the run.
+    import types
+
+    clock = Clock()
+    combat = StubCombat(approach_script=[MoveTo((1010, 1010))])
+    combat.config = types.SimpleNamespace(approach_with_revives=2)
+    step, svc = countess_step(clock, combat=combat, advance_revive_patience=3)
+    ctx = context()
+    ctx.notes["arrival"] = HOME
+    make_snap = lambda: snap()  # noqa: E731
+    settle_neighborhood(step, clock, ctx, make_snap)
+    # Walk the staging phase out (static position: the progress budget
+    # writes it off and the advance begins).
+    outcomes = []
+    for _ in range(20):
+        outcomes.append(step.step(make_snap(), ctx))
+        clock.advance(0.5)
+    braked = [o for o in outcomes if (o.note or "") == "revive brake"]
+    assert len(braked) == 3, f"the brake held {len(braked)} ticks, not 3"
+    assert combat.approach_calls > 0, "the advance never resumed after the brake"
+
+
+def test_countess_sweep_budget_spent_unproven_is_a_loud_stop():
+    # The <15s budget is a promise: spent with the kill unproven, the
+    # step reports and stops — silence is the one forbidden outcome.
+    clock = Clock()
+    alerts = []
+    step, svc = countess_step(clock, alerts=alerts)
+    ctx = context()
+    ctx.notes["arrival"] = HOME
+    make_snap = lambda: snap()  # noqa: E731
+    settle_neighborhood(step, clock, ctx, make_snap)
+    # Stage writes itself off (static position), the empty advance drops
+    # straight into the sweep, and then the budget runs dry mid-pass.
+    entered_sweep = False
+    with pytest.raises(NavigationError, match="sweep"):
+        for _ in range(30):
+            outcome = step.step(make_snap(), ctx)
+            if "chamber" in (outcome.note or "") or "sweep" in (outcome.note or ""):
+                entered_sweep = True
+            clock.advance(4.0 if entered_sweep else 0.5)
+    assert any("COUNTESS UNRESOLVED" in a for a in alerts)

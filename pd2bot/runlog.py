@@ -1,0 +1,436 @@
+"""The run event log: a structured record of everything a run did.
+
+**Why this exists, precisely.** On 2026-08-05 the bot spent 144 seconds
+in the Forgotten Tower — an empty 19x19-subtile square room, eleven
+subtiles from the staircase it was trying to take — and gave the run up.
+Nobody could say why. Not because the behaviour was subtle: because of
+roughly 150 decisions made in that room, **five were written down**.
+The atlas held the room completely, A* planned it as one leg, the seed
+matched, and routing was never even invoked. The bot was not lost; the
+instrument was blind.
+
+What filled that vacuum was speculation — two confident diagnoses, both
+wrong, one of which had already been turned into a code change before
+the user killed it with a single fact ("that room never has monsters").
+
+So this module exists to make a run a matter of record rather than
+reconstruction, and it obeys four rules that come straight out of that
+failure:
+
+**Never raises.** A logging failure must not end a run. The write path
+is wrapped; on error it disables itself, says so once, and the run
+continues. Instrumentation is not a dependency.
+
+**Never blocks.** Append and flush, nothing else. No rotation, no
+compaction, no network. The file is readable while the bot is running
+and survives a crash — the `Narrator` discipline (R179), for the same
+reason: the run you most want to read is the one that died.
+
+**Never interprets.** Events record what happened — "clicked at X, the
+player was at Y, the projection was screen point Z" — never what it
+meant. "The click failed" is a conclusion, and conclusions belong to
+whoever reads the log. This rule is the direct lesson of the two wrong
+diagnoses: both were inferences dressed as observations.
+
+**Honest absence.** A field the bot could not read is `None`, with a
+reason where one is available. Never a plausible-looking default. A
+guessed value in a diagnostic log is worse than no log at all, because
+it is indistinguishable from a real one.
+
+**It is not optional** (R220 Q11). `build_bot` opens one unconditionally;
+the only silent path is `NullRunLog`, passed explicitly by unit tests and
+the sim. Optional instrumentation means the one run you most need to
+explain is the one where somebody forgot the flag — which is not a
+hypothetical, it is exactly what happened.
+
+Layout, one directory per run, nothing pruned (R220 Q2):
+
+    logs/runs/<YYYYMMDD-HHMMSS>-<runname>/
+        run.json        the header, written once at open
+        events.jsonl    one JSON object per line, appended
+
+Read one back with the renderer:
+
+    python -m pd2bot.runlog                    # the most recent run
+    python -m pd2bot.runlog <run-dir>
+    python -m pd2bot.runlog <run-dir> --kind action. --since 59
+
+The schema reference lives in `docs/architecture/run-log.md`; this
+module owns the envelope and the writing rules.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+SCHEMA_VERSION = 1
+DEFAULT_ROOT = Path("logs") / "runs"
+
+
+def _default_warn(text: str) -> None:  # pragma: no cover - console only
+    print(f"!!  run log: {text}", flush=True)
+
+
+class NullRunLog:
+    """The silent implementation. The ONLY way to not log (R220 Q11).
+
+    Unit tests and the sim pass this explicitly. Nothing that touches
+    the live game may use it — `build_bot` opens a real one, and that is
+    deliberate: the alternative is a forgotten flag on the run that
+    matters most.
+    """
+
+    path: Path | None = None
+    directory: Path | None = None
+    # Emitters check this BEFORE gathering anything an event would need.
+    # It is not an optimisation detail: `_here()` and `_vitals()` are live
+    # memory reads, and a silent log that still paid for them would make
+    # instrumentation observable in the behaviour it instruments — which
+    # `test_nothing_is_read_until_we_have_actually_cast` exists to forbid.
+    enabled = False
+
+    def event(self, kind: str, /, **fields: Any) -> None:
+        return None
+
+    def area(self, area_id: int | None, area_name: str | None = None) -> None:
+        return None
+
+    def close(self, **fields: Any) -> None:
+        return None
+
+    def __enter__(self) -> NullRunLog:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+class RunLog:
+    """One run's event log: a directory, a header, and an append-only file.
+
+    Every event carries the same envelope, filled here rather than by
+    the caller — an emitter that has to remember to stamp its own events
+    will eventually forget, and a partly-stamped log is worse than none:
+
+    - `seq`  a monotonic counter, so ordering survives equal timestamps
+    - `at`   ISO wall clock, local — what the operator saw on screen
+    - `t`    seconds since run start, monotonic — what arithmetic uses
+    - `area` / `area_name` — the last area told to `area()`, so no event
+      is orphaned and no emitter needs to look it up
+
+    Both clocks are injectable, because the sim's clock is fake and
+    advances only when the sim says so.
+    """
+
+    enabled = True
+
+    def __init__(
+        self,
+        run_name: str,
+        *,
+        root: Path | str = DEFAULT_ROOT,
+        header: dict | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        wall: Callable[[], float] = time.time,
+        warn: Callable[[str], None] = _default_warn,
+    ) -> None:
+        self._clock = clock
+        self._wall = wall
+        self._warn = warn
+        self._started = clock()
+        self._seq = 0
+        self._area: int | None = None
+        self._area_name: str | None = None
+        self._disabled = False
+
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(wall()))
+        safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in run_name)
+        self.directory = Path(root) / f"{stamp}-{safe}"
+        self.path = self.directory / "events.jsonl"
+        try:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "schema": SCHEMA_VERSION,
+                "run": run_name,
+                "started_at": self._iso(),
+                **(header or {}),
+            }
+            (self.directory / "run.json").write_text(
+                json.dumps(payload, indent=2, default=str), encoding="utf-8"
+            )
+        except Exception as exc:  # noqa: BLE001 - never fatal (rule 1)
+            self._fail(f"could not open {self.directory} ({exc})")
+
+    # -- writing ---------------------------------------------------------------
+
+    def area(self, area_id: int | None, area_name: str | None = None) -> None:
+        """Set the area stamped onto subsequent events.
+
+        Called by whoever proves an area change (the traverse step, the
+        waypoint travel). Kept as ambient state rather than a per-event
+        argument because every emitter would otherwise have to thread it,
+        and the ones that forgot would produce events nobody could place.
+        """
+        self._area = area_id
+        self._area_name = area_name
+
+    def event(self, kind: str, /, **fields: Any) -> None:
+        """Append one event. Never raises (rule 1); never blocks (rule 2).
+
+        `kind` is POSITIONAL-ONLY, and that is load-bearing rather than
+        stylistic: without it, no emitter could ever have a field called
+        "kind" — and half of what this log describes (monsters, items)
+        has a kind. Found the moment `npc.interact` tried to record the
+        NPC's kind and collided with the parameter name.
+
+        `kind` is a dotted namespace — `action.move`, `item.dropped`,
+        `step.decision` — so a reader can filter by prefix. Unknown
+        fields are allowed on purpose: an emitter that learns something
+        new should be able to record it without a schema migration, and
+        the renderer degrades gracefully to key=value for anything it
+        does not recognise.
+        """
+        if self._disabled:
+            return
+        self._seq += 1
+        record = {
+            "seq": self._seq,
+            "at": self._iso(),
+            "t": round(self._clock() - self._started, 3),
+            "kind": kind,
+        }
+        if self._area is not None:
+            record["area"] = self._area
+            record["area_name"] = self._area_name
+        record.update(fields)
+        try:
+            with open(self.path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, default=str) + "\n")
+        except Exception as exc:  # noqa: BLE001 - never fatal (rule 1)
+            self._fail(f"could not write to {self.path} ({exc})")
+
+    def close(self, **fields: Any) -> None:
+        """Final event. `fields` typically carries the run's ending."""
+        self.event("run.end", **fields)
+
+    # -- internals -------------------------------------------------------------
+
+    def _iso(self) -> str:
+        seconds = self._wall()
+        base = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(seconds))
+        return f"{base}.{int((seconds % 1) * 1000):03d}"
+
+    def _fail(self, reason: str) -> None:
+        """Disable the log, once, loudly. A broken instrument that keeps
+        half-writing is worse than one that admits it stopped."""
+        if self._disabled:
+            return
+        self._disabled = True
+        self._warn(f"{reason} — logging disabled for the rest of this run")
+
+    def __enter__(self) -> RunLog:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+# -- reading ----------------------------------------------------------------------
+
+
+def load(run_dir: Path | str) -> list[dict]:
+    """Every event in a run directory, in order.
+
+    A malformed line is SKIPPED rather than fatal: JSONL degrades
+    gracefully, and a log truncated by a crash — precisely the log you
+    most want to read — is still readable up to the truncation.
+    """
+    path = Path(run_dir)
+    if path.is_dir():
+        path = path / "events.jsonl"
+    events = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return events
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except ValueError:
+            continue
+    return events
+
+
+def latest_run(root: Path | str = DEFAULT_ROOT) -> Path | None:
+    """The most recent run directory, by name (the names sort by time)."""
+    directories = sorted(p for p in Path(root).glob("*") if p.is_dir())
+    return directories[-1] if directories else None
+
+
+# The fields excluded from the collapse key when the renderer folds
+# consecutive identical events. Found the hard way while demoing the T71
+# decision trace: an elapsed-seconds value inside the label made every
+# line unique, so nothing collapsed and the reader got one line per tick
+# — which is the wall of noise that collapsing exists to prevent.
+_VOLATILE = frozenset({"seq", "at", "t", "dur_s", "elapsed_s", "timing", "n"})
+
+
+def _collapse_key(event: dict) -> tuple:
+    return (
+        event.get("kind"),
+        tuple(
+            sorted(
+                (k, json.dumps(v, sort_keys=True, default=str))
+                for k, v in event.items()
+                if k not in _VOLATILE
+            )
+        ),
+    )
+
+
+def _place(value: Any) -> str:
+    """A coordinate payload (mapframe.describe) rendered compactly."""
+    if not isinstance(value, dict) or "world" not in value:
+        return json.dumps(value, default=str)
+    out = f"{tuple(value['world'])}"
+    if value.get("local") is not None:
+        out += f" local{tuple(value['local'])}"
+    if value.get("dist") is not None:
+        out += f" {value['dist']} away"
+    if value.get("bearing"):
+        out += f" {value['bearing']}"
+    return out
+
+
+def describe_event(event: dict) -> str:
+    """One event as a line of English-ish text. No interpretation."""
+    parts = []
+    for key, value in event.items():
+        if key in {"seq", "at", "t", "kind", "area", "area_name"}:
+            continue
+        if isinstance(value, dict) and "world" in value:
+            parts.append(f"{key}={_place(value)}")
+        elif isinstance(value, dict):
+            inner = " ".join(f"{k}={v}" for k, v in value.items())
+            parts.append(f"{key}[{inner}]")
+        else:
+            parts.append(f"{key}={value}")
+    return "  ".join(parts)
+
+
+def render(events: list[dict], *, collapse: bool = True) -> list[str]:
+    """The human timeline. Consecutive identical events fold into one
+    line carrying a count and the span they covered."""
+    lines: list[str] = []
+    index = 0
+    while index < len(events):
+        event = events[index]
+        run_length = 1
+        if collapse:
+            key = _collapse_key(event)
+            while (
+                index + run_length < len(events)
+                and _collapse_key(events[index + run_length]) == key
+            ):
+                run_length += 1
+        last = events[index + run_length - 1]
+        stamp = str(event.get("at", ""))[11:23] or "?"
+        head = f"[t+{event.get('t', 0):8.2f}] {stamp}  {event.get('kind', '?')}"
+        area = event.get("area_name") or event.get("area")
+        if area is not None:
+            head += f"  ({area})"
+        body = describe_event(event)
+        if run_length > 1:
+            span = float(last.get("t", 0)) - float(event.get("t", 0))
+            body += f"   [x{run_length} over {span:.1f}s]"
+        lines.append(f"{head}  {body}".rstrip())
+        index += run_length
+    return lines
+
+
+def summarize(events: list[dict]) -> list[str]:
+    """The footer: duration, ticks, timing, event counts, areas visited."""
+    if not events:
+        return ["(no events)"]
+    duration = float(events[-1].get("t", 0))
+    counts: dict[str, int] = {}
+    for event in events:
+        counts[event.get("kind", "?")] = counts.get(event.get("kind", "?"), 0) + 1
+    ticks = [e for e in events if e.get("kind") == "tick"]
+    lines = [
+        "",
+        "SUMMARY",
+        f"  duration      {duration:.1f}s over {len(events)} event(s)",
+    ]
+    if ticks:
+        durations = [float(t.get("dur_s", 0)) for t in ticks]
+        lines.append(
+            f"  ticks         {len(ticks)}  "
+            f"mean {sum(durations)/len(durations):.3f}s  "
+            f"max {max(durations):.3f}s"
+        )
+    # Time per area: the question "where did the run spend itself" is
+    # the first one anybody asks of a slow run.
+    spent: dict[str, float] = {}
+    for before, after in zip(events, events[1:], strict=False):
+        name = str(before.get("area_name") or before.get("area") or "?")
+        spent[name] = spent.get(name, 0.0) + (
+            float(after.get("t", 0)) - float(before.get("t", 0))
+        )
+    lines.append("  areas")
+    for name, seconds in sorted(spent.items(), key=lambda kv: -kv[1]):
+        lines.append(f"      {name:<28} {seconds:8.1f}s")
+    lines.append("  events by kind")
+    for kind, count in sorted(counts.items(), key=lambda kv: -kv[1]):
+        lines.append(f"      {kind:<28} {count:6d}")
+    return lines
+
+
+def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
+    """`python -m pd2bot.runlog [run-dir] [--kind P] [--since S] [--raw]`"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Render a run event log.")
+    parser.add_argument("run", nargs="?", help="run directory (default: latest)")
+    parser.add_argument("--kind", help="only kinds with this prefix")
+    parser.add_argument("--since", type=float, help="only events at/after t")
+    parser.add_argument("--until", type=float, help="only events at/before t")
+    parser.add_argument("--raw", action="store_true", help="pass JSON through")
+    parser.add_argument(
+        "--no-collapse", action="store_true", help="one line per event"
+    )
+    args = parser.parse_args(argv)
+
+    run = Path(args.run) if args.run else latest_run()
+    if run is None:
+        print("no runs found under logs/runs/", flush=True)
+        return 1
+    events = load(run)
+    if args.kind:
+        events = [e for e in events if str(e.get("kind", "")).startswith(args.kind)]
+    if args.since is not None:
+        events = [e for e in events if float(e.get("t", 0)) >= args.since]
+    if args.until is not None:
+        events = [e for e in events if float(e.get("t", 0)) <= args.until]
+
+    print(f"# {run}", flush=True)
+    if args.raw:
+        for event in events:
+            print(json.dumps(event, default=str), flush=True)
+    else:
+        for line in render(events, collapse=not args.no_collapse):
+            print(line, flush=True)
+        for line in summarize(events):
+            print(line, flush=True)
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

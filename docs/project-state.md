@@ -8,7 +8,7 @@ same commit as the transition itself.
 - **Milestone:** M6 — Countess flagship
 - **Phase:** P4 — the countess run and the Cellar 5 endgame (P1, P2,
   P3 all DONE; plan: `docs/plans/2026-08-03-m6-countess/`)
-- **Next request ID:** R219 (overall counter; R171 was never issued — a
+- **Next request ID:** R220 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
 - **Next test ID:** T71 (T70 ran 5 times; check `docs/drill-log.md`)
@@ -35,10 +35,40 @@ dropped Thul rune on Cellar 4 (traverse has no pickup logic — the
 prime suspect; decide opportunistic-collect vs by-design before the
 first real farm run) and residual dithering/corner-walking (speed
 pass; capture a warm-descent trace first). 906 tests, ruff clean.)
-NEXT: **P4** — `runs/countess.toml` + the `clear_countess` endgame
-step (clear the chamber's neighborhood, approach from the NORTH,
-kill condition on the pinned identity with the <15 s sweep fallback,
-careful drop pickup), sim-first, go/no-go gate before live; the warm
-descent measurement opens the next live session. Then P5 (battery)
-and P6 (closeout). PR #1 merged; branch `m6-countess` is the working
-line, pushed.
+NEXT: **P4 implemented, gate pending (R219)** — `runs/countess.toml`,
+the `clear_countess` step (neighborhood clear via composed
+ClearRadiusStep; atlas-derived north staging, blackboard-recorded;
+revive-brake advance; kill condition = pinned identity dead OR
+provably absent after the budgeted 15 s sweep, alive-and-unreachable
+a LOUD stop), the T70 Thul question RESOLVED as opportunistic-collect
+in traverse (shared mixin, combat-declined ticks only), and full sim
+coverage (countess + blinded-read scenarios; 921 tests, ruff clean).
+Gate artifacts in the plan dir: `p4-sim-trace-countess.md`,
+`p4-sim-trace-absent.md`, `p4-staging-derivation.md`.
+
+**R219 answered** (2026-08-05): screen-north convention CONFIRMED; the
+staging point DEFERRED to live judgment (coordinates on a grid were the
+wrong instrument — show the behavior, don't describe it); GO given.
+
+**T71 run 1 FAILED and the endgame is still unproven live.** It never
+reached Cellar 5: the run died at the SECOND transition, in the
+Forgotten Tower, clicking the Cellar 1 staircase 5 times from 11
+subtiles away without the area changing. Run 2 was cancelled before it
+started (debugging). What the investigation established, in order of
+confidence: the atlas and pathfinding are PROVEN INNOCENT (area 20 is a
+fully-recorded 19x19 walkable box; A* returns one leg; seed matches;
+routing was never even invoked because 11 <= click_range 18). The real
+defect is that **TraverseStep recorded 5 of ~150 decisions**, so the
+artifact could not say what the bot was doing — now fixed with a
+run-length-collapsed decision trace carrying position and
+distance-to-stairs. Two earlier diagnoses ("the fight owned the ticks",
+"the staircase was contested") are recorded as UNSUPPORTED, not fixed;
+the `exit_block_radius` rule they produced is kept on its own merits
+only. Leading untested hypothesis: `InteractObject` clicks the raw tile
+projection with no offset, while T63 measured tile clicks missing
+sprites ~29/30 — so a staircase click may be executing as a walk order.
+Evidence: `t71-tower-decision-log.md`, `navigation-diagnosis.md`
+addendum. NEXT LIVE ACT: re-run T71 and read the trace — it
+distinguishes the three candidate causes by the position column alone.
+Then P5 (battery; warm-descent measurement) and P6 (closeout). PR #1
+merged; branch `m6-countess` is the working line. 924 tests, ruff clean.

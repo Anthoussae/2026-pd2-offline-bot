@@ -35,7 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from pd2bot import offsets, survey
+from pd2bot import mapframe, offsets, survey
 from pd2bot.behavior.combat import ClassConfig, load_class_config
 from pd2bot.behavior.engine import BehaviorEngine, EngineConfig
 from pd2bot.behavior.execute import GameActionExecutor
@@ -58,6 +58,7 @@ from pd2bot.panelinput import PanelInput
 from pd2bot.pathing import astar, nearest_walkable, simplify
 from pd2bot.pickit import Pickit, cleanse_keep, load_item_table, load_pickit
 from pd2bot.player import read_player
+from pd2bot.runlog import RunLog
 from pd2bot.safety import SafetyConfig, SafetyMonitor
 from pd2bot.snapshot import Perception
 from pd2bot.town import PreambleReport, TownConfig, TownLayer
@@ -292,6 +293,9 @@ class LiveBot:
     # engine_factory swaps the target.
     narrate_ref: dict = field(default_factory=lambda: {"fn": None})
     _engines: list[BehaviorEngine] = field(default_factory=list)
+    # Every run log opened this session, newest last — so a drill can name
+    # the file it just produced instead of the operator hunting for it.
+    _runlogs: list[object] = field(default_factory=list)
 
     @property
     def cleanse_enabled(self) -> bool:
@@ -299,6 +303,49 @@ class LiveBot:
         the whitelist cannot recognise what it must protect, so dropping is
         disabled outright rather than run with a hole in it."""
         return cleanse_keep(self.pickit) is not None
+
+    def pickit_item_name(self, kind: int) -> str | None:
+        """kind -> the verified item name, or None (never a guess).
+
+        Routed through the pickit's own `ItemTable`, which is anchored to
+        D2 item CODES rather than to numbers (R144). A second naming path
+        is precisely how a Wire Fleece came to be picked up as a Kraken
+        Shell, so the log gets the same table or nothing.
+        """
+        table = getattr(self.pickit, "item_table", None)
+        if table is None:
+            return None
+        try:
+            return table.name_for(kind)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def run_header(self, session: GameSession) -> dict:
+        """What the run.json header records: enough to tell two runs apart
+        and to know what the bot believed when it started."""
+        header: dict = {
+            "run_file": str(self.paths.run),
+            "class_config": str(self.paths.class_config),
+            "chicken_life_pct": self.class_config.chicken_life_pct,
+            "tick_interval_s": self.engine_config.tick_interval_s,
+            "idle_bail_s": self.engine_config.idle_bail_s,
+            "wait_bail_s": self.engine_config.wait_bail_s,
+        }
+        # Best effort, and labelled when it fails: a header that guessed
+        # the seed would make two different maps look like one.
+        try:
+            header["map_seed"] = read_map_seed(session)
+        except Exception:  # noqa: BLE001
+            header["map_seed"] = None
+            header["map_seed_unread"] = True
+        try:
+            player = read_player(session)
+            if player is not None:
+                header["character"] = player.name
+                header["level"] = player.level
+        except Exception:  # noqa: BLE001
+            header["character"] = None
+        return header
 
     def engine_factory(self, session: GameSession) -> BehaviorEngine:
         """Build one game's engine. Everything stateful is fresh here."""
@@ -308,6 +355,37 @@ class LiveBot:
         # no empty log behind.
         narrator = Narrator(REPO / "logs", clock=self.clock)
         self.narrate_ref["fn"] = narrator.narrate
+        # The run event log (R220 Q11: MANDATORY, never opt-in). Opened
+        # per run alongside the narrative, which keeps its own job: the
+        # narrative is the story a human skims, this is the record a tool
+        # queries. Optional instrumentation means the one run you most
+        # need to explain is the one where somebody forgot the flag —
+        # which is not hypothetical, it is T71.
+        runlog = RunLog(
+            self.paths.run.stem,
+            root=REPO / "logs" / "runs",
+            clock=self.clock,
+            header=self.run_header(session),
+        )
+        self._runlogs.append(runlog)
+        # The monitor is SESSION-scoped (the death latch lives in it), so
+        # it cannot be constructed per run — repoint its log instead, the
+        # same treatment `narrate_ref` gets for the town layer.
+        self.monitor.runlog = runlog
+        # The town layer is session-scoped too (its cleanse baseline must
+        # be), so it takes the same treatment. The waypoint layer reads
+        # the log through it rather than holding a second reference —
+        # one holder, one place to repoint.
+        self.town.runlog = runlog
+        # The area frame the log's coordinates are relative to. Read per
+        # call rather than cached: the area changes under the bot, and a
+        # stale frame would silently shift every local coordinate.
+        def frame():
+            try:
+                return mapframe.MapFrame.from_area(read_area(session))
+            except Exception:  # noqa: BLE001 - honest fallback, never a guess
+                return mapframe.MapFrame.unknown()
+
         combat = NecroCombat(
             config=self.class_config.combat,
             is_walkable=self.is_walkable,
@@ -316,6 +394,17 @@ class LiveBot:
             # module swaps configs, bookkeeping survives the swap.
             postures=self.class_config.postures,
         )
+        # Futile-strike write-offs reach the run log (T72/T74). Recorded
+        # rather than acted on across runs, deliberately: the "immune"
+        # signature belongs to THIS spawn (Hell rolls immunities per
+        # pack), so generalising it to the monster's kind would teach the
+        # bot to skip killable monsters. Only the "no-contact" signature
+        # is a candidate for a durable per-kind rule, and promoting one
+        # is a human decision — the item_ids.learned.toml precedent.
+        def note_write_off(**fields):
+            runlog.event("combat.write_off", **fields)
+
+        combat.note_write_off = note_write_off
         ladder = ReflexLadder(
             self.class_config.reflex,
             # with_sockets=False: this runs EVERY TICK and only ever reads
@@ -340,6 +429,17 @@ class LiveBot:
             # pathing and pickup).
             park_skill_id=self.class_config.reflex.armor_skill_id,
             park_grace_s=self.class_config.combat.park_grace_s,
+            # Instrumentation (the run-event-log plan, P3): every action
+            # that reaches the game becomes an event with all three
+            # coordinate frames. The name tables are the EXISTING
+            # code-anchored ones — never a second guessing path (R144).
+            runlog=runlog,
+            frame=frame,
+            skill_names={
+                skill_id: name
+                for name, skill_id in self.class_config.skills.items()
+            },
+            item_names=self.pickit_item_name,
         )
         def field_cleanse() -> int:
             """The town cleanse, run in the field — and its report SURFACED.
@@ -447,6 +547,8 @@ class LiveBot:
             clear_panels=clear_panels_tracked,
             narrate=narrator.narrate,
             route_to=route_service(self.navigator),
+            runlog=runlog,
+            frame=frame,
         )
         registry = build_registry(services)
         run = load_run(self.paths.run, registry)
@@ -471,6 +573,8 @@ class LiveBot:
             # The Enter/ESC kill switch (R189): the operator's own keys
             # stop the run, correlated against the stamp above.
             bot_escape_at=lambda: escape_stamp["at"],
+            runlog=runlog,
+            frame=frame,
         )
 
     def engines(self) -> list[BehaviorEngine]:

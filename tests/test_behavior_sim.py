@@ -29,10 +29,14 @@ from tests.simworld import (
     SimMonster,
     build_sim,
     cold_plains_scenario,
+    countess_absent_scenario,
+    countess_scenario,
     patrol_scenario,
 )
 
 MAX_TICKS = 400
+# The countess run is seven areas and an endgame; it earns a longer leash.
+COUNTESS_TICKS = 900
 
 
 def run_to_completion(sim, world, *, max_ticks=MAX_TICKS):
@@ -334,6 +338,138 @@ def test_the_run_still_finished_with_a_full_inventory(sim):
     # A full inventory costs loot; it must not stall the run.
     run, world = sim
     assert run_to_completion(run, world)
+
+
+# -- the countess run (M6 P4) ----------------------------------------------------
+
+
+@pytest.fixture
+def countess_sim(monkeypatch):
+    world = countess_scenario()
+    lines = []
+    run = build_sim(
+        world, monkeypatch=monkeypatch, run_file="countess.toml",
+        narrate=lines.append,
+    )
+    return run, world, lines
+
+
+def run_countess(run, world):
+    return run_to_completion(run, world, max_ticks=COUNTESS_TICKS)
+
+
+def test_the_whole_countess_run_completes(countess_sim):
+    run, world, _ = countess_sim
+    assert run_countess(run, world), "the run never finished"
+    assert run.engine.report.steps_completed == [
+        "town_preamble", "waypoint",
+        "traverse", "traverse", "traverse", "traverse", "traverse", "traverse",
+        "clear_countess", "pickup", "done",
+    ]
+    assert world.travels == [6]
+    assert world.area == 25  # ended on her floor
+
+
+def test_the_countess_died_and_the_kill_was_proven(countess_sim):
+    run, world, lines = countess_sim
+    run_countess(run, world)
+    # She is dead on the ground, by poison like everything else.
+    assert any(c.kind == 734 for c in world.corpses), "no countess corpse"
+    assert any(
+        isinstance(e.action, AttackUnit) and e.action.unit_id == 66
+        for e in run.trace
+    ), "she was never struck"
+    # And the step SAID so with the corpse evidence, not a guess.
+    assert any("DOWN" in line and "corpse" in line for line in lines), lines
+
+
+def test_the_neighborhood_was_cleared_before_the_approach(countess_sim):
+    # The user's tactic: no gaggle at our backs. The champion pack by the
+    # stairs dies before the staging narration appears.
+    run, world, lines = countess_sim
+    run_countess(run, world)
+    assert any("monster 65 died of poison" in line for line in world.log), (
+        "the champion pack by the stairs survived"
+    )
+    order = [
+        line for line in lines
+        if "neighborhood clear" in line or "staging north" in line
+    ]
+    assert len(order) >= 2, order
+    assert "neighborhood clear" in order[0]
+    assert "staging north" in order[1]
+
+
+def test_the_staging_point_is_screen_north_of_the_chamber(countess_sim):
+    # Screen-north is the world (-1,-1) diagonal: the staging point's
+    # coordinate sum must be strictly below the anchor's.
+    run, world, lines = countess_sim
+    run_countess(run, world)
+    staging_lines = [line for line in lines if "staging north of the chamber" in line]
+    assert staging_lines, lines
+    # "(12523, 11011)" for the run-file anchor (12548, 11036) minus the
+    # 25-subtile staging distance on the open-ground sim.
+    assert "(12523, 11011)" in staging_lines[0], staging_lines[0]
+
+
+def test_the_thul_lesson_a_wanted_rune_on_a_traversal_floor_is_collected(countess_sim):
+    # T70 run 5 walked past a Thul on Cellar 4: traversal floors had no
+    # pickup logic at all. Now the rune beside the Cellar 2 path comes up
+    # mid-traverse — and the run still arrives where it was going.
+    run, world, _ = countess_sim
+    run_countess(run, world)
+    assert 702 in world.inventory, "the corridor rune was left behind"
+    assert not any(g.unit_id == 880 for g in world.ground)
+
+
+def test_her_drops_were_lifted_from_the_chamber(countess_sim):
+    # The drop zone handoff: pickup adopts the chamber circle off the
+    # blackboard and lifts what she dropped — the rune AND the unique.
+    run, world, _ = countess_sim
+    run_countess(run, world)
+    dropped_at_death = [
+        g for g in world.ground if world.unit_areas.get(g.unit_id) == 25
+    ]
+    assert not dropped_at_death, f"left in the chamber: {dropped_at_death}"
+    assert 999 in world.inventory
+    assert world.inventory.count(702) == 2  # the corridor Thul and hers
+
+
+def test_the_corridor_straggler_was_fought_not_detoured(countess_sim):
+    # Brisk fights what obstructs; the straggler sits inside the bubble
+    # beside the Cellar 3 path and must die rather than stall the walk.
+    run, world, _ = countess_sim
+    run_countess(run, world)
+    assert not any(m.unit_id == 40 for m in world.monsters)
+
+
+def test_the_blinded_read_falls_back_to_the_sweep(monkeypatch):
+    # She is never in perception at all: the sweep walks its in-and-out
+    # pass inside the budget and concludes PROVABLY ABSENT — loudly
+    # distinct from a seen kill — and the run still finishes clean.
+    world = countess_absent_scenario()
+    lines = []
+    run = build_sim(
+        world, monkeypatch=monkeypatch, run_file="countess.toml",
+        narrate=lines.append,
+    )
+    assert run_to_completion(run, world, max_ticks=COUNTESS_TICKS)
+    assert any("sweeping the chamber" in line for line in lines), lines
+    assert any("provably absent" in line for line in lines), lines
+    assert not any("DOWN" in line for line in lines)
+    assert run.engine.report.steps_completed[-3:] == [
+        "clear_countess", "pickup", "done",
+    ]
+
+
+def test_the_countess_narrative_reads_as_a_story(countess_sim):
+    # The R179 coarseness contract holds for the longest run yet.
+    run, world, lines = countess_sim
+    assert run_countess(run, world)
+    ticks = run.engine.report.ticks
+    assert len(lines) < max(40, ticks / 4), (
+        f"{len(lines)} narrative lines over {ticks} ticks:\n" + "\n".join(lines)
+    )
 
 
 # -- the safety layer beneath everything -------------------------------------------

@@ -29,7 +29,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from pd2bot import offsets
+from pd2bot import mapframe, offsets
 from pd2bot.behavior.actions import InteractObject, MoveTo, PickUpItem
 from pd2bot.behavior.engine import EngineContext, StepOutcome
 from pd2bot.behavior.run import ParamSpec, StepRegistry, StepSpec
@@ -37,6 +37,7 @@ from pd2bot.items import CarriedItems
 from pd2bot.narrate import noop as narrate_noop
 from pd2bot.navigate import NavigationError
 from pd2bot.pickit import Pickit, belt_count, potion_type_of
+from pd2bot.runlog import NullRunLog
 from pd2bot.snapshot import GameSnapshot
 from pd2bot.uistate import blocking_panels
 from pd2bot.units import GroundItem
@@ -453,6 +454,40 @@ class RunServices:
     # often give up on several such targets and each repeat of the alert
     # buys nothing.
     unsurveyed_alerted: bool = False
+    # -- the run event log (P6/P7) ----------------------------------------
+    #
+    # The steps' own events: area transitions, wanted drops, collections,
+    # accidental pickups, the cleanse. Defaults to the null sink so the
+    # sim and unit tests stay silent; `wiring.py` passes the real log.
+    runlog: object = field(default_factory=NullRunLog)
+    frame: Callable[[], object] | None = None
+    # Wanted items already announced this run, by unit id — `item.dropped`
+    # fires on the TRANSITION into the wanted set, so a rune lying on the
+    # floor for thirty ticks is one event, not thirty.
+    seen_drops: set[int] = field(default_factory=set)
+    # -- the countess endgame (M6 P4) --------------------------------------
+    #
+    # Judgement calls that belong to the step, not the run file — the run
+    # file carries what the user tunes (the chamber anchor, the radii).
+    #
+    # How far screen-north of the chamber anchor the staging point sits.
+    # Screen-north is the world (-1,-1) diagonal (the projection is
+    # sx=(wx-wy), sy=(wx+wy): decreasing both is "up"). 25 is outside
+    # the aggressive posture's engagement bubble but inside one or two
+    # advance legs — staged, not camped.
+    staging_distance: int = 25
+    # The chamber sweep's whole budget (R212 Q7: "<15 s"). One short
+    # in-and-out pass so a blind corner cannot hide her; spent across
+    # every entry into the sweep, not per entry, so a countess who blinks
+    # in and out of perception cannot stretch it forever.
+    sweep_budget_s: float = 15.0
+    # Ticks the advance will hold for the revive wall without the wall
+    # GROWING before it advances anyway, loudly. The brake is the user's
+    # tactic (revives tank the approach); the bound exists because a
+    # fresh cellar with nothing dead nearby can never raise a wall, and
+    # a brake that cannot release is a hang, not a tactic (~10 s at tick
+    # rate — the survey's fight-patience shape).
+    advance_revive_patience: int = 20
 
 
 # -- blocking steps ------------------------------------------------------------
@@ -717,6 +752,17 @@ class _PickupMixin:
                     del self.services.pending_pickup[unit_id]
                 continue
             del self.services.pending_pickup[unit_id]
+            frame = self.services.frame() if self.services.frame else None
+            self.services.runlog.event(
+                "item.collected",
+                unit_id=unit_id,
+                item=self._logged_name(kind),
+                item_kind=kind,
+                potion=potion,
+                position=mapframe.describe(position, frame=frame),
+                took_s=round(now - clicked, 2),
+                accidental=False,
+            )
             if potion is not None:
                 if census is None:
                     carried = self.services.carried()
@@ -730,6 +776,43 @@ class _PickupMixin:
                 )
             else:
                 self.services.narrate(f"pickup: kind {kind} at {position} came up")
+
+    def _log_drop(self, item: GroundItem) -> None:
+        """One `item.dropped` per wanted item, ever (P7).
+
+        Keyed on the unit id and fired on the TRANSITION into the wanted
+        set, so a rune lying on the floor for thirty ticks is one event
+        rather than thirty. The T70 Thul was invisible to behaviour while
+        perception listed it the whole time; this is the line that would
+        have made that obvious.
+        """
+        if item.unit_id in self.services.seen_drops:
+            return
+        self.services.seen_drops.add(item.unit_id)
+        _, rule = self.services.pickit.decide(item, self.services.carried())
+        frame = self.services.frame() if self.services.frame else None
+        self.services.runlog.event(
+            "item.dropped",
+            unit_id=item.unit_id,
+            item=self._logged_name(item.kind),
+            item_kind=item.kind,
+            quality=item.quality,
+            sockets=item.sockets,
+            rule=rule,
+            position=mapframe.describe(item.position, frame=frame),
+        )
+
+    def _logged_name(self, kind: int) -> str:
+        """Code-anchored name or an honest `kind <n>` (R144)."""
+        table = getattr(self.services.pickit, "item_table", None)
+        if table is not None:
+            try:
+                name = table.name_for(kind)
+            except Exception:  # noqa: BLE001
+                name = None
+            if name:
+                return name
+        return f"kind {kind}"
 
     def note_wanted_sightings(
         self, snap: GameSnapshot, centre: tuple[int, int], radius: int
@@ -745,6 +828,7 @@ class _PickupMixin:
         """
         services = self.services
         for item in self.wanted_items(snap, centre, radius):
+            self._log_drop(item)
             services.wanted_seen[item.unit_id] = (
                 item.position,
                 item.kind,
@@ -829,6 +913,11 @@ class _PickupMixin:
                     self.services.narrate(
                         f"pickup: gave up on the item at {item.position} "
                         "(walks keep arriving short)"
+                    )
+                    self.services.runlog.event(
+                        "item.abandoned", unit_id=item.unit_id,
+                        item=self._logged_name(item.kind),
+                        reason="walks kept arriving short", walks=stalls,
                     )
                     return True
             if not self.send(ctx, MoveTo(item.position)):
@@ -918,7 +1007,11 @@ class _PickupMixin:
         self.services.pending_pickup[item.unit_id] = (
             item.kind, potion_type_of(item), item.position, now,
         )
-        ctx.executor.execute(PickUpItem(item.unit_id, item.position, attempt=attempts))
+        ctx.executor.execute(
+            PickUpItem(
+                item.unit_id, item.position, attempt=attempts, kind=item.kind
+            )
+        )
         return True
 
     def send(self, ctx: EngineContext, action) -> bool:
@@ -1121,6 +1214,11 @@ class _PickupMixin:
         walk_done()
         services.cleanse_queued = False
         dropped = services.cleanse()
+        frame = self.services.frame() if self.services.frame else None
+        self.services.runlog.event(
+            "inventory.cleanse", dropped=dropped,
+            position=mapframe.describe(origin, frame=frame),
+        )
         if dropped:
             self.services.narrate(
                 f"cleanse: dropped {dropped} junk item(s) at {origin}"
@@ -2070,8 +2168,73 @@ class TraverseStep(_PickupMixin):
     _announced: bool = False
     _seek_rooms: list[tuple[int, int]] | None = None
     _seek_announced: bool = False
+    # The decision trace (T71): consecutive identical decisions collapse
+    # into one line with a tick count and a duration.
+    _trace_last: str | None = None
+    _trace_ticks: int = 0
+    _trace_since: float | None = None
+    # Where this traverse started, so the transition event can name BOTH
+    # ends (the operator asked for the departing area as well as the
+    # target — "arrived in X" alone does not say what you left).
+    _departed_from: int | None = None
+    _transition_logged: bool = False
 
     def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
+        """One tick, with its decision RECORDED (T71, live).
+
+        The wrapper exists because of what T71 could not answer. The bot
+        spent 144 s in the Forgotten Tower — a 19x19-subtile room it had
+        fully mapped, 11 subtiles from the staircase — and left five log
+        lines behind: the five clicks. Every other tick returned through
+        a path that said nothing, so ~165 decisions were made and thrown
+        away, and the question "what was it doing?" had no answer in the
+        artifact. A step that acts without recording what it did is a
+        step that cannot be debugged, and this one was the last in the
+        file that did so.
+
+        Consecutive identical decisions are collapsed into one line with
+        a tick count and a duration, so a normal healthy traverse still
+        costs a handful of lines while a stuck one prints exactly the
+        shape of its stall.
+        """
+        outcome = self._decide(snap, ctx)
+        self._record_decision(snap, outcome)
+        if outcome.done:
+            self._flush_decision()
+        return outcome
+
+    def _record_decision(self, snap: GameSnapshot, outcome: StepOutcome) -> None:
+        where = snap.player.position if snap.player is not None else None
+        label = outcome.note or (
+            "acted (unnamed)" if outcome.acted
+            else "waiting (unnamed)" if outcome.waiting
+            else "nothing to do"
+        )
+        if self._exit is not None and where is not None:
+            label += f" [at {where}, {_chebyshev(where, self._exit)} from the stairs]"
+        elif where is not None:
+            label += f" [at {where}]"
+        if label == self._trace_last:
+            self._trace_ticks += 1
+            return
+        self._flush_decision()
+        self._trace_last = label
+        self._trace_ticks = 1
+        self._trace_since = self.services.clock()
+
+    def _flush_decision(self) -> None:
+        if self._trace_last is None:
+            return
+        span = self.services.clock() - (self._trace_since or 0.0)
+        ticks = self._trace_ticks
+        self.services.log(
+            f"traverse[{self.dest}]: {self._trace_last} "
+            f"— {ticks} tick(s) over {span:.1f}s"
+        )
+        self._trace_last = None
+        self._trace_ticks = 0
+
+    def _decide(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
         if self.posture is not None and not self._posture_applied:
             set_posture = getattr(self.services.combat, "set_posture", None)
             if set_posture is not None:
@@ -2085,31 +2248,86 @@ class TraverseStep(_PickupMixin):
             if arrival is not None:
                 ctx.notes["arrival"] = arrival
             name = offsets.AREA_NAMES.get(self.dest, f"area {self.dest}")
+            if not self._transition_logged:
+                self._transition_logged = True
+                frame = self.services.frame() if self.services.frame else None
+                self.services.runlog.event(
+                    "area.transition",
+                    from_area=self._departed_from,
+                    from_name=mapframe.area_name(self._departed_from),
+                    to_area=self.dest,
+                    to_name=name,
+                    via="staircase",
+                    exit_position=(
+                        mapframe.describe(self._exit, frame=frame)
+                        if self._exit else None
+                    ),
+                    arrival=mapframe.describe(arrival, frame=frame),
+                    clicks=self._clicks,
+                )
             return StepOutcome(
                 done=True, acted=True, note=f"arrived in {name} at {arrival}"
             )
         if snap.player is None or snap.area is None:
             # Mid-load — very likely OUR transition resolving. A declared
             # wait: deliberate, and still bounded by wait_bail_s.
-            return StepOutcome(done=False, waiting=True)
+            return StepOutcome(
+                done=False, waiting=True, note="mid-load (no player/area read)"
+            )
         if self.recover_panels(snap):
             return StepOutcome(done=False, acted=True, note="closed a stray panel")
 
         here = snap.area.level_no
+        if self._departed_from is None:
+            self._departed_from = here
         # The fight owns any tick it claims; the posture decides how much
         # fighting that is (brisk: only what obstructs the corridor).
         action = self.services.combat.engage(snap, ctx)
         if action is not None:
-            self.send(ctx, action)
-            return StepOutcome(done=False, acted=True)
+            landed = self.send(ctx, action)
+            # Named, because this was the biggest of the silent paths and
+            # "the fight owned the tick" was the story T71 could neither
+            # confirm nor refute (6 reflex fires across the whole run).
+            return StepOutcome(
+                done=False, acted=True,
+                note=f"fighting: {type(action).__name__}"
+                + ("" if landed else " (send did not land)"),
+            )
 
         origin = snap.player.position
+        # Opportunistic collection en route (M6 P4, the T70 run 5 Thul).
+        # The descent walked past a wanted rune on Cellar 4's floor
+        # because traversal floors had NO pickup logic at all — a wanted
+        # item was invisible to behavior even while perception listed it,
+        # and runes are the entire point of the Countess route. The
+        # machinery is the shared mixin the clearance and the sweep
+        # already use (same budgets, same write-offs, same memory), so a
+        # traversal differing from them in robustness — the shape that
+        # cost P3 three live runs — cannot recur here. Bounded by
+        # `pickup_radius`, and only on ticks combat declined: with the
+        # brisk posture that means no hostile owns the tick, and the
+        # ladder still gets its look between every click.
+        self.confirm_pickups(snap)
+        items = self.wanted_items(snap, origin, self.services.pickup_radius)
+        if items:
+            items.sort(key=lambda i: _chebyshev(i.position, origin))
+            if self.collect(snap, ctx, items[0]):
+                return StepOutcome(
+                    done=False, acted=True,
+                    note=f"collecting item {items[0].unit_id} at {items[0].position}",
+                )
+            # Claimed but still resolving (the retry pacing): hold the
+            # walk rather than march away from a click in flight.
+            return StepOutcome(done=False, waiting=True, note="pickup resolving")
         scan = self._locate_exit(here, origin)
         if self._exit is None:
             if scan is None:
                 # The live read has not answered yet (mid-load): wait the
                 # tick out rather than walk anywhere blind.
-                return StepOutcome(done=False, waiting=True)
+                return StepOutcome(
+                    done=False, waiting=True,
+                    note="the exit read has not answered yet",
+                )
             # The scan answered and the exit is NOT VISIBLE from here —
             # which is not "does not exist" (T70 descent: preset data
             # only loads around the player). Seek: route to the nearest
@@ -2137,8 +2355,27 @@ class TraverseStep(_PickupMixin):
                     self._click_closest = distance
                     self._clicked_at = now
                 if now - self._clicked_at < self.exit_retry_s:
-                    return StepOutcome(done=False, waiting=True)
+                    # No elapsed-seconds in the label, deliberately: the
+                    # trace collapses consecutive IDENTICAL decisions and
+                    # reports the duration itself, so a per-tick clock in
+                    # the text would defeat the collapsing and bury the
+                    # reader in one line per tick (found demoing this).
+                    return StepOutcome(
+                        done=False, waiting=True,
+                        note=f"waiting out the last click ({distance} away)",
+                    )
+            # The contested-staircase rule that briefly lived here was
+            # REVERTED (R220 Q10, 2026-08-05). It held a click while a
+            # hostile stood on the stairs, on the theory that T71's
+            # failure was monsters eating the clicks. The user then
+            # supplied the fact that killed it: the Forgotten Tower
+            # never contains monsters, and never has. The rule was
+            # unmotivated code carrying a 10 s hold, built on a
+            # hypothesis inferred from silence — see
+            # docs/adr/2026-08-05-run-event-log.md for why that silence
+            # is the real defect being fixed.
             if self._clicks >= self.click_budget:
+                self._flush_decision()  # the stall's shape, before the raise
                 raise NavigationError(
                     f"clicked the staircase at {self._exit} {self._clicks} "
                     f"times without the area changing from {here} — the "
@@ -2155,13 +2392,18 @@ class TraverseStep(_PickupMixin):
 
         leg = _route_leg(self.services, origin, self._exit)
         if leg is None:
+            self._flush_decision()
             raise NavigationError(
                 f"no route from {origin} to the exit at {self._exit} in "
                 f"area {here} — the atlas has no path (survey the area, "
                 "or the exit read misfired)"
             )
-        self.send(ctx, MoveTo(leg))
-        return StepOutcome(done=False, acted=True)
+        landed = self.send(ctx, MoveTo(leg))
+        return StepOutcome(
+            done=False, acted=True,
+            note=f"walking to the exit via {leg}"
+            + ("" if landed else " (walk refused)"),
+        )
 
     def _locate_exit(self, here: int, origin: tuple[int, int]):
         """Fill `_exit`: memory immediately, the live read when it answers.
@@ -2239,7 +2481,12 @@ class TraverseStep(_PickupMixin):
                 self._seek_rooms.pop()
                 continue
             self.send(ctx, MoveTo(leg))
-            return StepOutcome(done=False, acted=True)
+            return StepOutcome(
+                done=False, acted=True,
+                note=f"seeking the exit — walking to room {target} "
+                f"({len(self._seek_rooms)} room(s) left)",
+            )
+        self._flush_decision()
         raise NavigationError(
             f"area {here} has no exit toward area {self.dest}: every one "
             f"of its {scan.rooms_walked} room(s) was visited and scanned "
@@ -2247,6 +2494,475 @@ class TraverseStep(_PickupMixin):
             f"{[(e.dest_area, e.position) for e in scan.exits]}) — the run "
             "file asks for a transition this map does not have"
         )
+
+
+def _screen_north_point(
+    anchor: tuple[int, int],
+    distance: int,
+    is_walkable: Callable[[tuple[int, int]], bool] | None = None,
+) -> tuple[int, int]:
+    """The most-northerly stageable ground within `distance` of `anchor`.
+
+    Delegates to `mapframe.screen_north`, which owns the convention:
+    screen-north is the world (-1,-1) diagonal, and the pure -x/-y axes
+    are screen NW and NE. ONE definition in the codebase — the log's
+    bearings and the endgame's staging must agree, and two copies of an
+    isometric convention are two chances to get it backwards.
+
+    Cellar 5's chamber is cut into solid rock, so strictly-north-outside
+    ground may simply not exist; the search degrades to the NW/NE
+    shoulders and then closer in, which is why the derived staging point
+    sits on the chamber's own north-west band.
+    """
+    return mapframe.screen_north(anchor, distance, is_walkable)
+
+
+@dataclass
+class ClearCountessStep(_PickupMixin):
+    """The Cellar 5 endgame: the user's tactics for the Countess, encoded.
+
+    Four beats, in order (R212 Q4 exception, Q7):
+
+    1. **Clear the neighborhood** — a bounded clearance around the
+       arrival point so the encounter has no gaggle at our backs. A
+       composed `ClearRadiusStep` (modest radius, no patrol): the same
+       machinery, the same budgets, not a re-implementation.
+    2. **Stage north** — route to a point screen-north of the chamber
+       anchor, derived from the atlas at run time and recorded on the
+       blackboard (`notes["countess"]`) for the drill and the gate to
+       display. Best-effort: staging is a tactic, and a staging point
+       the map refuses is logged and skipped, never a hang.
+    3. **Advance slowly** — short legs through the module's own
+       `approach` (its gates decide what "in a fight" means), held by
+       the revive brake: no advancing while the wall is shorter than
+       `approach_with_revives`, until the patience bound releases it
+       loudly. The on-contact wait-for-revives beat is `engage`'s own.
+    4. **Kill and prove it** — the fight itself belongs to `engage`
+       (aggressive posture). The step owns the EVIDENCE: her pinned
+       identity (kind 734 / unique_no 6, T68+R216) seen with a dead
+       mode, or provably absent after the budgeted chamber sweep — one
+       short in-and-out pass so a blind corner cannot hide her, run in
+       BOTH outcomes (after a seen kill it doubles as drop
+       reconnaissance, priming the sightings memo the sweep-after
+       relies on). Alive and unreachable is a loud stop-and-report,
+       never a silent give-up: this step IS the run's objective.
+
+    On confirmation the chamber region goes on the blackboard as the
+    `cleared` circle (`pickup` adopts it unchanged — one region format,
+    the M5 handoff), centred on her corpse when one was seen.
+    """
+
+    services: RunServices = None  # type: ignore[assignment]
+    chamber: tuple[int, int] = (0, 0)
+    neighborhood_radius: int = 30
+    chamber_radius: int = 25
+    posture: str | None = None
+    name: str = "clear_countess"
+    _phase: str = "clear"
+    _posture_applied: bool = False
+    _neighborhood: ClearRadiusStep | None = None
+    _anchor: tuple[int, int] | None = None
+    _anchor_live: bool = False
+    _seen_alive: bool = False
+    _corpse_at: tuple[int, int] | None = None
+    _staging: tuple[int, int] | None = None
+    _closest: int | None = None
+    _attempts: int = 0
+    _walk_fails: int = 0
+    _revive_waited: int = 0
+    _revives_seen: int = 0
+    _brake_logged: bool = False
+    _sweep_points: list[tuple[int, int]] | None = None
+    _sweep_deadline: float | None = None
+    _sweep_narrated: bool = False
+
+    def __post_init__(self) -> None:
+        self._anchor = self.chamber
+        # The neighborhood clearance, composed. No patrol: the arrival
+        # pocket is small and the chamber must not be wandered into as a
+        # "ring point". No posture: this step already set the run's.
+        self._neighborhood = ClearRadiusStep(
+            self.services,
+            radius=self.neighborhood_radius,
+            centre_note="arrival",
+            patrol=False,
+        )
+
+    # -- identity ------------------------------------------------------------
+
+    @staticmethod
+    def _is_countess(unit) -> bool:
+        """The pinned identity (T68 + R216). kind is the monstats row —
+        hers alone — and unique_no confirms when readable; a corpse read
+        that lost the boss flag (unique_no None) must not un-kill her."""
+        return unit.kind == offsets.COUNTESS_KIND and (
+            unit.unique_no is None
+            or unit.unique_no == offsets.COUNTESS_UNIQUE_NO
+        )
+
+    def _scan(self, snap: GameSnapshot) -> object | None:
+        """One look for her, live or dead. Returns the live unit if any.
+
+        The live position REPLACES the run file's anchor whenever she is
+        in perception — the memory-first, live-read-as-authority rule
+        the traverse step already follows for exits.
+        """
+        for unit in snap.corpses:
+            if self._is_countess(unit):
+                if self._corpse_at is None:
+                    self._corpse_at = unit.position
+                    self.services.narrate(
+                        f"countess: DOWN — her corpse reads at {unit.position}"
+                    )
+                return None
+        alive = None
+        for unit in snap.monsters:
+            if not self._is_countess(unit):
+                continue
+            if unit.is_corpse:
+                if self._corpse_at is None:
+                    self._corpse_at = unit.position
+                    self.services.narrate(
+                        f"countess: DOWN — her corpse reads at {unit.position}"
+                    )
+                return None
+            alive = unit
+            break
+        if alive is not None:
+            self._seen_alive = True
+            if not self._anchor_live:
+                self._anchor_live = True
+                self.services.log(
+                    f"countess: sighted live at {alive.position} — the "
+                    f"anchor {self._anchor} yields to the read"
+                )
+            self._anchor = alive.position
+        return alive
+
+    def _loud_stop(self, why: str) -> None:
+        """The run's objective cannot be met and silence is forbidden."""
+        self.services.alert(f"COUNTESS UNRESOLVED: {why}")
+        raise NavigationError(f"clear_countess: {why}")
+
+    def _confirmed(self, ctx: EngineContext) -> StepOutcome:
+        centre = self._corpse_at or self._anchor or self.chamber
+        # The M5 region handoff: `pickup` adopts this circle verbatim.
+        ctx.notes["cleared"] = {
+            "centre": centre,
+            "radius": self.chamber_radius,
+            "patrol": True,
+        }
+        if self._corpse_at is not None:
+            note = f"the countess is down; drop zone {centre} r{self.chamber_radius}"
+        else:
+            note = (
+                "the countess is provably absent (chamber swept clean); "
+                f"drop zone {centre} r{self.chamber_radius}"
+            )
+        self.services.narrate(f"countess: {note}")
+        return StepOutcome(done=True, acted=True, note=note)
+
+    # -- movement bookkeeping ------------------------------------------------
+
+    def _progressing(self, distance: int) -> bool:
+        """The patrol's margin rule (R189 b), for whichever walk owns the
+        phase. Reset via `_retarget` on every phase or target change."""
+        if (
+            self._closest is None
+            or distance <= self._closest - self.services.patrol_progress_margin
+        ):
+            self._closest = distance
+            self._attempts = 0
+            return True
+        self._attempts += 1
+        return self._attempts < self.services.patrol_attempts
+
+    def _retarget(self) -> None:
+        self._closest = None
+        self._attempts = 0
+        self._walk_fails = 0
+
+    def _leg_toward(
+        self, ctx: EngineContext, origin: tuple[int, int], target: tuple[int, int]
+    ) -> bool:
+        """One capped leg via the map. False = this target is not happening
+        (no route twice would be cleaner, but the two-strike rule guards
+        WRITE-OFFS of many candidates; here every no-route already falls
+        through to the next phase, which re-decides from fresh reads)."""
+        leg = _route_leg(self.services, origin, target)
+        if leg is None:
+            return False
+        if not self.send(ctx, MoveTo(leg)):
+            self._walk_fails += 1
+            return self._walk_fails < 2
+        return True
+
+    # -- the tick ------------------------------------------------------------
+
+    def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
+        if self.posture is not None and not self._posture_applied:
+            set_posture = getattr(self.services.combat, "set_posture", None)
+            if set_posture is not None:
+                set_posture(self.posture)
+                self.services.narrate(f"combat posture: {self.posture}")
+            self._posture_applied = True
+        if self.recover_panels(snap):
+            return StepOutcome(done=False, acted=True, note="closed a stray panel")
+        if snap.player is None or snap.area is None:
+            return StepOutcome(done=False, waiting=True)
+        origin = snap.player.position
+
+        self.confirm_pickups(snap)
+        alive = self._scan(snap)
+        # Everything the chamber region drops feeds the sightings memo,
+        # so the pickup step's ring walk starts with evidence in hand.
+        if self._anchor is not None:
+            self.note_wanted_sightings(snap, self._anchor, self.chamber_radius)
+
+        # 1 — the neighborhood clearance owns the tick until it is done.
+        # It fights, collects and cleanses through its own machinery;
+        # running this step's engage beside it would decide twice.
+        if self._phase == "clear":
+            outcome = self._neighborhood.step(snap, ctx)
+            if not outcome.done:
+                return outcome
+            self._phase = "stage"
+            self._retarget()
+            self.services.narrate(
+                f"countess: neighborhood clear ({outcome.note}) — staging north"
+            )
+            return StepOutcome(done=False, acted=True, note="neighborhood clear")
+
+        # Her corpse settles the question in any later phase: sweep for
+        # the sanity pass (and the drop reconnaissance), then confirm.
+        if self._corpse_at is not None and self._phase != "sweep":
+            self._enter_sweep()
+
+        # The fight owns any tick it claims — aggressive posture: she and
+        # her court are exactly what this step came to fight.
+        action = self.services.combat.engage(snap, ctx)
+        if action is not None:
+            if not self.send(ctx, action):
+                blamed = getattr(action, "toward", None)
+                if alive is not None and blamed == alive.unit_id:
+                    self._walk_fails += 1
+                    if self._walk_fails >= 2:
+                        self._loud_stop(
+                            f"she is alive at {alive.position} and the walk "
+                            "to her keeps failing — alive and unreachable"
+                        )
+            return StepOutcome(done=False, acted=True)
+
+        if self._phase == "stage":
+            return self._stage_tick(snap, ctx, origin)
+        if self._phase == "advance":
+            return self._advance_tick(snap, ctx, origin, alive)
+        return self._sweep_tick(snap, ctx, origin, alive)
+
+    # -- 2: staging ----------------------------------------------------------
+
+    def _stage_tick(
+        self, snap: GameSnapshot, ctx: EngineContext, origin: tuple[int, int]
+    ) -> StepOutcome:
+        if self._staging is None:
+            self._staging = _screen_north_point(
+                self._anchor or self.chamber,
+                self.services.staging_distance,
+                getattr(self.services.combat, "is_walkable", None),
+            )
+            # The blackboard record the drill displays and the gate reviews.
+            ctx.notes["countess"] = {
+                "anchor": self._anchor,
+                "staging": self._staging,
+                "radius": self.chamber_radius,
+            }
+            self.services.narrate(
+                f"countess: staging north of the chamber at {self._staging} "
+                f"(anchor {self._anchor})"
+            )
+        distance = _chebyshev(origin, self._staging)
+        if distance <= self.services.patrol_reach:
+            self._to_advance("staged")
+            return StepOutcome(done=False, acted=True, note="staged north")
+        if not self._progressing(distance) or not self._leg_toward(
+            ctx, origin, self._staging
+        ):
+            # Best-effort by design: the staging point is a tactic, not
+            # the objective, and a map that refuses it must not hang the
+            # run that came to kill her.
+            self.services.log(
+                f"countess: staging at {self._staging} not reachable "
+                f"(closest {self._closest}); advancing from here"
+            )
+            self._to_advance("staging written off")
+        return StepOutcome(done=False, acted=True, note="staging north")
+
+    def _to_advance(self, why: str) -> None:
+        self._phase = "advance"
+        self._retarget()
+        self.services.narrate(f"countess: advancing on the chamber ({why})")
+
+    # -- 3: the advance ------------------------------------------------------
+
+    def _advance_tick(
+        self, snap: GameSnapshot, ctx: EngineContext, origin: tuple[int, int], alive
+    ) -> StepOutcome:
+        # The revive brake (the user's tactic): no advancing while the
+        # wall is short. Released by the wall reaching the module's own
+        # `approach_with_revives`, by the wall GROWING resetting the
+        # patience, or by the patience bound — loudly, because a cellar
+        # with nothing dead nearby can never raise a wall at all.
+        needed = getattr(
+            getattr(self.services.combat, "config", None),
+            "approach_with_revives",
+            0,
+        )
+        standing = len(snap.revives)
+        if standing > self._revives_seen:
+            self._revive_waited = 0
+        self._revives_seen = standing
+        if standing < needed:
+            self._revive_waited += 1
+            if self._revive_waited <= self.services.advance_revive_patience:
+                if not self._brake_logged:
+                    self._brake_logged = True
+                    self.services.log(
+                        f"countess: holding the advance for the revive wall "
+                        f"({standing}/{needed} up)"
+                    )
+                return StepOutcome(done=False, waiting=True, note="revive brake")
+            if self._brake_logged:
+                self._brake_logged = False
+                self.services.log(
+                    f"countess: the wall never grew past {standing}/{needed} "
+                    f"— advancing without it"
+                )
+
+        target = self._anchor or self.chamber
+        distance = _chebyshev(origin, target)
+        if distance <= self.services.patrol_reach:
+            if alive is None:
+                self._enter_sweep()
+                return StepOutcome(done=False, acted=True, note="at the chamber")
+            # At her anchor with her alive in sight: `engage`'s fight now;
+            # its deliberate pauses (restrike, revives) are not stalls.
+            return StepOutcome(done=False, waiting=True)
+
+        via = None
+        if self.services.route_to is not None:
+            route = self.services.route_to(target)
+            if route is not None:
+                via = _next_route_waypoint(route, origin)
+        closing = self.services.combat.approach(snap, target, via=via)
+        if closing is not None:
+            if not self.send(ctx, closing):
+                self._walk_fails += 1
+                if self._walk_fails >= 2:
+                    if alive is not None:
+                        self._loud_stop(
+                            f"she is alive at {alive.position} and every "
+                            "approach fails — alive and unreachable"
+                        )
+                    self.services.log(
+                        "countess: the anchor is not approachable — sweeping"
+                    )
+                    self._enter_sweep()
+                return StepOutcome(done=False, acted=True)
+            if not self._progressing(distance):
+                if alive is not None:
+                    self._loud_stop(
+                        f"she is alive at {alive.position} and "
+                        f"{self._attempts} advance legs got no closer than "
+                        f"{self._closest} — alive and unreachable"
+                    )
+                self.services.log(
+                    f"countess: the advance stalled {self._attempts} legs "
+                    f"short of the anchor — sweeping from here"
+                )
+                self._enter_sweep()
+            return StepOutcome(done=False, acted=True, note="advancing")
+        # approach refused. With her alive in sight that is a deliberate
+        # combat beat (wait-for-revives on contact, a restrike window) —
+        # engage's next look. With NO live countess it means the module
+        # considers the anchor in reach and has nothing to fight there:
+        # the chamber is as approached as it gets, and waiting on an
+        # empty anchor was this step's own hang (found by the blinded
+        # sim scenario, exactly the sweep's case).
+        if alive is None:
+            self._enter_sweep()
+            return StepOutcome(done=False, acted=True, note="at the chamber")
+        return StepOutcome(done=False, waiting=True)
+
+    # -- 4: the chamber sweep ------------------------------------------------
+
+    def _enter_sweep(self) -> None:
+        if self._phase != "sweep":
+            self._phase = "sweep"
+            self._retarget()
+        if self._sweep_deadline is None:
+            # One budget across every entry: a countess blinking in and
+            # out of perception must not stretch it.
+            self._sweep_deadline = self.services.clock() + self.services.sweep_budget_s
+        if self._sweep_points is None:
+            anchor = self._anchor or self.chamber
+            r = self.chamber_radius
+            walkable = getattr(self.services.combat, "is_walkable", None)
+            south = (anchor[0] + r, anchor[1] + r)
+            if walkable is not None:
+                for d in range(r, 7, -4):
+                    candidate = (anchor[0] + d, anchor[1] + d)
+                    try:
+                        if walkable(candidate):
+                            south = candidate
+                            break
+                    except Exception:  # noqa: BLE001 - torn read
+                        continue
+            # In-and-out: the heart of the chamber, its far (south) side,
+            # and back to the heart — a pass, not a patrol.
+            self._sweep_points = [anchor, south, anchor]
+        if not self._sweep_narrated:
+            self._sweep_narrated = True
+            self.services.narrate(
+                f"countess: sweeping the chamber ({self.services.sweep_budget_s:.0f}s "
+                f"budget) — {self._sweep_points}"
+            )
+
+    def _sweep_tick(
+        self, snap: GameSnapshot, ctx: EngineContext, origin: tuple[int, int], alive
+    ) -> StepOutcome:
+        self._enter_sweep()  # idempotent: fills points/deadline if entered abruptly
+        if alive is not None and self._corpse_at is None:
+            # The sweep fed the scan and the scan answered: she lives.
+            # Back to the approach — the budget clock keeps running.
+            self._to_advance("she is in sight")
+            return StepOutcome(done=False, acted=True, note="sighted her")
+        if self.services.clock() > self._sweep_deadline:
+            if self._corpse_at is not None:
+                return self._confirmed(ctx)
+            self._loud_stop(
+                f"the {self.services.sweep_budget_s:.0f}s chamber sweep "
+                "budget is spent with the kill unproven — she is neither "
+                "dead on the ground nor provably absent"
+            )
+        while self._sweep_points:
+            point = self._sweep_points[0]
+            distance = _chebyshev(origin, point)
+            if distance <= self.services.patrol_reach:
+                self._sweep_points.pop(0)
+                self._retarget()
+                continue
+            if not self._progressing(distance) or not self._leg_toward(
+                ctx, origin, point
+            ):
+                self.services.log(
+                    f"countess: sweep point {point} not reachable — skipped"
+                )
+                self._sweep_points.pop(0)
+                self._retarget()
+                continue
+            return StepOutcome(done=False, acted=True, note=f"sweeping via {point}")
+        # The pass is complete: dead on the ground, or provably absent.
+        return self._confirmed(ctx)
 
 
 def _checked_posture(services: RunServices, name: str | None) -> str | None:
@@ -2319,6 +3035,29 @@ def build_registry(services: RunServices) -> StepRegistry:
             factory=lambda p: TraverseStep(
                 services,
                 dest=p["dest"],
+                posture=_checked_posture(services, p["posture"]),
+            ),
+        )
+    )
+    registry.register(
+        StepSpec(
+            "clear_countess",
+            params=(
+                # The chamber anchor: her T68-measured position for this
+                # seed, upgraded to the live boss read the moment she is
+                # in perception. Two ints because run-file params are
+                # scalars — the run file comments their provenance.
+                ParamSpec("chamber_x", int),
+                ParamSpec("chamber_y", int),
+                ParamSpec("neighborhood_radius", int, required=False, default=30),
+                ParamSpec("chamber_radius", int, required=False, default=25),
+                ParamSpec("posture", str, required=False, default=None),
+            ),
+            factory=lambda p: ClearCountessStep(
+                services,
+                chamber=(p["chamber_x"], p["chamber_y"]),
+                neighborhood_radius=p["neighborhood_radius"],
+                chamber_radius=p["chamber_radius"],
                 posture=_checked_posture(services, p["posture"]),
             ),
         )

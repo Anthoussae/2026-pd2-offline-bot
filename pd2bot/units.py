@@ -205,6 +205,12 @@ class Monster:
     # super-unique" is settled by the P2 descent drill, not assumed.
     unique_no: int | None = None
     name: str = ""
+    # Does this unit carry any of the stats a thing that fights has?
+    # (T74, 2026-08-06 — `offsets.COMBAT_RATED_STATS` records the
+    # measurement.) False means scenery: a decorative bat, a town
+    # chicken, a cow. They are still REPORTED — a phantom you cannot see
+    # is worse than one you can — but they are never targets.
+    combat_rated: bool = True
 
     @property
     def is_alive(self) -> bool:
@@ -217,7 +223,15 @@ class Monster:
 
     @property
     def is_ally(self) -> bool:
-        """Your merc, your summons, friendly NPCs — never a target."""
+        """Your merc, your summons, friendly NPCs — never a target.
+
+        NOTE what this does and does not settle. Alignment separates
+        ALLY from everything else and nothing more: T73 read all 39
+        hostiles in Tower Cellar 1 and **none of them carried the
+        alignment stat**, exactly like the decorative bats. "Not
+        provably friendly" is therefore not a definition of enemy — see
+        `combat_rated`, which is.
+        """
         return self.alignment == offsets.ALIGNMENT_FRIENDLY
 
     @property
@@ -314,6 +328,9 @@ class UnitScan:
     skipped: int  # units that could not be read; nonzero is worth noticing
     allies: list[Monster] = field(default_factory=list)
     corpses: list[Monster] = field(default_factory=list)
+    # Decorative units — bats, chickens, cows (T74). Reported so a run
+    # log can show what was actually in the room, never targeted.
+    critters: list[Monster] = field(default_factory=list)
     objects: list[GameObject] = field(default_factory=list)
 
 
@@ -345,6 +362,7 @@ def _read_monster(session: GameSession, unit: int) -> Monster | None:
         hp=stats.get(offsets.STAT_HP, 0),
         max_hp=stats.get(offsets.STAT_MAX_HP, 0),
         alignment=stats.get(offsets.STAT_ALIGNMENT, 0),
+        combat_rated=bool(offsets.COMBAT_RATED_STATS & stats.keys()),
         mode=session.u32(unit + offsets.UNIT_MODE),
         is_champion=bool(flags & offsets.MONSTER_FLAG_CHAMPION),
         is_boss=bool(flags & offsets.MONSTER_FLAG_BOSS),
@@ -522,6 +540,7 @@ def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitSca
     monsters: list[Monster] = []
     allies: list[Monster] = []
     corpses: list[Monster] = []
+    critters: list[Monster] = []
     items: list[GroundItem] = []
     objects: list[GameObject] = []
     skipped = 0
@@ -552,8 +571,19 @@ def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitSca
                 seen.add(key)
                 if monster.is_corpse:
                     corpses.append(monster)
+                elif monster.is_ally:
+                    allies.append(monster)
+                elif not monster.combat_rated:
+                    # Scenery, not an enemy (T74). The bot spent 173 s of
+                    # T72 attacking two decorative bats 23 times each
+                    # because "did not prove itself friendly" was the
+                    # whole test. Kept in its own list rather than
+                    # dropped: the run log should be able to show what
+                    # was in the room, and a filter that hides its own
+                    # work is how the next phantom goes unnoticed.
+                    critters.append(monster)
                 else:
-                    (allies if monster.is_ally else monsters).append(monster)
+                    monsters.append(monster)
         except Exception:
             # The game mutates these structures as we read them; a malformed
             # unit is expected occasionally, not exceptional.
@@ -589,5 +619,6 @@ def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitSca
         skipped=skipped,
         allies=allies,
         corpses=corpses,
+        critters=critters,
         objects=objects,
     )

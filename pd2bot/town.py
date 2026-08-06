@@ -66,6 +66,7 @@ from pd2bot.menuinput import MenuInput
 from pd2bot.navigate import NavigationError
 from pd2bot.panelinput import PanelInput
 from pd2bot.player import Player, read_player
+from pd2bot.runlog import NullRunLog
 from pd2bot.screen import projection_for
 from pd2bot.snapshot import GameSnapshot
 from pd2bot.uipoints import UIPoint, default_points
@@ -376,6 +377,7 @@ class TownLayer:
         alert: Callable[[str], None] = _default_alert,
         notice: Callable[[str], None] | None = None,
         narrate: Callable[[str], None] | None = None,
+        runlog: object | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         should_stop: Callable[[], bool] | None = None,
@@ -423,6 +425,11 @@ class TownLayer:
         # polling plus settle timers, and this is where it says so. No-op
         # by default so drills and tests stay silent.
         self._narrate = narrate if narrate is not None else (lambda text: None)
+        # The run event log (P6). Taken the same way `narrate` is — a
+        # holder rather than a construction argument — because the town
+        # layer is SESSION-scoped and outlives any one run, so the wiring
+        # repoints it per run.
+        self.runlog = runlog if runlog is not None else NullRunLog()
         self._pressure_warned = False
         self._clock = clock
         self._sleep = sleep
@@ -653,13 +660,19 @@ class TownLayer:
             }
             if not stray:
                 break
-            found.append(
-                ", ".join(
-                    sorted(
-                        offsets.UI_NAMES.get(panel, f"ui_{panel:#x}")
-                        for panel in stray
-                    )
+            names = ", ".join(
+                sorted(
+                    offsets.UI_NAMES.get(panel, f"ui_{panel:#x}")
+                    for panel in stray
                 )
+            )
+            found.append(names)
+            # Nothing opens a panel on purpose except us, so one being
+            # open that we did not ask for IS an accident (R220 Q7). The
+            # recovery has existed since R85; only now does it say so.
+            self.runlog.event(
+                "npc.accidental", panels=names,
+                ids=sorted(stray), requested=False,
             )
             try:
                 self.menu.press_escape()
@@ -1162,7 +1175,7 @@ class TownLayer:
         robust they are.
         """
         clicked = None
-        for _ in range(1 + self.config.interact_retries):
+        for attempt in range(1 + self.config.interact_retries):
             self._check_stop()
             # If our previous click already opened it, STOP. Re-approaching
             # now is what produced the Kashya loop (R80): the walk cannot
@@ -1180,6 +1193,11 @@ class TownLayer:
                 lambda: self._panel_open(offsets.UI_NPCMENU),
                 self.config.npc_walk_timeout_s,
             ):
+                self.runlog.event(
+                    "npc.interact", npc=name, npc_kind=kind,
+                    clicked=list(clicked), attempts=attempt + 1,
+                    requested=True,
+                )
                 return clicked
         player = self._read_player(self.session)
         raise TownError(
@@ -1479,7 +1497,18 @@ class TownLayer:
                 )
 
             if self._await(_gone, verify_s):
+                self.runlog.event(
+                    "stash.deposit", unit_id=item.unit_id,
+                    item_kind=item.kind, quality=item.quality,
+                    sockets=item.sockets, cell=list(item.position),
+                    attempts=attempt + 1,
+                )
                 return True
+        self.runlog.event(
+            "stash.refused", unit_id=item.unit_id, item_kind=item.kind,
+            attempts=attempts,
+            reason="the item would not leave the inventory",
+        )
         return False
 
     def _deposit_items(
@@ -1734,6 +1763,10 @@ class TownLayer:
             ):
                 moved = carried - carried_now()
                 report.log.append(f"gold: {moved} deposited")
+                self.runlog.event(
+                    "stash.gold", amount=moved, before=carried,
+                    after=carried_now(),
+                )
                 return moved
         self._dismiss_chat_console()
         raise TownError(

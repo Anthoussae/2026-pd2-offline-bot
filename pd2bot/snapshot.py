@@ -36,6 +36,11 @@ class GameSnapshot:
     allies: tuple[Monster, ...] = ()  # mercenary, summons, friendly NPCs
     ground_items: tuple[GroundItem, ...] = ()
     corpses: tuple[Monster, ...] = ()  # dead type-1 units: revive fuel (M5)
+    # Decorative units — bats, chickens, cows (T74, 2026-08-06). NOT in
+    # `monsters`, so combat never sees them; reported so the run log can
+    # show what was really in the room. The bot spent 173 s attacking two
+    # of these before anything could tell them from a Fallen.
+    critters: tuple[Monster, ...] = ()
     objects: tuple[GameObject, ...] = ()  # waypoints, stash, doors (M5)
     skills: ActiveSkills | None = None  # active left/right skill ids (M5)
     skipped_units: int = 0
@@ -109,6 +114,7 @@ class Perception:
             allies=tuple(scan.allies),
             ground_items=tuple(scan.ground_items),
             corpses=tuple(scan.corpses),
+            critters=tuple(scan.critters),
             objects=tuple(scan.objects),
             skills=read_active_skills(session),
             skipped_units=scan.skipped,

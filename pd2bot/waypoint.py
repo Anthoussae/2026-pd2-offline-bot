@@ -137,6 +137,7 @@ class WaypointTravel:
         )
         report.clicks += 1
         report.log.append(f"panel edge 0->1 at waypoint object {position}")
+        self.interact.runlog.event("waypoint.open", position=list(position))
 
     def select_tab(self, dest_area: int, report: TravelReport) -> None:
         """Click the destination's act tab (M6 P2). No-op for areas with
@@ -156,6 +157,7 @@ class WaypointTravel:
         self.interact.click_point(tab, lambda: self._panel_open())
         report.clicks += 1
         report.log.append(f"act tab {tab.name} clicked, panel still open")
+        self.interact.runlog.event("waypoint.tab", tab=tab.name)
 
     def click_destination(self, dest_area: int, report: TravelReport) -> None:
         point = self.interact.point(self._point_name(dest_area))
@@ -165,6 +167,10 @@ class WaypointTravel:
         # budget waiting for an arrival that was never coming.
         self.interact.click_point(point, lambda: not self._panel_open())
         report.log.append(f"destination row {point.name} clicked, panel closed")
+        self.interact.runlog.event(
+            "waypoint.select", row=point.name, dest_area=dest_area,
+            dest_name=offsets.AREA_NAMES.get(dest_area, f"area {dest_area}"),
+        )
 
     def await_arrival(self, dest_area: int, report: TravelReport) -> None:
         deadline = self._clock() + self.config.travel_timeout_s
@@ -177,6 +183,12 @@ class WaypointTravel:
             if area is not None and area.level_no == dest_area and not self._panel_open():
                 report.arrived = True
                 report.log.append(f"arrived: area {dest_area}")
+                self.interact.runlog.event(
+                    "waypoint.arrived", dest_area=dest_area,
+                    dest_name=offsets.AREA_NAMES.get(
+                        dest_area, f"area {dest_area}"
+                    ),
+                )
                 return
             self._sleep(self.config.poll_s)
         where = "unreadable"

@@ -37,11 +37,12 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from pd2bot import offsets
+from pd2bot import mapframe, offsets
 from pd2bot.behavior.actions import ActionExecutor
 from pd2bot.behavior.reflex import ReflexLadder
 from pd2bot.input import InputRefused
 from pd2bot.narrate import noop as narrate_noop
+from pd2bot.runlog import NullRunLog
 from pd2bot.safety import ChickenExit
 from pd2bot.skills import SkillSwitchFailed
 from pd2bot.snapshot import GameSnapshot
@@ -262,6 +263,8 @@ class BehaviorEngine:
         narrate: Callable[[str], None] = narrate_noop,
         should_stop: Callable[[], bool] | None = None,
         bot_escape_at: Callable[[], float | None] | None = None,
+        runlog: object | None = None,
+        frame: Callable[[], object] | None = None,
     ) -> None:
         if not states:
             raise BehaviorError("a run with no steps cannot do anything")
@@ -289,6 +292,20 @@ class BehaviorEngine:
         # The narrative channel (R179): step transitions with durations —
         # the engine is the only thing that knows when a step began.
         self._narrate = narrate
+        # The run event log (the run-event-log plan, P4). This is where
+        # T71's hole was: the engine recorded a tick only when its
+        # outcome carried a `note`, so a step that decided something
+        # silently — the fight branch, a walk leg, the click pacing —
+        # left nothing at all. 144 s in the Forgotten Tower produced five
+        # lines out of ~150 decisions, and the analysis that followed was
+        # therefore invention. Every tick is now recorded, with where the
+        # time went.
+        self._runlog = runlog if runlog is not None else NullRunLog()
+        self._frame = frame
+        self._timing: dict[str, float] = {}
+        self._tick_step: str | None = None
+        self._tick_outcome: StepOutcome | None = None
+        self._tick_snap: GameSnapshot | None = None
         self._step_started = self._clock()
         # Per-rung fire counts, narrated at every 25th fire (R185 C): run
         # 4's clearance spent ~10 silent minutes on combat-module upkeep,
@@ -499,12 +516,133 @@ class BehaviorEngine:
         return "\n".join(lines)
 
     def tick(self) -> bool:
-        """One decision. Returns True when the run is complete.
+        """One decision, recorded. Returns True when the run is complete.
 
-        Monitor exceptions (ChickenExit, DeathHalt) and IdleBail propagate
-        to the caller untouched — the cycle owns what they mean.
+        A thin wrapper over `_tick`, so that EVERY tick leaves an event
+        carrying its duration and where that duration went — including
+        the ticks that end by raising (a chicken, an idle bail, a loud
+        give-up), which are exactly the ticks worth reading. That is why
+        the emit sits in a `finally`.
+
+        The timing split is the measurement T71 lacked: 193 ticks over
+        203 s is ~1.05 s per tick against a configured 0.2 s interval, so
+        ~0.85 s of every tick went somewhere nobody could name. Candidates
+        it will now distinguish: the snapshot read, the ladder, the step
+        (which itself calls `carried()` and the exit scan), and the
+        executor's housekeeping.
         """
+        started = self._clock()
+        self._timing = {}
+        self._tick_step = None
+        self._tick_outcome = None
+        self._tick_snap = None
+        try:
+            return self._tick()
+        finally:
+            self._log_tick(started)
+
+    def _log_tick(self, started: float) -> None:
+        """Emit the tick record. Never raises — instrumentation is not a
+        dependency, least of all on the tick that was already failing."""
+        if not getattr(self._runlog, "enabled", False):
+            return
+        try:
+            snap = self._tick_snap
+            player = snap.player if snap is not None else None
+            outcome = self._tick_outcome
+            frame = None
+            if self._frame is not None:
+                try:
+                    frame = self._frame()
+                except Exception:  # noqa: BLE001
+                    frame = None
+            frame = frame or mapframe.MapFrame.unknown()
+            record: dict = {
+                "n": self.report.ticks,
+                "dur_s": round(self._clock() - started, 3),
+                "timing": {k: round(v, 3) for k, v in self._timing.items()},
+                "step": self._tick_step,
+                "step_index": self._index,
+            }
+            if player is not None:
+                record["player"] = frame.describe(player.position)
+                record["hp"] = player.hp
+                record["max_hp"] = player.max_hp
+                record["mana"] = player.mana
+                record["max_mana"] = player.max_mana
+            else:
+                record["player"] = None
+            if snap is not None:
+                # COUNTS, not lists: cheap, and they settle "was there
+                # anything to fight or pick up?" without a reader having
+                # to infer it.
+                record["hostiles"] = len(snap.live_monsters)
+                record["ground_items"] = len(snap.ground_items)
+                record["allies"] = len(snap.allies)
+                # Decorative units, counted so the filter's own work is
+                # visible (T74). A filter that hides what it excluded is
+                # how the next phantom goes unnoticed for three runs —
+                # and if this number is ever 0 in a room full of bats,
+                # the classifier has regressed.
+                record["critters"] = len(snap.critters)
+                # The nearest few hostiles WITH THEIR HEALTH (T72). The
+                # counts alone proved the Forgotten Tower fight never
+                # ended — two units attacked 23 times each across 173 s,
+                # both still standing — but could not say whether their
+                # health was moving. "Is this fight going anywhere?" is
+                # the question a stalled run most needs answered, and it
+                # is unanswerable from a count. Bounded to four so a
+                # crowded field cannot bloat the tick.
+                if snap.player is not None and snap.live_monsters:
+                    near = sorted(
+                        snap.live_monsters,
+                        key=lambda m: max(
+                            abs(m.position[0] - snap.player.position[0]),
+                            abs(m.position[1] - snap.player.position[1]),
+                        ),
+                    )[:4]
+                    record["hostile_detail"] = [
+                        {
+                            "id": m.unit_id,
+                            "kind": m.kind,
+                            "hp": m.hp,
+                            "life_pct": round(m.life_pct, 1),
+                            "dist": max(
+                                abs(m.position[0] - snap.player.position[0]),
+                                abs(m.position[1] - snap.player.position[1]),
+                            ),
+                            "boss": m.is_boss,
+                            "champion": m.is_champion,
+                        }
+                        for m in near
+                    ]
+            if outcome is not None:
+                record["outcome"] = (
+                    "done" if outcome.done
+                    else "acted" if outcome.acted
+                    else "waiting" if outcome.waiting
+                    else "idle"
+                )
+                record["note"] = outcome.note
+            self._runlog.event("tick", **record)
+        except Exception:  # noqa: BLE001 - never fatal
+            return
+
+    def _tick(self) -> bool:
+        t0 = self._clock()
         snap = self._snapshot()
+        self._timing["snapshot"] = self._clock() - t0
+        self._tick_snap = snap
+        # Stamp the area onto every subsequent event. Done HERE, from the
+        # snapshot, rather than by whoever proves a transition: T72's log
+        # came back with `area` absent on all 620 events because the
+        # setter existed and nothing called it, which made "how long was
+        # it in the Tower?" a question the log could not answer despite
+        # having been built to answer exactly that.
+        if snap.area is not None:
+            self._runlog.area(
+                snap.area.level_no, mapframe.area_name(snap.area.level_no)
+            )
         # The death latch outranks EVERY stop (review 2026-08-02, issue
         # 001): a StopRequested rides ChickenExit into the cycle's
         # leave-game path, which SENDS INPUT — and if the stop preempted
@@ -538,8 +676,15 @@ class BehaviorEngine:
             self._last_position = snap.player.position
             self._mark_activity(now)
 
+        t0 = self._clock()
         decision = self._ladder.evaluate(snap) if self._ladder is not None else None
+        self._timing["ladder"] = self._clock() - t0
         if decision is not None:
+            self._tick_step = f"reflex:{decision.rung}"
+            self._runlog.event(
+                "reflex", rung=decision.rung, reason=decision.reason,
+                action=type(decision.action).__name__,
+            )
             # Survival owns the tick; the run step is skipped outright.
             self.report.reflex_fires.append(decision.rung)
             self.report.log.append(
@@ -572,9 +717,12 @@ class BehaviorEngine:
 
         if not self.complete:
             state = self._states[self._index]
+            self._tick_step = state.name
+            t0 = self._clock()
             try:
                 outcome = state.step(snap, self.ctx)
             except SEND_DID_NOT_LAND as exc:
+                self._timing["step"] = self._clock() - t0
                 # Steps send through the same executor, so they refuse the
                 # same way. A step is free to have done part of its work
                 # before the refusal; it is written to be re-entered, which
@@ -582,6 +730,22 @@ class BehaviorEngine:
                 self._note_refusal(f"step {state.name}", exc)
                 self._check_idle(snap, now)
                 return self.complete
+            self._timing["step"] = self._clock() - t0
+            self._tick_outcome = outcome
+            # EVERY decision, not just the ones carrying a note. This one
+            # line is the T71 fix: the silent branches — the fight, a walk
+            # leg, the click pacing — are exactly the ones that mattered
+            # and exactly the ones nothing recorded.
+            self._runlog.event(
+                "step.decision", step=state.name,
+                outcome=(
+                    "done" if outcome.done
+                    else "acted" if outcome.acted
+                    else "waiting" if outcome.waiting
+                    else "idle"
+                ),
+                note=outcome.note,
+            )
             if outcome.acted:
                 self._refusal_streak = 0
                 self._waiting_since = None
@@ -630,10 +794,12 @@ class BehaviorEngine:
         # still a bot the never-idle invariant must catch.
         maintain = getattr(self._executor, "maintain", None)
         if maintain is not None:
+            t0 = self._clock()
             try:
                 maintain()
             except SEND_DID_NOT_LAND:
                 pass
+            self._timing["maintain"] = self._clock() - t0
 
         self._check_idle(snap, now)
         return self.complete
@@ -642,6 +808,15 @@ class BehaviorEngine:
         """Absorb one refused send, and escalate only on a long streak."""
         self.report.refusals += 1
         self._refusal_streak += 1
+        # A refusal is a DIFFERENT thing from a send, and the log keeps
+        # them apart: `action.*` means it reached the game, `refusal`
+        # means it did not. `_PickupMixin.send` also swallows walk
+        # failures, which is why they get an event of their own rather
+        # than living only in a prose line.
+        self._runlog.event(
+            "refusal", where=where, error=type(exc).__name__, detail=str(exc),
+            streak=self._refusal_streak,
+        )
         self.report.log.append(
             f"{where}: send did not land — {type(exc).__name__}: {exc}"
         )

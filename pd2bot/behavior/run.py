@@ -161,6 +161,20 @@ def default_registry() -> StepRegistry:
             ),
         )
     )
+    registry.register(
+        # Must stay in step with build_registry's copy (the standing
+        # rule): this schema is what the run linter validates against.
+        StepSpec(
+            "clear_countess",
+            params=(
+                ParamSpec("chamber_x", int),
+                ParamSpec("chamber_y", int),
+                ParamSpec("neighborhood_radius", int, required=False, default=30),
+                ParamSpec("chamber_radius", int, required=False, default=25),
+                ParamSpec("posture", str, required=False, default=None),
+            ),
+        )
+    )
     registry.register(StepSpec("pickup"))
     # Must stay in step with build_registry's copy (same rule as
     # clear_radius's params above): this schema is what the run linter

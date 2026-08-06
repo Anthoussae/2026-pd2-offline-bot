@@ -28,7 +28,7 @@ NEAR_ARRAY = 0x0B003000
 
 def add_monster(
     mem, address, unit_id, kind, pos, hp, max_hp, flags=0, alignment=0, mode=1,
-    unique_no=None, name=None,
+    unique_no=None, name=None, level=3, extra_stats=None,
 ):
     # mode defaults to 1 (Standing): mode 0 is the Death animation, and a
     # fake that leaves the field unwritten would read as a corpse.
@@ -62,8 +62,17 @@ def add_monster(
         )
     mem.write_fields(data, data_fields)
     values = {offsets.STAT_HP: hp << 8, offsets.STAT_MAX_HP: max_hp << 8}
+    if level is not None:
+        # A real combatant carries a LEVEL (T74). Fakes default to having
+        # one, because a fake without one models a decorative bat rather
+        # than a monster — which is exactly what these fakes silently
+        # were until the critter filter landed and every one of them
+        # stopped being a monster.
+        values[offsets.STAT_LEVEL] = level
     if alignment:
         values[offsets.STAT_ALIGNMENT] = alignment
+    if extra_stats:
+        values.update(extra_stats)
     mem.write_fields(
         stats,
         {
@@ -597,3 +606,106 @@ def test_ordinary_monsters_never_pay_the_identity_reads():
     assert monster.unique_no is None
     assert monster.name == ""
     assert not monster.is_super_unique
+
+
+# -- decorative critters (T74, 2026-08-06) ---------------------------------------
+
+
+def build_with_a_bat():
+    """The Forgotten Tower as T73 actually read it: the merc, and a
+    decorative bat carrying only hp/max-hp and animation rates.
+
+    The bat's real stat list, measured: {6, 7, 67, 68, 69}. No level, no
+    resistances, no experience — MonStats code "B9". The bot attacked two
+    of these 23 times each across 173 s because "did not prove itself
+    friendly" was the entire hostility test.
+    """
+    mem = FakeMemory()
+    mem.write(CLIENT_BASE + offsets.PLAYER_UNIT_PTR, u32(PLAYER))
+    mem.write_fields(PLAYER, {offsets.UNIT_PATH: u32(PLAYER_PATH)})
+    mem.write_fields(
+        PLAYER_PATH,
+        {
+            offsets.PATH_ROOM1: u32(ROOM_A),
+            offsets.PATH_X: u32(100)[:2],
+            offsets.PATH_Y: u32(200)[:2],
+        },
+    )
+    # level=None -> no STAT_LEVEL, exactly like the live bat.
+    bat = add_monster(mem, 0x0B030000, 650373, 159, (103, 203), 100, 100,
+                      level=None)
+    merc = add_monster(mem, 0x0B031000, 1, 271, (105, 205), 128, 128,
+                       alignment=offsets.ALIGNMENT_FRIENDLY, level=91)
+    fallen = add_monster(mem, 0x0B032000, 56, 21, (110, 210), 128, 128,
+                         level=3)
+    mem.write_fields(
+        ROOM_A,
+        {
+            offsets.ROOM1_UNIT_FIRST: u32(bat),
+            offsets.ROOM1_ROOMS_NEAR: u32(0),
+            offsets.ROOM1_ROOMS_NEAR_COUNT: u32(0),
+        },
+    )
+    hash_table(mem, {offsets.UNIT_TYPE_MONSTER: [bat, merc, fallen]})
+    return FakeSession(mem)
+
+
+def test_a_decorative_critter_is_never_a_combat_target():
+    # THE T72 regression: two bats, 46 attacks, 173 seconds, no kill.
+    scan = scan_units(build_with_a_bat())
+    assert [m.unit_id for m in scan.monsters] == [56], (
+        "the bat is still being reported as a monster"
+    )
+    assert [c.unit_id for c in scan.critters] == [650373]
+
+
+def test_critters_are_reported_rather_than_hidden():
+    # A filter that hides its own work is how the NEXT phantom goes
+    # unnoticed for three live runs.
+    scan = scan_units(build_with_a_bat())
+    bat = scan.critters[0]
+    assert bat.kind == 159
+    assert not bat.combat_rated
+    assert bat.is_alive  # it is a real unit, just not a foe
+
+
+def test_a_real_monster_is_still_a_target():
+    # The failure direction that frightens us: a pacifist bot. T73 caught
+    # that fix one step from being written.
+    scan = scan_units(build_with_a_bat())
+    fallen = next(m for m in scan.monsters if m.unit_id == 56)
+    assert fallen.combat_rated and fallen.is_alive
+
+
+def test_the_merc_is_still_an_ally_not_a_critter():
+    scan = scan_units(build_with_a_bat())
+    assert [a.unit_id for a in scan.allies] == [1]
+    assert all(c.unit_id != 1 for c in scan.critters)
+
+
+def test_resistances_alone_qualify_a_unit_as_a_combatant():
+    """The OR is deliberate. D2 omits zero-valued stats, so a monster
+    could in principle answer on a resistance rather than a level; the
+    test is generous about what counts as a combatant and strict only
+    about what carries none of it."""
+    mem = FakeMemory()
+    mem.write(CLIENT_BASE + offsets.PLAYER_UNIT_PTR, u32(PLAYER))
+    mem.write_fields(PLAYER, {offsets.UNIT_PATH: u32(PLAYER_PATH)})
+    mem.write_fields(
+        PLAYER_PATH,
+        {offsets.PATH_ROOM1: u32(ROOM_A),
+         offsets.PATH_X: u32(100)[:2], offsets.PATH_Y: u32(200)[:2]},
+    )
+    odd = add_monster(
+        mem, 0x0B033000, 900, 21, (101, 201), 128, 128,
+        level=None, extra_stats={offsets.STAT_FIRE_RESIST: 40},
+    )
+    mem.write_fields(
+        ROOM_A,
+        {offsets.ROOM1_UNIT_FIRST: u32(odd),
+         offsets.ROOM1_ROOMS_NEAR: u32(0), offsets.ROOM1_ROOMS_NEAR_COUNT: u32(0)},
+    )
+    hash_table(mem, {offsets.UNIT_TYPE_MONSTER: [odd]})
+    scan = scan_units(FakeSession(mem))
+    assert [m.unit_id for m in scan.monsters] == [900]
+    assert not scan.critters

@@ -126,6 +126,20 @@ urgency hold working, but worth pricing).
    `pickup_radius`, only when no hostile owns the tick), or declare
    traversal floors no-pickup by design and accept the cost. The first
    matches the user's expectations; investigate before choosing.
+
+   **RESOLVED (P4, 2026-08-05): opportunistic-collect.** The
+   investigation found `TraverseStep` already carries `_PickupMixin`
+   (for panels and sends), so the collect is the shared machinery —
+   same budgets, same write-offs, same shared memory as the clearance
+   and the sweep, not a third implementation that could drift. Gated
+   exactly as sketched: only on ticks combat declined (with brisk that
+   IS "no hostile owns the tick"), bounded by `pickup_radius`, the walk
+   held only while a click resolves (`pickup_retry_s`, ≤1.5 s). Cost on
+   a clean corridor: zero ticks. Covered by the P4 sim (the restaged
+   Thul comes up mid-traverse and the run still arrives) and a unit
+   test. Speed-pass note: each collected item costs its clicks plus
+   the walk to it — if warm-descent timing ever tightens, the knob is
+   the pickit's rules, not the step.
 2. **The bot still dithers and walks into corners** at times. To
    troubleshoot when speed work begins — suspects, in order: seek legs
    aiming at room centres that sit near walls (nearest_walkable
@@ -133,3 +147,41 @@ urgency hold working, but worth pricing).
    tight cellar corridors, and CastInFlight contention stealing
    movement ticks. First move: capture a warm-descent trace and read
    the MoveTo targets against the atlas.
+
+## Staircase click pacing — measured, for the speed pass (T72 run 2)
+
+**Evidence, 2026-08-06.** With the critter filter in, the Forgotten
+Tower crossing is 16 ticks / 4.3 s (it was 184 ticks / 173 s). The whole
+sequence, from the run log:
+
+    t+35.3  arrived in Forgotten Tower at (10006, 8002)
+    t+35.7  clicked the staircase (attempt 1)      <- from 5 away
+    t+36.0  waiting out the last click (5 away)
+    t+36.2  waiting out the last click (1 away)    <- the walk closed
+            ... 12 more ticks, all "1 away" ...
+    t+39.6  clicked the staircase (attempt 2)      <- transitioned
+
+**Roughly 3 of those 4.3 seconds are `waiting out the last click` at a
+distance of ONE subtile.** The character is standing on the stairs and
+the step is waiting out `exit_retry_s` (3.0 s) before re-clicking.
+
+Why it happens: the progress-aware pacing (R189 b shape) restarts its
+clock on every subtile of progress, then holds the full retry window
+once progress stops. That is correct as written — it exists because a
+time-based retry re-issued walk orders mid-walk and cost ~10 s per
+transition (T70) — but it has no notion of "the walk has ARRIVED and the
+click simply did not take".
+
+**Candidate for the speed pass** (do NOT act on this without a
+measurement; the last four confident fixes in this area were wrong):
+when the character is inside `melee_range`-ish of the exit and has
+stopped closing, the walk is over and the retry window is buying
+nothing. A shorter window in that specific state — or re-clicking
+immediately once distance stops falling AND is small — would return
+~2-3 s per transition. Over the Countess route's seven transitions that
+is on the order of 15-20 s against a 5-6 minute budget.
+
+Cross-check before touching it: T70's original defect was re-clicking
+too EAGERLY. Any change here must keep the case it fixed (a click whose
+walk is still closing must not be re-issued) and must be measured on a
+warm descent, not reasoned about.

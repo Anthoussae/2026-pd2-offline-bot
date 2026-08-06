@@ -13,7 +13,7 @@ executor owns those translations; nothing above it may bypass them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 
@@ -128,6 +128,18 @@ class PickUpItem:
     unit_id: int
     position: tuple[int, int]
     attempt: int = 0
+    # The item's type number, carried purely so the run log can NAME what
+    # was reached for (the run-event-log plan, P3). The executor cannot
+    # resolve it — it only has a unit id — and a log that says "picked up
+    # something" answers none of the questions a log exists for. Optional
+    # so every existing construction site keeps working; unset renders as
+    # an honest "unknown" rather than a guess.
+    #
+    # `compare=False` for the same reason `MoveTo.toward` is informational:
+    # the kind does not change what this action DOES, so two pickups of
+    # the same item at the same aim are the same action whether or not
+    # the caller happened to know its type. Equality is about the deed.
+    kind: int | None = field(default=None, compare=False)
 
 
 Action = (

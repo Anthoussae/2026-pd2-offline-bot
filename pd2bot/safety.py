@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pd2bot import offsets
 from pd2bot.memory import GameSession
 from pd2bot.player import Player, read_player
+from pd2bot.runlog import NullRunLog
 from pd2bot.world import Area, read_area
 
 
@@ -97,13 +98,35 @@ class SafetyMonitor:
         read_player_fn: Callable[[GameSession], Player | None] = read_player,
         read_area_fn: Callable[[GameSession], Area | None] = read_area,
         alert: Callable[[], None] = _default_alert,
+        runlog: object | None = None,
     ) -> None:
         self.session = session
         self.config = config if config is not None else SafetyConfig()
         self._read_player = read_player_fn
         self._read_area = read_area_fn
         self._alert = alert
+        # The run event log. Chicken and death are the two moments an
+        # operator most wants a precise record of, and until now the
+        # reason was a printed string that survived only if a drill
+        # happened to capture stdout. Defaults to the null sink; the
+        # SESSION owns the monitor, so the wiring repoints this per run.
+        self.runlog = runlog if runlog is not None else NullRunLog()
         self.halted = False
+
+    def _record(self, kind: str, **fields) -> None:
+        """Write one safety event. Never raises: the monitor is the last
+        line of defence and must not be endangered by its own logging,
+        least of all on the tick it is halting the bot."""
+        try:
+            area = self._read_area(self.session)
+            if area is not None:
+                fields.setdefault("area", area.level_no)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.runlog.event(kind, **fields)
+        except Exception:  # noqa: BLE001
+            return
 
     def tick(self) -> None:
         """Check vitals once. Raises DeathHalt (latched) or ChickenExit."""
@@ -122,6 +145,10 @@ class SafetyMonitor:
         ):
             self.halted = True
             self._alert()
+            self._record(
+                "death", reason="player mode/hp reads dead",
+                mode=player.mode, hp=player.hp, max_hp=player.max_hp,
+            )
             raise DeathHalt(
                 f"{player.name} is dead (mode {player.mode}, hp {player.hp}) — "
                 "halting permanently; the game is untouched"
@@ -135,6 +162,12 @@ class SafetyMonitor:
         if self.config.life_chicken_pct > 0 and player.max_hp > 0:
             pct = 100.0 * player.hp / player.max_hp
             if pct <= self.config.life_chicken_pct:
+                self._record(
+                    "chicken", reason="life", hp=player.hp,
+                    max_hp=player.max_hp, pct=round(pct, 1),
+                    threshold=self.config.life_chicken_pct,
+                    mana=player.mana, max_mana=player.max_mana,
+                )
                 raise ChickenExit(
                     f"life {player.hp}/{player.max_hp} ({pct:.0f}%) <= "
                     f"{self.config.life_chicken_pct:.0f}% threshold"
@@ -143,6 +176,12 @@ class SafetyMonitor:
         if self.config.mana_chicken_pct > 0 and player.max_mana > 0:
             pct = 100.0 * player.mana / player.max_mana
             if pct <= self.config.mana_chicken_pct:
+                self._record(
+                    "chicken", reason="mana", hp=player.hp,
+                    max_hp=player.max_hp, mana=player.mana,
+                    max_mana=player.max_mana, pct=round(pct, 1),
+                    threshold=self.config.mana_chicken_pct,
+                )
                 raise ChickenExit(
                     f"mana {player.mana}/{player.max_mana} ({pct:.0f}%) <= "
                     f"{self.config.mana_chicken_pct:.0f}% threshold"

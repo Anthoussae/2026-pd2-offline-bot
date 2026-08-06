@@ -128,6 +128,13 @@ class CombatConfig:
     approach_with_revives: int = 1
     revive_search_radius: int = 15  # corpses this close are revive fuel
     desecrate_rounds: int = 2  # bounded: stop if it makes no corpses
+    # Strikes on ONE unit that move neither its health nor our mana before
+    # it stops being a target (T72: 23 strikes each on two decorative bats
+    # over 173 s, with nothing in the code able to notice). Small on
+    # purpose — poison kills over seconds, so a genuine fight moves the
+    # target's health well inside four strikes, and the write-off expires
+    # the moment that health does move.
+    futile_strikes: int = 4
     desecrate_settle_s: float = 1.0  # wait for corpses before casting again
     revive_settle_s: float = 0.6  # do not re-target the same corpse instantly
     # Skill ids, filled from the class config (defaults are the live ids).
@@ -158,6 +165,48 @@ class NecroCombat:
     posture: str = "cautious"
     # Bookkeeping.
     _last_strike: dict[int, float] = field(default_factory=dict)
+    # -- the futile-strike write-off (T72/T74, 2026-08-06) -----------------
+    #
+    # Per unit id: how many strikes have landed on it with NOTHING to show
+    # for them, and what the world looked like at the last one. "Nothing to
+    # show" is two independent readings that must BOTH hold:
+    #
+    #   - the target's health has not moved, and
+    #   - OUR MANA has not moved either (the operator's insight: a poison
+    #     strike costs mana, so mana that does not move means the attack
+    #     never actually happened).
+    #
+    # The pair is what makes the signature readable, and the two halves
+    # mean genuinely different things — which is why they are recorded
+    # separately rather than collapsed into one counter:
+    #
+    #   mana spent + health static = "no-damage". The strike landed and
+    #       achieved nothing VISIBLE YET. Usually transient: poison is
+    #       damage over time and the monster's health is stored on a
+    #       coarse 0-128 scale, the swing may simply have missed, or a
+    #       resistance has not yet been pierced.
+    #   mana NOT spent             = "no-contact". The strike never
+    #       happened at all — a phantom, a unit behind a wall, a click
+    #       that went nowhere.
+    #
+    # NEITHER is a durable property, and the earlier version of this
+    # comment was wrong to imply the first one was (operator correction,
+    # 2026-08-06). Hell "immunity" is 100% resistance, not invulnerability:
+    # characters and mercs deal MIXED damage, Poison Dagger carries poison
+    # resistance pierce, and the operator's merc runs Pus Spitter, whose
+    # Lower Resist on striking breaks immunities outright. A monster that
+    # looks unkillable for four strikes may be dying on the fifth — which
+    # is exactly why the write-off expires the moment its health moves,
+    # and why nothing here is remembered across runs.
+    #
+    # T72 spent 173 s and 46 strikes on two decorative bats without this.
+    # The critter filter (T74) now removes that particular family before
+    # combat ever sees it; this exists for the family nobody has met yet.
+    _futile: dict[int, int] = field(default_factory=dict)
+    _futile_seen: dict[int, tuple[int, int, tuple[int, int]]] = field(
+        default_factory=dict
+    )
+    _written_off: dict[int, tuple[int, int]] = field(default_factory=dict)
     _engagement_start: float | None = None
     _retreat_after_strike: bool = False
     _desecrate_rounds: int = 0
@@ -201,7 +250,80 @@ class NecroCombat:
             m
             for m in snap.live_monsters
             if _chebyshev(m.position, origin) <= self.config.engage_radius
+            and self._worth_striking(m)
         ]
+
+    # -- the futile-strike write-off -------------------------------------------
+
+    def _worth_striking(self, monster: Monster) -> bool:
+        """False once strikes on this unit have provably achieved nothing.
+
+        The write-off EXPIRES when the monster's health finally moves —
+        the same shape as `ClearRadiusStep._reachable`, whose write-off
+        expires when the monster moves. A retry that cannot differ from
+        the attempt it retries is not a retry; a target whose health has
+        started falling is a genuinely different situation.
+        """
+        recorded = self._written_off.get(monster.unit_id)
+        if recorded is None:
+            return True
+        hp_then, _ = recorded
+        if monster.hp < hp_then:
+            # Something is hurting it after all (a revive, the merc, a
+            # lingering poison stack). It is back on the table.
+            del self._written_off[monster.unit_id]
+            self._futile.pop(monster.unit_id, None)
+            self._futile_seen.pop(monster.unit_id, None)
+            return True
+        return False
+
+    def _book_strike_outcome(
+        self, snap: GameSnapshot, target: Monster, now: float
+    ) -> None:
+        """Judge the PREVIOUS strike on `target` before issuing another.
+
+        Called just before a strike is committed, because that is the
+        moment both readings are available and comparable: what the
+        target's health was when we last hit it, and what our mana was.
+        """
+        player = snap.player
+        if player is None:
+            return
+        previous = self._futile_seen.get(target.unit_id)
+        self._futile_seen[target.unit_id] = (
+            target.hp, player.mana, target.position
+        )
+        if previous is None:
+            return
+        hp_then, mana_then, _ = previous
+        health_moved = target.hp < hp_then
+        mana_moved = player.mana < mana_then
+        if health_moved:
+            # The fight is working. Any accumulated futility is stale.
+            self._futile.pop(target.unit_id, None)
+            return
+        strikes = self._futile.get(target.unit_id, 0) + 1
+        self._futile[target.unit_id] = strikes
+        if strikes < self.config.futile_strikes:
+            return
+        self._written_off[target.unit_id] = (target.hp, target.kind)
+        # Both signatures are reported, and both are TRANSIENT claims
+        # about this moment rather than facts about the monster: see the
+        # field comments. The log carries them so a pattern across runs
+        # can be noticed by a human, never so the bot can teach itself
+        # that something is unkillable.
+        self.note_write_off(
+            unit_id=target.unit_id,
+            kind=target.kind,
+            strikes=strikes,
+            signature="no-damage" if mana_moved else "no-contact",
+            hp=target.hp,
+        )
+
+    def note_write_off(self, **fields) -> None:
+        """Report a write-off. Overridden/patched by the wiring to reach
+        the run log; a no-op by default so the module stays loggerless."""
+        return None
 
     def _revives_engaged(self, snap: GameSnapshot, hostiles: list[Monster]) -> bool:
         """Have the revives actually gone in? The wait is for them to tank,
@@ -478,6 +600,13 @@ class NecroCombat:
                 self._dash_target(origin, target.position), toward=target.unit_id
             )
 
+        # Judge the LAST strike on this target before spending another
+        # (the futile-strike write-off). Deliberately here rather than at
+        # target selection: this is the one place both readings — the
+        # target's health and our mana — are current and comparable.
+        self._book_strike_outcome(snap, target, now)
+        if not self._worth_striking(target):
+            return None  # written off just now; re-decide next tick
         self._last_strike[target.unit_id] = now  # phase 4
         # Aggressive (M6 P3): the post-strike retreat is group-conditioned.
         # 0 keeps the cautious beat — back out after every strike.

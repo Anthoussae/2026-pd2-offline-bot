@@ -156,6 +156,43 @@ STAT_STAMINA = 10
 STAT_MAX_STAMINA = 11
 STAT_LEVEL = 12
 STAT_EXPERIENCE = 13
+# The COMBAT-RATED markers (T74, 2026-08-06). A unit that carries any of
+# these is a thing that can fight or be fought; a unit carrying none of
+# them is scenery.
+#
+# Measured, not assumed. T74 read the stat lists of a Fallen (kind 21),
+# a Goatman (55), the Rogue merc (271) and the decorative bats the bot
+# had been attacking for 173 s (kind 159, MonStats code "B9"):
+#
+#   Fallen   6, 7, 12, 36, 39, 41, 43, 45, 67, 68, 69, 190, 328
+#   Goatman  6, 7, 12, 36, 39, 67, 68, 69, 328
+#   merc     6, 7, 12, 39, 41, 43, 45, ... (76 stats)
+#   BAT      6, 7, 67, 68, 69           <- hp, max hp, and animation rates
+#
+# The bat carries exactly enough to draw and move a sprite and nothing
+# else: no level, no resistances, no experience.
+#
+# An OR rather than a single stat, and deliberately: the failure we now
+# fear is a PACIFIST bot (T73 caught that fix one step from being
+# written), so this is generous about what counts as a combatant and
+# strict only about what carries none of it. D2 omits zero-valued stats,
+# so a monster with no resistances still answers on its level.
+STAT_DAMAGE_RESIST = 36
+STAT_FIRE_RESIST = 39
+STAT_LIGHT_RESIST = 41
+STAT_COLD_RESIST = 43
+STAT_POISON_RESIST = 45
+COMBAT_RATED_STATS = frozenset(
+    {
+        STAT_LEVEL,
+        STAT_EXPERIENCE,
+        STAT_DAMAGE_RESIST,
+        STAT_FIRE_RESIST,
+        STAT_LIGHT_RESIST,
+        STAT_COLD_RESIST,
+        STAT_POISON_RESIST,
+    }
+)
 STAT_GOLD = 14
 STAT_GOLD_BANK = 15
 # Bone Armor's remaining/maximum absorb (the small square by the HP orb).

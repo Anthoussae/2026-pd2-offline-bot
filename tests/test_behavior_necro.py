@@ -70,6 +70,25 @@ def wall(count=3, pos=(1004, 1000)):
     return [ally(900 + i, pos) for i in range(count)]
 
 
+
+def make_snap(monsters=(), mana=400, allies=None):
+    """A snapshot with a settable MANA reading — the write-off's second
+    input (a poison strike costs mana, so mana that does not move means
+    the strike never connected)."""
+    who = player()
+    who = Player(
+        name=who.name, level=who.level, act=who.act, position=who.position,
+        mode=who.mode, hp=who.hp, max_hp=who.max_hp, mana=mana,
+        max_mana=who.max_mana, stamina=0, max_stamina=0, experience=0,
+        gold=0, gold_stash=0, strength=0, dexterity=0, vitality=0, energy=0,
+    )
+    return GameSnapshot(
+        in_game=True, taken_at=0.0, player=who,
+        area=Area(level_no=20, position=(0, 0), size=(500, 500)),
+        monsters=tuple(monsters),
+        allies=tuple(allies if allies is not None else wall()),
+    )
+
 def skirmishing(**kw):
     """A config with the wait-for-the-tanks phase switched off.
 
@@ -689,3 +708,100 @@ def test_the_hold_never_fires_with_the_wall_up_or_the_build_dead():
     necro2._last_wall_cast = None
     action2 = necro2.engage(snap(monsters=hostiles, allies=wall(1)))
     assert isinstance(action2, AttackUnit)
+
+
+# -- the futile-strike write-off (T72/T74, 2026-08-06) ---------------------------
+
+
+class Ticking:
+    """A clock that advances past `restrike_s` on every read, so each
+    engage() call is free to strike again. With a frozen clock only the
+    FIRST strike ever lands and the write-off has nothing to count."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        self.now += 2.0
+        return self.now
+
+
+def _futile_world(hp=100, mana=400):
+    """A single hostile that never takes damage, and a player whose mana
+    may or may not move — the two readings the write-off compares."""
+    monster = Monster(
+        unit_id=650373, kind=159, position=(1002, 1000), hp=hp, max_hp=100,
+        is_champion=False, is_boss=False, is_minion=False,
+    )
+    return monster
+
+
+def test_strikes_that_move_nothing_write_the_target_off():
+    # THE T72 regression: 23 strikes each on two units, 173 seconds, and
+    # nothing in the code able to notice.
+    combat = NecroCombat(config=CombatConfig(), clock=Ticking())
+    seen = []
+    combat.note_write_off = lambda **f: seen.append(f)
+    monster = _futile_world()
+    for _ in range(12):
+        snap = make_snap(monsters=[monster], mana=400)  # mana never moves
+        action = combat.engage(snap)
+        if action is None:
+            break
+    assert seen, "the futile strikes were never written off"
+    assert seen[0]["unit_id"] == 650373
+    # No mana spent = the strike never connected: the phantom signature,
+    # which is the only one safe to generalise across runs.
+    assert seen[0]["signature"] == "no-contact"
+
+
+def test_a_target_whose_health_moves_is_never_written_off():
+    # The failure direction that matters: a bot that stops fighting.
+    combat = NecroCombat(config=CombatConfig(), clock=Ticking())
+    seen = []
+    combat.note_write_off = lambda **f: seen.append(f)
+    hp = [100]
+    for _ in range(12):
+        monster = Monster(
+            unit_id=7, kind=21, position=(1002, 1000), hp=hp[0], max_hp=100,
+            is_champion=False, is_boss=False, is_minion=False,
+        )
+        combat.engage(make_snap(monsters=[monster], mana=400))
+        hp[0] -= 5  # poison is working
+    assert not seen, f"a dying monster was written off: {seen}"
+
+
+def test_mana_spent_with_static_health_reads_as_no_damage():
+    # Distinguished from a phantom because the two mean different things
+    # — the strike landed vs it never happened — but NEITHER is durable
+    # (operator correction 2026-08-06: Hell immunity is 100% resistance,
+    # pierced by this build's poison pierce and the merc's Lower Resist).
+    combat = NecroCombat(config=CombatConfig(), clock=Ticking())
+    seen = []
+    combat.note_write_off = lambda **f: seen.append(f)
+    mana = [400]
+    monster = _futile_world()
+    for _ in range(12):
+        combat.engage(make_snap(monsters=[monster], mana=mana[0]))
+        mana[0] -= 5  # the strike IS landing; it just does nothing
+        if seen:
+            break
+    assert seen and seen[0]["signature"] == "no-damage"
+
+
+def test_the_write_off_expires_when_the_health_finally_moves():
+    """A retry that cannot differ from the attempt it retries is not a
+    retry — but a target whose health has started falling is genuinely a
+    different situation (the merc landed a hit, a revive is chewing on
+    it, a poison stack ticked)."""
+    combat = NecroCombat(config=CombatConfig(), clock=Ticking())
+    monster = _futile_world()
+    for _ in range(12):
+        combat.engage(make_snap(monsters=[monster], mana=400))
+    assert 650373 in combat._written_off
+
+    hurt = Monster(
+        unit_id=650373, kind=159, position=(1002, 1000), hp=60, max_hp=100,
+        is_champion=False, is_boss=False, is_minion=False,
+    )
+    assert combat._worth_striking(hurt), "the write-off never expired"
