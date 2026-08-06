@@ -2575,6 +2575,7 @@ class ClearCountessStep(_PickupMixin):
     _sweep_points: list[tuple[int, int]] | None = None
     _sweep_deadline: float | None = None
     _sweep_narrated: bool = False
+    _sweep_skipped: int = 0
 
     def __post_init__(self) -> None:
         self._anchor = self.chamber
@@ -2958,10 +2959,22 @@ class ClearCountessStep(_PickupMixin):
                     f"countess: sweep point {point} not reachable — skipped"
                 )
                 self._sweep_points.pop(0)
+                self._sweep_skipped += 1
                 self._retarget()
                 continue
             return StepOutcome(done=False, acted=True, note=f"sweeping via {point}")
-        # The pass is complete: dead on the ground, or provably absent.
+        # The pass is complete. A corpse settles it regardless — the sweep
+        # was only drop reconnaissance then. But ABSENCE is only proven by
+        # ground actually walked: a pass whose points were skipped as
+        # unreachable saw nothing, and calling that "provably absent"
+        # would hand the flagship drill a PASS on a partial run — the
+        # review-001 shape, one layer down.
+        if self._corpse_at is None and self._sweep_skipped:
+            self._loud_stop(
+                f"the chamber sweep skipped {self._sweep_skipped} of its "
+                "points as unreachable — she was never seen and absence "
+                "is unproven"
+            )
         return self._confirmed(ctx)
 
 

@@ -2033,13 +2033,22 @@ def test_countess_corpse_confirms_and_publishes_the_chamber_region():
 
 
 def test_countess_provably_absent_after_the_sweep():
-    # The fallback: never seen, never dead — the sweep walks its pass and
+    # The fallback: never seen, never dead — the sweep WALKS its pass and
     # concludes absence rather than waiting on a read that cannot answer.
+    # The player must actually move: a static run of the same script is
+    # the unproven-absence loud stop below, not this conclusion.
     clock = Clock()
     step, svc = countess_step(clock)
-    ctx = context()
+    here = {"pos": HOME}
+
+    def react(action):
+        if isinstance(action, MoveTo):
+            here["pos"] = action.target
+
+    executor = RecordingExecutor(clock=clock, on_execute=react)
+    ctx = context(executor)
     ctx.notes["arrival"] = HOME
-    make_snap = lambda: snap()  # noqa: E731
+    make_snap = lambda: snap(pos=here["pos"])  # noqa: E731
     settle_neighborhood(step, clock, ctx, make_snap)
     outcome = None
     for _ in range(60):
@@ -2050,6 +2059,25 @@ def test_countess_provably_absent_after_the_sweep():
     assert outcome is not None and outcome.done, "absence never concluded"
     assert "provably absent" in outcome.note
     assert ctx.notes["cleared"]["centre"] == CHAMBER
+
+
+def test_countess_unwalked_sweep_cannot_prove_absence():
+    # Review 001's shape, one layer down: with the player pinned in
+    # place, every sweep point is skipped as unreachable — the pass saw
+    # nothing. Concluding "provably absent" from it would let the
+    # flagship drill PASS on a partial run; the step must stop loudly.
+    clock = Clock()
+    alerts = []
+    step, svc = countess_step(clock, alerts=alerts)
+    ctx = context()  # the default executor moves nothing
+    ctx.notes["arrival"] = HOME
+    make_snap = lambda: snap()  # noqa: E731
+    settle_neighborhood(step, clock, ctx, make_snap)
+    with pytest.raises(NavigationError, match="absence is unproven"):
+        for _ in range(60):
+            step.step(make_snap(), ctx)
+            clock.advance(0.3)
+    assert any("COUNTESS UNRESOLVED" in a for a in alerts)
 
 
 def test_countess_alive_and_unreachable_is_a_loud_stop():
@@ -2099,6 +2127,11 @@ def test_countess_advance_holds_for_the_revive_wall_then_releases():
     for _ in range(20):
         outcomes.append(step.step(make_snap(), ctx))
         clock.advance(0.5)
+        if combat.approach_calls:
+            # The advance resumed — this test's whole claim. Ticking on
+            # from a pinned position now ends in the unwalked-sweep loud
+            # stop, which is the next test's subject, not this one's.
+            break
     braked = [o for o in outcomes if (o.note or "") == "revive brake"]
     assert len(braked) == 3, f"the brake held {len(braked)} ticks, not 3"
     assert combat.approach_calls > 0, "the advance never resumed after the brake"
