@@ -92,3 +92,18 @@ Stages A–D passed in order with logged outcomes; thresholds finalized
 via Stage C (chicken 35 for proper runs); the acceptance report and
 timing table captured; open tuning items (if any) named for the
 closeout's follow-ups.
+
+## Named tuning item, already open (2026-08-06)
+
+The first complete run (T71 run 4) landed before this battery formally
+began and produced the battery's biggest finding early: **pickup
+accuracy is ~42% failure on wanted items (13 of 31 attempted never came
+up), and pickup is the largest single cost in the run.** The operator's
+call: *"this level of delay and potential failure is too high for the
+working bot."*
+
+Full evidence and analysis: **notes.md → "NAMED TUNING ITEM: pickup
+accuracy and the pickup logic as a whole"**. It is a workstream needing
+its own planning pass, not a Stage C threshold tweak — so it does not
+belong inside this battery, but Stage B/D reports must record pickup
+attempted-vs-collected counts so the fix has a before-number to beat.

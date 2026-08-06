@@ -135,6 +135,25 @@ drill. An item that appears and vanishes with no attempt between is the
 signature of the T70 Thul bug — a wanted item invisible to behaviour
 while perception listed it.
 
+**It is emitted from `_PickupMixin.log_wanted_drops`, called by
+`wanted_items` — the one enumerator every collecting step shares.** That
+placement is deliberate and was bought the hard way: until 2026-08-06 it
+fired from `note_wanted_sightings` instead, which the clearance, the
+sweep and the endgame call and **`TraverseStep` does not** — so T71 run
+4 recorded four drops on the single floor that ran a clearance and none
+on the four floors it descended through, collecting all the way. Any
+future step that learns to collect gets the logging for free; a step
+that grows its own item enumerator must call `log_wanted_drops` itself.
+
+Two properties the emitter guarantees, both load-bearing:
+
+- **Whitelist verdict only.** `pickit.decide` returning anything but
+  `skip` is what logs. A full belt, a full inventory, or a walk that
+  already gave up are facts about *us*; the drop is recorded either way.
+- **Independent of any circle.** Radius filters belong to collection,
+  not to the record. An item perception can see is logged even when no
+  step is in a position to go and get it.
+
 ### `area.transition`
 
 `from_area`, `from_name`, `to_area`, `to_name`, `via`, `exit_position`,

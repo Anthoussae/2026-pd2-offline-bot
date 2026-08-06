@@ -1725,11 +1725,12 @@ def _exit_scan(area, exits, rooms=()):
 
 
 def traversing(clock, *, here=20, dest=21, exit_pos=(1060, 1000),
-               recall=None, combat=None):
+               recall=None, combat=None, runlog=None):
     """A traverse step over a scripted world: clicking the staircase
     flips the area after a beat, like the client's walk + load."""
     world = {"area": here, "pos": HOME, "flip_at": None}
     remembered = []
+    extra = {"runlog": runlog} if runlog is not None else {}
     svc = services(
         clock,
         combat=combat if combat is not None else StubCombat(),
@@ -1738,6 +1739,7 @@ def traversing(clock, *, here=20, dest=21, exit_pos=(1060, 1000),
         ),
         exit_recall=(lambda a, d: recall) if recall is not None else None,
         exit_remember=lambda a, d, p: remembered.append((a, d, p)),
+        **extra,
     )
     step = make_step("traverse", svc, {"dest": dest})
 
@@ -1936,6 +1938,71 @@ def test_traverse_reclicks_only_when_the_walk_stalls():
     clock.advance(4.0)
     tick_unflipped()
     assert len(clicks()) == 2, "a stalled walk never earned its re-click"
+
+
+def test_a_wanted_item_on_a_traversal_floor_is_logged(tmp_path):
+    """T71 run 4's hole, and the operator's fix request (2026-08-06).
+
+    `item.dropped` used to fire only from `note_wanted_sightings`, which
+    the clearance, the sweep and the endgame call and `TraverseStep` does
+    not — yet traverse is what collects during a descent. The run logged
+    four drops on the one floor that ran a clearance and NONE on the four
+    it descended through, while being the artifact meant to answer "what
+    did we leave behind".
+
+    The item here sits far outside `pickup_radius`, so it is never a
+    collection candidate: the drop is on the record irrespective of
+    whether anything could be done about it, which is the whole ask.
+    """
+    from pd2bot.runlog import RunLog, load
+
+    clock = Clock()
+    log = RunLog("t", root=tmp_path, clock=clock, wall=lambda: 1786000000.0)
+    step, world, remembered, executor, ctx, tick = traversing(clock, runlog=log)
+    far = GroundItem(unit_id=901, kind=999, position=(1400, 1400), quality=RARE)
+    step.step(snap(pos=world["pos"], area=20, items=[far]), ctx)
+
+    dropped = [e for e in load(log.directory) if e["kind"] == "item.dropped"]
+    assert len(dropped) == 1, f"the drop was not logged: {dropped}"
+    assert dropped[0]["unit_id"] == 901
+    assert dropped[0]["position"]["world"] == [1400, 1400]
+    assert dropped[0]["rule"], "the matching pickit rule must be named"
+    assert dropped[0]["at"], "a wanted drop needs its timestamp"
+    assert not [a for a in executor.actions if isinstance(a, PickUpItem)], (
+        "the far item must be logged, not collected"
+    )
+
+
+def test_a_wanted_drop_is_logged_once_not_once_per_tick(tmp_path):
+    # The dedupe that makes always-on logging affordable: a rune lying
+    # there for thirty ticks is one event, not thirty.
+    from pd2bot.runlog import RunLog, load
+
+    clock = Clock()
+    log = RunLog("t", root=tmp_path, clock=clock, wall=lambda: 1786000000.0)
+    step, world, remembered, executor, ctx, tick = traversing(clock, runlog=log)
+    far = GroundItem(unit_id=902, kind=999, position=(1400, 1400), quality=RARE)
+    for _ in range(6):
+        step.step(snap(pos=world["pos"], area=20, items=[far]), ctx)
+        clock.advance(0.5)
+
+    dropped = [e for e in load(log.directory) if e["kind"] == "item.dropped"]
+    assert len(dropped) == 1, f"one event per item, got {len(dropped)}"
+
+
+def test_junk_on_the_floor_is_never_logged_as_a_wanted_drop(tmp_path):
+    # "Whitelisted" is the pickit's verdict, not "an item exists". A log
+    # that recorded every dropped item would answer a different question
+    # from the one asked and bury the answer to this one.
+    from pd2bot.runlog import RunLog, load
+
+    clock = Clock()
+    log = RunLog("t", root=tmp_path, clock=clock, wall=lambda: 1786000000.0)
+    step, world, remembered, executor, ctx, tick = traversing(clock, runlog=log)
+    junk = GroundItem(unit_id=903, kind=999, position=(1005, 1000), quality=2)
+    step.step(snap(pos=world["pos"], area=20, items=[junk]), ctx)
+
+    assert not [e for e in load(log.directory) if e["kind"] == "item.dropped"]
 
 
 def test_traverse_collects_a_wanted_item_en_route():

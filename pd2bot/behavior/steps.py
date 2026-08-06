@@ -692,10 +692,53 @@ class _PickupMixin:
         capacity = self.services.pickit.belt_capacity.get(potion, 0)
         return belt_count(carried, potion) < capacity
 
+    def log_wanted_drops(
+        self, snap: GameSnapshot, carried: CarriedItems | None = None
+    ) -> None:
+        """One `item.dropped` for every whitelisted item, wherever it lies.
+
+        Deliberately independent of the caller's circle and of every
+        situational filter. `decide` returning anything but "skip" IS the
+        whitelist verdict; a belt that happens to be full, an inventory
+        that happens to be full, and a walk that already gave up are
+        facts about US, not about whether the item dropped. The operator
+        asked for the drop itself to be on the record either way
+        (2026-08-06), and the run that prompted it is the argument: 13
+        wanted items were clicked and never came up, and reconstructing
+        that needed unit-id correlation because the event stream could
+        not answer it.
+
+        Called from `wanted_items`, which is the ONE enumerator every
+        collecting step shares — including `TraverseStep`, whose absence
+        from the old call path is exactly why T71 run 4 logged four
+        drops on one floor and none on the four floors it descended
+        through. Putting it anywhere else would re-open that hole the
+        next time a step learns to collect.
+
+        Costs nothing when the log is off (sims, unit tests): the guard
+        is checked before any pickit work.
+        """
+        log = getattr(self.services, "runlog", None)
+        if log is None or not getattr(log, "enabled", False):
+            return
+        seen = self.services.seen_drops
+        for item in snap.ground_items:
+            if item.unit_id in seen:
+                continue
+            if carried is None:
+                carried = self.services.carried()
+            action, rule = self.services.pickit.decide(item, carried)
+            if action == "skip":
+                continue
+            self._log_drop(item, rule)
+
     def wanted_items(
         self, snap: GameSnapshot, centre: tuple[int, int], radius: int
     ) -> list[GroundItem]:
         carried = self.services.carried()
+        # Record BEFORE filtering: what dropped is not the same question
+        # as what this step is in a position to collect right now.
+        self.log_wanted_drops(snap, carried)
         found = []
         for item in snap.ground_items:
             if item.unit_id in self.services.stuck:
@@ -777,7 +820,7 @@ class _PickupMixin:
             else:
                 self.services.narrate(f"pickup: kind {kind} at {position} came up")
 
-    def _log_drop(self, item: GroundItem) -> None:
+    def _log_drop(self, item: GroundItem, rule: str | None = None) -> None:
         """One `item.dropped` per wanted item, ever (P7).
 
         Keyed on the unit id and fired on the TRANSITION into the wanted
@@ -785,11 +828,15 @@ class _PickupMixin:
         rather than thirty. The T70 Thul was invisible to behaviour while
         perception listed it the whole time; this is the line that would
         have made that obvious.
+
+        `rule` is passed by callers that have already asked the pickit,
+        so the common path decides once rather than twice.
         """
         if item.unit_id in self.services.seen_drops:
             return
         self.services.seen_drops.add(item.unit_id)
-        _, rule = self.services.pickit.decide(item, self.services.carried())
+        if rule is None:
+            _, rule = self.services.pickit.decide(item, self.services.carried())
         frame = self.services.frame() if self.services.frame else None
         self.services.runlog.event(
             "item.dropped",
@@ -827,8 +874,10 @@ class _PickupMixin:
         entire justification for re-walking the ring.
         """
         services = self.services
+        # `wanted_items` logs the drops now (for every step, not just the
+        # ones that keep a sightings memo), so this loop is back to being
+        # about the memo alone.
         for item in self.wanted_items(snap, centre, radius):
-            self._log_drop(item)
             services.wanted_seen[item.unit_id] = (
                 item.position,
                 item.kind,

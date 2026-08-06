@@ -197,6 +197,88 @@ yona-push shape (commit → push → PR #1 updated → checks watched); a
 full review artifact skipped for a docs-only closeout (one code
 comment changed), reasoning recorded in the R211 outcome.
 
+## NAMED TUNING ITEM: pickup accuracy and the pickup logic as a whole
+
+**Operator's call, 2026-08-06, after T71 run 4** (the first complete
+Countess run): *"we need to refine item pickup accuracy considerably
+more, and the whole pickup logic more. This level of delay and
+potential failure is too high for the working bot."*
+
+This is the P5 battery's "open tuning items named for the closeout's
+follow-ups" clause firing, and it is the largest one M6 has produced.
+It is a **workstream, not a tweak** — big enough to want its own
+planning pass rather than an improvisation inside P5.
+
+### The evidence, measured (not estimated)
+
+From `logs/runs/20260806-025952-countess`, correlating
+`action.pickup_attempt` against `item.collected` by unit id:
+
+- **31 wanted items attempted, 18 collected, 13 never came up** — a
+  ~42% failure rate on items the pickit had already decided it wanted.
+- Two were valuable, not just potions: a **flawless emerald** (kind
+  691) on Cellar 1 at (12644, 5146) after 8 attempts, and a **Nef
+  rune** (kind 702) in the Countess's chamber at (12544, 11084) after
+  3 — while a Hel rune two subtiles away *was* collected. The pickit
+  was right; the click was not.
+- Most failures show exactly 8 attempts: `pickup_click_attempts`, the
+  full budget, spent and lost.
+- **Cost**: `pickup` took 192 s of a 930 s run, and pickup on the
+  traversal floors is the single largest component of a descent that
+  ran ~9 min against a 5–6 min target. 143 pickup attempts for 18
+  items.
+
+### What is already known about the causes (do not re-derive)
+
+- **Sprite aim is measured, not guessed** (T63/T65): labels-off aim is
+  (0, -28), labels-on (-16, -40), and `pickup_click_attempts = 8` is
+  deliberately the length of the aim schedule so a write-off means
+  every measured aim point was tried. So the 8-attempt failures are
+  *the schedule exhausting*, which means either the schedule is
+  incomplete for these item classes or the character is standing
+  somewhere the schedule cannot reach from.
+- **T65 run 4 already found a total-miss case**: 245 probes on kind
+  619, zero hits. Item classes differ and the hitbox map is partial.
+- **The navigator oscillation** (performance-notes.md, same run) puts
+  the character in the wrong place to click from: it walks past a goal
+  ~5 subtiles either side and gives up after "5 plan cycles without
+  progress". Pickup accuracy and walk accuracy are probably **one
+  problem**, and fixing the clicking alone may not move the number.
+- Ground items also perturb the clicks themselves — the click audit
+  shows travel clicks being nudged around items ("GOAL-EXEMPT", "near
+  miss"), which is the avoid-radius machinery interacting with pickup.
+- **The hold-to-move discovery below (R215) is likely load-bearing
+  here**, not just a misclick fix: if travel clicks cannot scoop
+  items, the interaction between walking and picking up largely
+  dissolves.
+
+### Instrument gaps to close FIRST (the method note, again)
+
+Both found by questions the log could not answer on 2026-08-06:
+
+1. **A click-budget write-off is silent.** 11 of the 13 misses emitted
+   no `item.abandoned`; only walk-based give-ups are logged. Until
+   that exists, "what did we fail to pick up, and why" needs unit-id
+   correlation by hand.
+2. **A failed walk emits nothing at all.** `send()` swallows
+   `NavigationError` into `services.log`, so the four 25–35 s ticks in
+   the endgame are visible only as durations with nothing inside them.
+
+(`item.dropped` no longer having a traversal-floor blind spot is
+**FIXED**, 2026-08-06 — see `docs/architecture/run-log.md`.)
+
+### Shape of the work when it is scheduled
+
+Measure before changing anything. A pickup-accuracy drill already
+exists in spirit (T64/T67, "sparse melange"); the new one wants mixed
+item CLASSES on a cellar floor, not town ground, with the run-event log
+on. Then decide between: extending the aim schedule per item class,
+fixing the stand-off position the click is issued from, hold-to-move
+for travel legs, and tightening the pickit's rules so the descent
+stops fetching potions it does not need. **Do not start with the
+pickit rules** — that hides the accuracy problem rather than fixing it,
+though it is the cheapest way to buy back descent time.
+
 ## Future work / out of scope notes
 
 - **Hold-to-move (user discovery, 2026-08-04, R215)**: holding the left

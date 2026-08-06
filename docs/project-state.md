@@ -130,15 +130,17 @@ A click-budget write-off is silent, so the log cannot currently answer
 "what did we fail to pick up" without correlating attempts against
 collections by unit id.
 
-**Worse, `item.dropped` has a blind spot covering four of the five
-floors.** It fires only from `note_wanted_sightings`, which
-`ClearRadiusStep`, `PickupStep` and `ClearCountessStep` call and
-**`TraverseStep` does not** — yet traverse is what collects on the
-descent (the P4 opportunistic-collect). So all 4 `item.dropped` events
-in this run are Cellar 5, and the traversal floors formally record no
-wanted drops at all. That is a missing instrument, not an absence — and
-it is precisely the T70 Thul signature the event was written to catch,
-now unable to catch it on the floors where the Thul was found.
+**`item.dropped` also had a blind spot covering four of the five
+floors** — it fired only from `note_wanted_sightings`, which
+`TraverseStep` does not call, so the floors the bot descended through
+recorded no wanted drops at all. **FIXED 2026-08-06** (operator's
+request): it is emitted from `_PickupMixin.log_wanted_drops`, called by
+`wanted_items` — the one enumerator every collecting step shares — on
+the pickit's verdict alone, independent of any radius or full-belt
+filter. Every whitelisted drop is now on the record with its timestamp
+and location whether or not anything could be done about it. Three
+tests pin it; `docs/architecture/run-log.md` records why the placement
+is load-bearing.
 
 ### The numbers (see `performance-notes.md` for the evidence)
 
@@ -157,32 +159,84 @@ failed emits **no run-log event** — those four ticks are visible only as
 durations with nothing inside them. Close that gap first; the method
 note in this file was paid for four times already.
 
+## NEXT: pickup reliability — a new M6 phase, BEFORE the P5 acceptance
+
+Recommended 2026-08-06 after reviewing the plans. **Do not go straight
+to P5's acceptance stages.** The reasoning, so it can be argued with:
+
+1. **The operator has declared the current state not shippable** —
+   *"this level of delay and potential failure is too high for the
+   working bot"* — and P5's Stage D is the stage that would certify it.
+2. **Stage D would pass while failing.** Its criterion is "Countess
+   confirmed dead each run, drops swept". A bot losing 13 of 31 wanted
+   items sweeps the drop zone and reports success. That is exactly the
+   "a test that can pass without doing the thing it tests" shape this
+   repo has now paid for three times (review 001, `ClearRadiusStep`'s
+   docstring, T72's criteria).
+3. **It is in M6's scope, and the speed problem is not.** The plan's
+   goal names *"take extra care over her drops"* and scopes in "careful
+   pickup"; it explicitly scopes OUT "speed optimization beyond the
+   battery's report". So pickup accuracy is M6 work now; the ~9-minute
+   descent is a follow-up with measurements already banked.
+4. **Live time is the scarce resource.** Each full run costs ~15 min
+   plus the operator's presence. Three acceptance runs spent on a known
+   ~42% pickup failure buys an acceptance record worth re-doing.
+
+Order within the phase — measure before changing anything:
+
+1. **Close the two remaining instrument gaps** (small, and the method
+   note demands it): a click-budget write-off emits no `item.abandoned`
+   (11 of the 13 misses were silent), and `send()` swallows
+   `NavigationError` so a walk that burned 35 s and failed emits nothing
+   at all. `item.dropped`'s traversal blind spot is already fixed.
+2. **A pickup-accuracy drill on a CELLAR floor with mixed item classes**
+   — T64/T67 measured this on town ground with potions and gems; the
+   failures are on cellar floors, and T65 run 4 already found an item
+   class (kind 619) with 245 probes and zero hits.
+3. **Then fix** — treating the navigator oscillation as possibly the
+   same problem, since a click issued from the wrong stand-off position
+   fails no matter how good the aim schedule is. Candidate levers are
+   listed in the plan notes; the note there warns against starting with
+   the pickit rules, which hide the accuracy problem while buying back
+   descent time.
+
+Full evidence: `docs/plans/2026-08-03-m6-countess/notes.md` →
+"NAMED TUNING ITEM: pickup accuracy and the pickup logic as a whole".
+**This wants its own `yona-plan` pass** — it is a workstream, not a
+tweak, and the repo's workflow says plan first for non-trivial work.
+
 ## After that
 
-- **P5 battery** — the warm-descent timing is now MEASURED (the table in
-  `performance-notes.md`), so the battery's first act is spent. What
-  remains is repeat runs for variance: this is one run, and monster
-  density alone moves clearance times by tens of seconds.
-- **Speed pass** — `docs/plans/2026-08-03-m6-countess/performance-notes.md`
-  holds the evidence. Ranked by measured cost: the pickup-on-descent
-  rules, then the navigator oscillation (~120 s in the chamber alone),
-  then ~3 of the Tower's 4.3 s in the staircase retry window held while
-  standing on the stairs. Every one of them carries a warning not to
-  "fix" it without a measurement — the eager version of that retry was
-  T70's original bug, and four confident hypotheses about the Tower were
-  wrong before the log answered it.
-- **The staging question** (above) — a design decision, not a bug.
+- **P5 battery** — with pickup attempted-vs-collected recorded in every
+  stage report, so the fix has a before-number (18/31) to beat. The
+  warm-descent timing is already MEASURED (the table in
+  `performance-notes.md`), so the battery's first act is spent; what
+  remains is repeat runs for variance, since one run's monster density
+  moves clearance times by tens of seconds.
+- **P6 closeout**, then **M7** (manual, architecture docs, cleanup
+  sweep) — the roadmap's last row.
+- **Speed pass** — deferred by M6's own scope boundary, evidence banked
+  in `performance-notes.md`. Ranked by measured cost: the
+  pickup-on-descent rules, the navigator oscillation (~120 s in the
+  chamber alone), then ~3 of the Tower's 4.3 s in the staircase retry
+  window held while standing on the stairs. Every one carries a warning
+  not to "fix" it without a measurement — the eager version of that
+  retry was T70's original bug, and four confident hypotheses about the
+  Tower were wrong before the log answered it.
+- **Housekeeping, small**: the run-event-log plan
+  (`docs/plans/2026-08-05-run-event-log/`) is still `status: active` and
+  needs its closeout/archive; its ADR is still **proposed**, and its own
+  acceptance condition ("once the log answers a question the old
+  instrumentation could not") is now met several times over — T72 run 2
+  and T71 run 4 both turned on it. Worth offering as a decision.
+- **The staging question** — a design decision, not a bug; closed as
+  low priority by the operator.
 - **Deferred, deliberately**: enemy-death events (R220 Q6),
   `item.accidental`, the collision recorder writing rooms under the
   wrong area id during an area flip (seen in `area-020.json` and
   `area-025.json`), and — **new, operator's call 2026-08-06, LOW
   priority** — the Countess's preferred approach direction (they watched
   the run approach from the south and judged it fine).
-- **Two instrument gaps worth closing before the speed pass**, both
-  found by questions the log could not answer: a silent click-budget
-  write-off (no `item.abandoned`), and `item.dropped` never firing on
-  traversal floors because `TraverseStep` does not call
-  `note_wanted_sightings`. Add these rather than reason around them.
 
 ## Hard-won facts (do not re-derive)
 
