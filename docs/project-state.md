@@ -8,7 +8,7 @@ same commit as the transition itself.
 - **Milestone:** M6 — Countess flagship
 - **Phase:** P4 — the countess run and the Cellar 5 endgame (P1, P2, P3
   DONE; plan: `docs/plans/2026-08-03-m6-countess/`)
-- **Next request ID:** R223 (overall counter; R171 was never issued — a
+- **Next request ID:** R224 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
 - **Next test ID:** T75 (T72 ran twice, T73 twice, T74 twice; check
@@ -82,9 +82,19 @@ not.
 - The run will be the first live exercise of `stash.*` and `npc.*`
   (T72's preamble had nothing to deposit).
 
-Drill to write: T75, the full countess run. `drills/t71_countess.py`
-already does this — re-check its success criteria against review 001's
-lesson (it must not pass on a partial run) before launching.
+The launch goes out as **T71 run 3** (a re-run of an existing drill
+keeps its ID — T70/T72 precedent; T75 stays reserved for the next new
+drill). The ordered pre-launch re-check (review 001's lesson) is DONE,
+2026-08-06: the drill's three gates are sound (a chickened cycle,
+a short descent, and a missing `clear_countess` all fail), but the STEP
+under them had the same hole one layer down — a chamber sweep whose
+points were all skipped as unreachable still concluded "provably
+absent", so a bot pinned short of the chamber could complete the run
+objective having seen nothing. Fixed in ce3ba82: skips are counted, and
+a completed pass with skips and no corpse is the same loud stop as a
+spent budget. The old absence test was itself the false path (static
+player) and now genuinely walks. Launch gate: R223 (pending — the user
+tabs in and says go).
 
 ## After that
 
