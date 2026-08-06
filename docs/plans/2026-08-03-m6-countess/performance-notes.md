@@ -185,3 +185,72 @@ Cross-check before touching it: T70's original defect was re-clicking
 too EAGERLY. Any change here must keep the case it fixed (a click whose
 walk is still closing must not be re-issued) and must be measured on a
 warm descent, not reasoned about.
+
+## The first warm descent, and the endgame's real cost (T71 run 4)
+
+**Evidence, 2026-08-06.** The first complete Countess run: 930 s, PASS,
+`[CVRL]`. This is the warm-descent measurement the section above asked
+for — every staircase came from `maps/exits.json` ("remembered"), so
+nothing searched.
+
+| segment | time | note |
+|---|---|---|
+| preamble + waypoint | 24 s | nothing to deposit, nothing to repair |
+| → Forgotten Tower | 14 s | |
+| → Cellar 1 | 4 s | the fixed crossing, holding |
+| → Cellar 2 | 179 s | |
+| → Cellar 3 | 145 s | |
+| → Cellar 4 | 96 s | |
+| → Cellar 5 | 81 s | |
+| `clear_countess` | 186 s | |
+| `pickup` | 192 s | |
+
+**The descent alone is ~9 minutes against a 5–6 minute budget**, and
+the staircases are not where it goes — they are seconds. Two things
+dominate, and both are now measured rather than suspected.
+
+### 1. Opportunistic pickup is the descent's biggest cost
+
+The traversal floors were carpeted with potions and the bot took nearly
+all of them: 143 `action.pickup_attempt` events, 18 `item.collected`.
+Cellar 1's 179 s and Cellar 2's 145 s are mostly this. It is the
+feature working exactly as designed (P4 resolved the ignored-Thul
+observation in its favour) — but the speed-pass note written then is
+now priced: *the knob is the pickit's rules, not the step*. Healing
+potions were being fetched with the belt already stocked and the
+character at full health.
+
+### 2. The navigator oscillates around close targets — ~120 s in the chamber
+
+Four ticks in the Cellar 5 endgame took **34.9 s, 33.0 s, 24.9 s and
+27.7 s** — 120 s of the 186 s endgame, during which the character moved
+about 17 subtiles in total. The click audit says what happened, and it
+is a limit cycle, not a stall:
+
+    click (12578, 11083) ... goal (12571, 11082)
+    click (12567, 11084) ... goal (12571, 11082)
+    click (12578, 11083) ... goal (12571, 11082)
+    click (12567, 11084) ... goal (12571, 11082)
+
+The character walks past the goal to one side, then past it to the
+other, ~5 subtiles either way, never landing inside reach — until the
+navigator gives up with *"gave up after 5 plan cycles without
+progress"*. Seven of those give-ups happened across the run, three of
+them in the endgame.
+
+This is almost certainly the **"dithers and walks into corners"** the
+user reported from the chair after T70 run 5, now with a trace and a
+price. Note the ground-item interaction visible in the same audit
+lines: the clicks are being placed and nudged around nearby ground
+items, and the chamber floor was covered in them.
+
+**Do not "fix" this from the audit alone.** What is measured is the
+oscillation and its cost; what is NOT measured is why the walk
+overshoots — click projection, the nudge, the plan's waypoint spacing
+and the arrival test are all live suspects, and the last four confident
+fixes in this area were wrong. The instrument to add first is on the
+give-up path: `send()` swallows `NavigationError` into `services.log`,
+so a walk that burned 35 s and failed produces **no run-log event at
+all** — the four expensive ticks are visible only as tick durations
+with nothing inside them. That gap should be closed before the cause
+is theorised about.

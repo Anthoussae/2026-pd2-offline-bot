@@ -11,7 +11,8 @@ same commit as the transition itself.
 - **Next request ID:** R224 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
-- **Next test ID:** T75 (T72 ran twice, T73 twice, T74 twice; check
+- **Next test ID:** T75 (T71 has now run 4 times — the harness counts
+  every row with the id; T72 twice, T73 twice, T74 twice; check
   `docs/drill-log.md`)
 
 Updated: 2026-08-06. Branch `m6-countess`, pushed, **PR #2 open**
@@ -67,44 +68,73 @@ write-off in `necro.py` (`futile_strikes`) for the family nobody has met
 yet; both its signatures are transient, nothing is remembered across
 runs.
 
-## NEXT: the first live Countess run
+## THE COUNTESS IS DEAD — the flagship works end to end
 
-Everything upstream of the Countess is now live-proven. The endgame is
-not.
+**T71 run 4, 2026-08-06: PASS.** 930 s, clean `[CVRL]`, 6/6 traverses,
+`clear_countess` completed, her corpse read at **(12541, 11088)**, drop
+zone published and swept, `pickup` collected the drop (two runes among
+it). No chicken, no death, no idle bail, 22 reflex fires. Artifacts:
+`logs/runs/20260806-025952-countess` (2259 events) and
+`logs/run-20260806-025952.log`.
 
-- `runs/countess.toml` + `clear_countess` are **sim-proven only** — both
-  the seen-kill path and the blinded-read sweep. Never run against the
-  game.
-- R219 answered: screen-north confirmed, staging point (12531, 11036)
-  **deferred to live judgment** — the operator watches the approach and
-  says whether it reads right. That judgement is still outstanding.
-- Chicken **35** for a proper run (R212 Q8); 50 for cellar drills.
-- The run will be the first live exercise of `stash.*` and `npc.*`
-  (T72's preamble had nothing to deposit).
+Pre-launch, the ordered re-check (review 001's lesson) found the same
+hole one layer below the drill: a chamber sweep whose points were all
+skipped as unreachable still concluded "provably absent". Fixed in
+ce3ba82 — skips void the absence proof and stop loudly; the old absence
+test was itself the false path and now genuinely walks.
 
-The launch goes out as **T71 run 3** (a re-run of an existing drill
-keeps its ID — T70/T72 precedent; T75 stays reserved for the next new
-drill). The ordered pre-launch re-check (review 001's lesson) is DONE,
-2026-08-06: the drill's three gates are sound (a chickened cycle,
-a short descent, and a missing `clear_countess` all fail), but the STEP
-under them had the same hole one layer down — a chamber sweep whose
-points were all skipped as unreachable still concluded "provably
-absent", so a bot pinned short of the chamber could complete the run
-objective having seen nothing. Fixed in ce3ba82: skips are counted, and
-a completed pass with skips and no corpse is the same loud stop as a
-spent budget. The old absence test was itself the false path (static
-player) and now genuinely walks. Launch gate: R223 (pending — the user
-tabs in and says go).
+### What the run did NOT settle
+
+- **The staging beat never ran.** `notes["countess"]` was never written
+  and no staging narration exists, because `engage` is consulted BEFORE
+  the phase dispatch in `ClearCountessStep.step` and owned every tick
+  from the neighborhood clearance to her death: 22 of 27 `clear_countess`
+  decisions are the bare `acted` with no note that only the engage
+  branch produces. So **R219(b) is still owed and is currently
+  unobservable** — with hostiles in perception the step cannot reach
+  `_stage_tick`, and the Countess always has a court. Decide whether
+  staging-before-contact is a real tactic (it must then pre-empt engage
+  under some condition) or a beat that only ever fires on an empty
+  approach — do not just re-run and hope.
+- **`stash.*` and `npc.*` are still unexercised.** Zero of each: the
+  inventory held only the three unmovables, so there was nothing to
+  deposit. Same gap T72 had.
+- **The kill was almost entirely poison.** One `action.attack` in the
+  whole endgame (13 in the run). She and her court died to poison, the
+  revives and the merc.
+
+### The numbers (see `performance-notes.md` for the evidence)
+
+The descent is **~9 minutes against the 5–6 minute target**, and the
+staircases are not the cost — they are seconds. Two things dominate:
+opportunistic pickup on the traversal floors (143 pickup attempts; the
+speed-pass knob is the pickit's rules, not the step), and a **navigator
+oscillation around close targets** that burned ~120 s of the 186 s
+endgame in four ticks while the character moved ~17 subtiles. That is
+almost certainly the "dithers and walks into corners" the user reported
+after T70 run 5, now traced and priced.
+
+**Instrument to add before theorising about it:** `send()` swallows
+`NavigationError` into `services.log`, so a walk that burned 35 s and
+failed emits **no run-log event** — those four ticks are visible only as
+durations with nothing inside them. Close that gap first; the method
+note in this file was paid for four times already.
 
 ## After that
 
-- **P5 battery** — the warm-descent timing measurement is its first live
-  act, and it now has real instrumentation to measure with.
+- **P5 battery** — the warm-descent timing is now MEASURED (the table in
+  `performance-notes.md`), so the battery's first act is spent. What
+  remains is repeat runs for variance: this is one run, and monster
+  density alone moves clearance times by tens of seconds.
 - **Speed pass** — `docs/plans/2026-08-03-m6-countess/performance-notes.md`
-  holds the evidence, including the newest: ~3 of the Tower's 4.3 s is
-  the staircase retry window held while standing on the stairs. It
-  carries a warning not to "fix" it without a measurement, because the
-  eager version of that retry was T70's original bug.
+  holds the evidence. Ranked by measured cost: the pickup-on-descent
+  rules, then the navigator oscillation (~120 s in the chamber alone),
+  then ~3 of the Tower's 4.3 s in the staircase retry window held while
+  standing on the stairs. Every one of them carries a warning not to
+  "fix" it without a measurement — the eager version of that retry was
+  T70's original bug, and four confident hypotheses about the Tower were
+  wrong before the log answered it.
+- **The staging question** (above) — a design decision, not a bug.
 - **Deferred, deliberately**: enemy-death events (R220 Q6),
   `item.accidental`, the collision recorder writing rooms under the
   wrong area id during an area flip (seen in `area-020.json` and
