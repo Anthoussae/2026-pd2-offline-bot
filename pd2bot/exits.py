@@ -1,11 +1,22 @@
 """Level exits: where the current area connects to its neighbours.
 
-Room2 is the STATIC room layer — once a level is initialized it spans the
-whole area whether or not the runtime rooms (Room1) around the player are
-loaded, so exits are enumerable area-wide from anywhere inside the level.
-The algorithm is d2mapapi's own (mapdata.cpp:217-232 — the offline
-generator this project already vendors, so the arithmetic is a proven
-lineage, not an invention):
+Room2 is the static room layer and its chain spans the whole level — but
+**preset data does not** (T70 descent, live, 2026-08-05): a Room2's
+warp/preset chains are only populated for rooms whose data the client
+has ADDED, which it does around the player. d2mapapi's own source is
+explicit about this — it calls D2COMMON_AddRoomData on every room
+BEFORE reading presets (mapdata.cpp:54-60), a call an out-of-process
+reader cannot make. So a scan returns the exits that are currently
+DISCOVERABLE, not all that exist: in Cellar 1 the read found only the
+up-staircase beside the arrival point, and the down-staircase two rooms
+away was invisible. Consumers must treat "no exit toward X in this
+scan" as "not visible from here", never as "does not exist" — the
+traverse step walks toward unvisited rooms (their POSITIONS are static
+and readable level-wide) and re-scans as the client initializes them.
+
+The per-room algorithm is d2mapapi's own (mapdata.cpp:217-232 — the
+offline generator this project already vendors, so the arithmetic is a
+proven lineage, not an invention):
 
     a PresetUnit of type TILE in a Room2 names a warp (dwTxtFileNo);
     the RoomTile whose *nNum equals that number names the DESTINATION
@@ -69,6 +80,16 @@ class ExitScan:
     area: int  # the level the scan ran in
     rooms_walked: int = 0
     skipped: int = 0
+    # Every room's centre in world subtiles — STATIC data, readable
+    # level-wide regardless of initialization. The traverse step's seek
+    # targets: walking near one makes the client add its room data,
+    # which is what populates the preset chains a later scan reads.
+    rooms: tuple[tuple[int, int], ...] = ()
+    # How many rooms actually had a preset chain to read — the honesty
+    # counter for the discoverability limit above. A scan that walked 16
+    # rooms and read presets in 3 has seen an eighth of the level's
+    # exits, and should say so.
+    rooms_with_presets: int = 0
 
     def toward(self, dest_area: int) -> tuple[LevelExit, ...]:
         """The exits leading to `dest_area` (usually one; stairs can pair)."""
@@ -77,9 +98,12 @@ class ExitScan:
 
 def _room_exits(
     session: GameSession, room2: int
-) -> tuple[list[LevelExit], int]:
-    """One Room2's warp exits, plus a skipped count for its chains."""
+) -> tuple[list[LevelExit], int, bool]:
+    """One Room2's warp exits, a skipped count, and whether it had any
+    preset chain at all (the initialization signal — see the module
+    docstring)."""
     skipped = 0
+    had_presets = session.ptr(room2 + offsets.ROOM2_PRESET) is not None
     # The warp connections: warp number -> destination level id.
     warp_dest: dict[int, int] = {}
     tile = session.ptr(room2 + offsets.ROOM2_ROOM_TILES)
@@ -99,7 +123,7 @@ def _room_exits(
             skipped += 1
         tile = session.ptr(tile + offsets.ROOMTILE_NEXT)
     if not warp_dest:
-        return [], skipped
+        return [], skipped, had_presets
 
     # The warp POSITIONS: TILE presets whose dwTxtFileNo matches a warp.
     found: list[LevelExit] = []
@@ -129,7 +153,7 @@ def _room_exits(
         except Exception:  # noqa: BLE001
             skipped += 1
         preset = session.ptr(preset + offsets.PRESET_NEXT)
-    return found, skipped
+    return found, skipped, had_presets
 
 
 def read_level_exits(session: GameSession) -> ExitScan | None:
@@ -158,6 +182,8 @@ def read_level_exits(session: GameSession) -> ExitScan | None:
 
     area = session.u32(level + offsets.LEVEL_NO)
     exits: dict[tuple[tuple[int, int], int], LevelExit] = {}
+    rooms: list[tuple[int, int]] = []
+    rooms_with_presets = 0
     rooms_walked = 0
     skipped = 0
     seen: set[int] = set()
@@ -168,8 +194,24 @@ def read_level_exits(session: GameSession) -> ExitScan | None:
         seen.add(node)
         rooms_walked += 1
         try:
-            found, room_skipped = _room_exits(session, node)
+            # The room's centre, from STATIC fields — readable whether or
+            # not the room's data is loaded, which is what makes it a
+            # seek target when the presets are not.
+            rooms.append((
+                (
+                    session.u32(node + offsets.ROOM2_POS_X)
+                    + session.u32(node + offsets.ROOM2_SIZE_X) // 2
+                )
+                * SUBTILES_PER_TILE,
+                (
+                    session.u32(node + offsets.ROOM2_POS_Y)
+                    + session.u32(node + offsets.ROOM2_SIZE_Y) // 2
+                )
+                * SUBTILES_PER_TILE,
+            ))
+            found, room_skipped, had_presets = _room_exits(session, node)
             skipped += room_skipped
+            rooms_with_presets += 1 if had_presets else 0
             for one in found:
                 exits[(one.position, one.dest_area)] = one
         except Exception:  # noqa: BLE001 - an unreadable room is skipped whole
@@ -183,6 +225,8 @@ def read_level_exits(session: GameSession) -> ExitScan | None:
         area=area,
         rooms_walked=rooms_walked,
         skipped=skipped,
+        rooms=tuple(rooms),
+        rooms_with_presets=rooms_with_presets,
     )
 
 

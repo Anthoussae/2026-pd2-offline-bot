@@ -138,6 +138,10 @@ def test_finds_the_staircase_with_world_position_and_destination():
     assert scan.exits[0].dest_name == "Tower Cellar Level 1"
     assert scan.toward(DEST_AREA) == scan.exits
     assert scan.toward(offsets.AREA_BLACK_MARSH) == ()
+    # Room centres are static data, listed for BOTH rooms (the traverse
+    # step's seek targets); only room A had a preset chain to read.
+    assert scan.rooms == ((5000, 10000), (0, 0))
+    assert scan.rooms_with_presets == 1
 
 
 def test_npc_presets_matching_the_warp_number_are_not_exits():

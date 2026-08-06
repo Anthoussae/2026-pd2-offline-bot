@@ -2014,11 +2014,22 @@ class TraverseStep(_PickupMixin):
 
     The exit position comes from memory first (`ExitMemory`, recorded on
     first discovery), refined by the live RoomTile read when it answers
-    (`exits.read_level_exits` — the authority; the memory only buys the
-    first legs while a mid-load read sorts itself out). A readable scan
-    that shows NO exit toward `dest` is a loud `NavigationError`: the run
-    file asked for a transition this map does not have, and walking
-    hopefully is the failure mode this project never picks.
+    (`exits.read_level_exits`). This is kolbot's `moveToExit` shape —
+    look the exit's coordinates up, path to them, use it — with one
+    honest difference: kolbot's in-process engine is HANDED the full
+    exit list (its host adds room data before reading presets, the same
+    privilege d2mapapi uses), while an out-of-process read only sees
+    exits in rooms the client has loaded around the player (T70
+    descent, live). So on the one run where neither memory nor the scan
+    knows the way, the step SEEKS: it routes over the atlas to the
+    nearest room centre it has not yet been near — room positions are
+    static and readable level-wide — and re-scans as the client loads
+    each room's data. Bounded by the level's room count, every leg on
+    known walkable ground, and the answer is remembered per map seed:
+    the search happens once per level, ever, and every later run is
+    kolbot-shaped from the first tick. Only a search that has walked
+    EVERY room and still found nothing raises `NavigationError` — at
+    that point "this map has no such transition" finally has evidence.
 
     Combat en route belongs to the posture (M6 P3): the module's
     `engage` owns any tick it wants — brisk makes that "only what
@@ -2034,18 +2045,31 @@ class TraverseStep(_PickupMixin):
     # nearest screen edge is 19-38 subtiles out) and inside the
     # loaded-room horizon, so the click projects and resolves.
     click_range: int = 18
-    # A click that produced no area change within this long earns a
-    # re-click (loads take a beat; the click may also have been eaten).
-    exit_retry_s: float = 5.0
+    # A click whose walk has STALLED for this long earns a re-click.
+    # Progress-aware since T70 (the user watched the pause): the first
+    # click is a walk order the client honours over several seconds, and
+    # a timer that ignored the closing distance re-issued the same order
+    # mid-walk — ~10 s of a 16 s traverse was that pacing. While the
+    # character keeps getting closer to the stairs, the click is doing
+    # its job and the clock keeps resetting (the patrol's own
+    # progress-vs-time distinction, R189 b).
+    exit_retry_s: float = 3.0
     # Re-clicks are BOUNDED: past this, the staircase is not taking us
     # anywhere and the run must say so loudly rather than click forever.
     click_budget: int = 5
+    # Seeking: a room counts as visited (its data loaded, its presets
+    # scanned) once the character has been within this many subtiles.
+    # Comfortably inside the measured loaded-room horizon (46-67, T51).
+    seek_reach: int = 25
     _posture_applied: bool = False
     _exit: tuple[int, int] | None = None
     _from_memory: bool = False
     _clicked_at: float | None = None
+    _click_closest: int | None = None
     _clicks: int = 0
     _announced: bool = False
+    _seek_rooms: list[tuple[int, int]] | None = None
+    _seek_announced: bool = False
 
     def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
         if self.posture is not None and not self._posture_applied:
@@ -2079,11 +2103,19 @@ class TraverseStep(_PickupMixin):
             self.send(ctx, action)
             return StepOutcome(done=False, acted=True)
 
-        self._locate_exit(here)
+        origin = snap.player.position
+        scan = self._locate_exit(here, origin)
         if self._exit is None:
-            # No memory and the live read has not answered yet (mid-load
-            # scan): wait the tick out rather than walk anywhere blind.
-            return StepOutcome(done=False, waiting=True)
+            if scan is None:
+                # The live read has not answered yet (mid-load): wait the
+                # tick out rather than walk anywhere blind.
+                return StepOutcome(done=False, waiting=True)
+            # The scan answered and the exit is NOT VISIBLE from here —
+            # which is not "does not exist" (T70 descent: preset data
+            # only loads around the player). Seek: route to the nearest
+            # room centre we have not been near, so the client loads its
+            # data and the next scan can see further.
+            return self._seek(ctx, origin, here, scan)
         if not self._announced:
             self.services.narrate(
                 f"traverse: exit toward "
@@ -2093,15 +2125,19 @@ class TraverseStep(_PickupMixin):
             )
             self._announced = True
 
-        origin = snap.player.position
         now = self.services.clock()
-        if _chebyshev(origin, self._exit) <= self.click_range:
-            if (
-                self._clicked_at is not None
-                and now - self._clicked_at < self.exit_retry_s
-            ):
-                # Clicked; the walk-to-stairs + load is resolving.
-                return StepOutcome(done=False, waiting=True)
+        distance = _chebyshev(origin, self._exit)
+        if distance <= self.click_range:
+            if self._clicked_at is not None:
+                # Progress-aware pacing (the T70 pause): a click whose
+                # walk is still CLOSING on the stairs is working — the
+                # clock restarts on every subtile of progress and only a
+                # genuine stall earns the re-click.
+                if self._click_closest is None or distance < self._click_closest:
+                    self._click_closest = distance
+                    self._clicked_at = now
+                if now - self._clicked_at < self.exit_retry_s:
+                    return StepOutcome(done=False, waiting=True)
             if self._clicks >= self.click_budget:
                 raise NavigationError(
                     f"clicked the staircase at {self._exit} {self._clicks} "
@@ -2110,6 +2146,7 @@ class TraverseStep(_PickupMixin):
                 )
             self._clicks += 1
             self._clicked_at = now
+            self._click_closest = distance
             self.send(ctx, InteractObject(self._exit))
             return StepOutcome(
                 done=False, acted=True,
@@ -2126,36 +2163,90 @@ class TraverseStep(_PickupMixin):
         self.send(ctx, MoveTo(leg))
         return StepOutcome(done=False, acted=True)
 
-    def _locate_exit(self, here: int) -> None:
+    def _locate_exit(self, here: int, origin: tuple[int, int]):
         """Fill `_exit`: memory immediately, the live read when it answers.
 
-        The live read REPLACES a remembered position when they disagree
-        (the memory is a cache of this very read), and its answer is also
-        written back so the next run starts warm.
+        Returns the scan (or None) so the caller can seek off it. The
+        live read REPLACES a remembered position when they disagree (the
+        memory is a cache of this very read), and EVERY exit a scan sees
+        is written back — not just the sought one — so each discovery
+        run warms the map for every future traversal through this level
+        (the up-staircase learned on the way down is the down-staircase
+        of the return trip).
         """
         if self._exit is None and self.services.exit_recall is not None:
             remembered = self.services.exit_recall(here, self.dest)
             if remembered is not None:
                 self._exit = remembered
                 self._from_memory = True
+        scan = None
         if self._exit is None or self._from_memory:
             reader = self.services.level_exits
             scan = reader() if reader is not None else None
             if scan is not None and getattr(scan, "area", None) == here:
+                if self.services.exit_remember is not None:
+                    for one in scan.exits:
+                        self.services.exit_remember(
+                            here, one.dest_area, one.position
+                        )
                 found = scan.toward(self.dest)
                 if found:
-                    self._exit = found[0].position
-                    self._from_memory = False
-                    if self.services.exit_remember is not None:
-                        self.services.exit_remember(here, self.dest, self._exit)
-                elif not self._from_memory:
-                    raise NavigationError(
-                        f"area {here} has no exit toward area {self.dest} "
-                        f"({len(scan.exits)} exit(s) read: "
-                        f"{[(e.dest_area, e.position) for e in scan.exits]}) "
-                        "— the run file asks for a transition this map "
-                        "does not have"
+                    # Nearest first, kolbot's own tiebreak for paired
+                    # staircases.
+                    best = min(
+                        found,
+                        key=lambda e: _chebyshev(e.position, origin),
                     )
+                    self._exit = best.position
+                    self._from_memory = False
+            elif scan is not None:
+                scan = None  # a stale-area scan is no answer at all
+        return scan
+
+    def _seek(
+        self, ctx: EngineContext, origin: tuple[int, int], here: int, scan
+    ) -> StepOutcome:
+        """One leg of the discovery walk (T70 descent, the fix).
+
+        Room centres come from the scan (static data, level-wide); the
+        route comes from the atlas. Rooms the character has been near
+        are done — their data loaded and their presets were in the very
+        scan that still lacked the exit — so the walk visits each
+        remaining room nearest-first until the exit turns up, which ends
+        seeking via `_locate_exit` next tick. All rooms exhausted with
+        no exit is the one situation that now has EVIDENCE behind "this
+        map has no such transition".
+        """
+        if self._seek_rooms is None:
+            self._seek_rooms = sorted(
+                scan.rooms, key=lambda c: _chebyshev(c, origin), reverse=True
+            )
+            self.services.narrate(
+                f"traverse: exit toward "
+                f"{offsets.AREA_NAMES.get(self.dest, self.dest)} not in "
+                f"sight — searching the level's {len(self._seek_rooms)} "
+                "room(s) (first visit; the answer is remembered)"
+            )
+        while self._seek_rooms:
+            target = self._seek_rooms[-1]
+            if _chebyshev(target, origin) <= self.seek_reach:
+                self._seek_rooms.pop()  # been here: its data is loaded
+                continue
+            leg = _route_leg(self.services, origin, target)
+            if leg is None:
+                # No route over the atlas: the centre sits in a wall or
+                # unwalkable void. Costs the candidate, not the search.
+                self._seek_rooms.pop()
+                continue
+            self.send(ctx, MoveTo(leg))
+            return StepOutcome(done=False, acted=True)
+        raise NavigationError(
+            f"area {here} has no exit toward area {self.dest}: every one "
+            f"of its {scan.rooms_walked} room(s) was visited and scanned "
+            f"({len(scan.exits)} exit(s) found: "
+            f"{[(e.dest_area, e.position) for e in scan.exits]}) — the run "
+            "file asks for a transition this map does not have"
+        )
 
 
 def _checked_posture(services: RunServices, name: str | None) -> str | None:

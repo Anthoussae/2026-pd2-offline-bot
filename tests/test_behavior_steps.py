@@ -1711,12 +1711,14 @@ def test_no_ring_is_cached_until_an_area_was_available_to_filter():
 # -- the traverse step (M6 P2) -------------------------------------------------
 
 
-def _exit_scan(area, exits):
+def _exit_scan(area, exits, rooms=()):
     from pd2bot.exits import ExitScan, LevelExit
 
     return ExitScan(
         exits=tuple(LevelExit(position=p, dest_area=d) for p, d in exits),
         area=area,
+        rooms=tuple(rooms),
+        rooms_walked=len(rooms),
     )
 
 
@@ -1827,3 +1829,108 @@ def test_traverse_lets_the_fight_own_the_tick():
     # The one action sent was the COMBAT's, not a traverse leg (the
     # combat move and a route leg differ: the leg aims at the exit).
     assert executor.actions == [MoveTo((1002, 1002))]
+
+
+def test_traverse_seeks_unvisited_rooms_until_the_exit_loads():
+    """The T70 descent fix: preset data only loads around the player, so
+    a scan that lacks the exit means 'not visible from here', never
+    'does not exist'. The step must walk toward unvisited room centres
+    (static data, atlas-routable) and re-scan until the staircase
+    appears — then use it exactly as if it had always been known."""
+    from pd2bot.behavior.actions import InteractObject
+
+    clock = Clock()
+    world = {"pos": HOME, "area": 20, "flip_at": None}
+    far_room = (1200, 1000)  # ~200 subtiles east; its data is not loaded
+    dest = 21
+    exit_pos = (1195, 1000)
+    remembered = []
+
+    def scan():
+        # The exit's room only reveals its presets once the character
+        # has been NEAR it — the live discoverability limit, scripted.
+        near = _chebyshev(world["pos"], far_room) <= 25
+        return _exit_scan(
+            world["area"],
+            [(exit_pos, dest)] if near else [],
+            rooms=((1005, 1000), far_room),
+        )
+
+    svc = services(
+        clock,
+        level_exits=scan,
+        exit_remember=lambda a, d, p: remembered.append((a, d, p)),
+    )
+    step = make_step("traverse", svc, {"dest": dest})
+
+    def react(action):
+        if isinstance(action, MoveTo):
+            world["pos"] = action.target
+        if isinstance(action, InteractObject):
+            world["flip_at"] = clock() + 1.0
+
+    executor = RecordingExecutor(clock=clock, on_execute=react)
+    ctx = context(executor)
+
+    outcome = None
+    for _ in range(80):
+        if world["flip_at"] is not None and clock() >= world["flip_at"]:
+            world["area"] = dest
+            world["flip_at"] = None
+        outcome = step.step(snap(pos=world["pos"], area=world["area"]), ctx)
+        clock.advance(0.5)
+        if outcome.done:
+            break
+    assert outcome is not None and outcome.done, "the seek never found the exit"
+    # It walked east toward the unloaded room, clicked, and arrived.
+    assert any(
+        isinstance(a, MoveTo) and a.target[0] > 1100 for a in executor.actions
+    ), "no seek leg ever approached the far room"
+    assert any(isinstance(a, InteractObject) for a in executor.actions)
+    # The discovery was written back: next run skips the whole search.
+    assert (20, dest, exit_pos) in remembered
+
+
+def test_traverse_reclicks_only_when_the_walk_stalls():
+    """Progress-aware pacing (the T70 'pause before clicking the
+    stairs'): the first click is a WALK ORDER the client honours over
+    several seconds, and while the character keeps closing on the
+    staircase no re-click may fire — the old time-based pacing burned
+    ~10s per transition re-issuing orders mid-walk."""
+    from pd2bot.behavior.actions import InteractObject
+
+    clock = Clock()
+    # Exit at the edge of click range; the walk closes 2 subtiles per
+    # tick, slower than the old timer would tolerate.
+    step, world, remembered, executor, ctx, tick = traversing(
+        clock, exit_pos=(1016, 1000), recall=(1016, 1000)
+    )
+
+    def clicks():
+        return [a for a in executor.actions if isinstance(a, InteractObject)]
+
+    def tick_unflipped():
+        # This test drives the WALK, not the transition: the scripted
+        # flip a click schedules must never fire, or the step just
+        # arrives and nothing about pacing gets tested.
+        world["flip_at"] = None
+        return tick()
+
+    tick_unflipped()  # in range: click 1 (the walk order)
+    assert len(clicks()) == 1
+    # The character closes steadily for 8 ticks x 1s — far past the old
+    # 5s timer — and no re-click fires, because progress keeps the
+    # clock reset.
+    for i in range(8):
+        clock.advance(1.0)
+        world["pos"] = (world["pos"][0] + 2, 1000)
+        if world["pos"][0] >= 1016:
+            break
+        tick_unflipped()
+        assert len(clicks()) == 1, f"re-clicked mid-walk on tick {i}"
+    # Now the walk STALLS short of the stairs: the re-click is earned.
+    world["pos"] = (1013, 1000)
+    tick_unflipped()
+    clock.advance(4.0)
+    tick_unflipped()
+    assert len(clicks()) == 2, "a stalled walk never earned its re-click"
