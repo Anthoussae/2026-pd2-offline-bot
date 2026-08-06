@@ -407,13 +407,17 @@ MONSTER_FLAG_CHAMPION = 1 << 2
 MONSTER_FLAG_BOSS = 1 << 3
 MONSTER_FLAG_MINION = 1 << 4
 # Super-unique identity (M6 P1, the Countess). wUniqueNo indexes
-# superuniques.txt; wName carries the display name the client shows.
-# Which values mean "not a super-unique" is NOT assumed — the P2 descent
-# drill logs every boss-flagged monster's (unique_no, name) and the
-# Countess's own id gets a named constant with that drill as provenance.
+# superuniques.txt. wName turned out to hold GARBAGE on live units (T68)
+# — kept readable as a diagnostic only, never identity.
 MONSTER_UNIQUE_NO = 0x26  # WORD wUniqueNo
 MONSTER_NAME = 0x2C  # wchar_t wName[28]
 MONSTER_NAME_CHARS = 28
+# The Countess herself, live-captured: T68 read kind 734 / unique_no 6
+# in Tower Cellar Level 5 (2026-08-05), and the user confirmed her alive
+# on screen during that visit (R216). unique_no 6 is superuniques.txt's
+# Countess row — two independent facts agreeing, the usual bar.
+COUNTESS_KIND = 734
+COUNTESS_UNIQUE_NO = 6
 
 # --- ItemData (D2Structs.h:510) --------------------------------------------
 
@@ -773,13 +777,21 @@ AREA_COLD_PLAINS = 3
 # The Countess route (M6). Ids match the T52 survey's atlas file names
 # (maps/<seed>/area-006 … area-025) — strong prior evidence, but still
 # expectations until the P2 traversal drill reads each one live (R212 Q1).
-AREA_BLACK_MARSH = 6
+AREA_BLACK_MARSH = 6  # live-verified: T69 read it on arrival (2026-08-05)
 AREA_FORGOTTEN_TOWER = 20
 AREA_TOWER_CELLAR_1 = 21
 AREA_TOWER_CELLAR_2 = 22
 AREA_TOWER_CELLAR_3 = 23
 AREA_TOWER_CELLAR_4 = 24
 AREA_TOWER_CELLAR_5 = 25
+# The two cross-act calibration destinations (R212 Q2). Halls of Pain
+# was READ on arrival in T69 — and note it contradicts classic-D2 area
+# tables (which put it near 117), so the live read is the only number
+# trusted. Arcane Sanctuary is still classic-lore 74, an EXPECTATION:
+# the first bot trip proves or refutes it by arrival (a wrong id fails
+# the travel loudly, which is the trust-nothing behavior we want).
+AREA_ARCANE_SANCTUARY = 74  # expectation (classic lore); unverified live
+AREA_HALLS_OF_PAIN = 123  # live-verified: T69 read it on arrival
 AREA_NAMES = {
     AREA_ROGUE_ENCAMPMENT: "Rogue Encampment",
     AREA_COLD_PLAINS: "Cold Plains",

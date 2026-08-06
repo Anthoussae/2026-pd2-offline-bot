@@ -206,6 +206,40 @@ def default_points() -> dict[str, UIPoint]:
         # The waypoint list. A destination click raises no panel — it closes
         # the one you are in and loads an area — so `opens` stays None and
         # the proof is the area id read back (waypoint.py's `await_arrival`).
+        # The act TABS of the waypoint list (M6 P2). Screen-anchored
+        # furniture like the rows. Clicking a tab swaps the destination
+        # list and raises no panel; travel on a subsequently-clicked row
+        # is the proof the tab click took.
+        UIPoint(
+            "waypoint.tab_act1",
+            offsets.UI_WPMENU,
+            (0.2363, 0.1308),  # T69, 2026-08-05, window 1536x864
+        ),
+        UIPoint(
+            "waypoint.tab_act2",
+            offsets.UI_WPMENU,
+            (0.2930, 0.1319),  # T69, 2026-08-05, window 1536x864
+        ),
+        UIPoint(
+            "waypoint.tab_act5",
+            offsets.UI_WPMENU,
+            (0.4720, 0.1250),  # T69, 2026-08-05, window 1536x864
+        ),
+        UIPoint(
+            "waypoint.black_marsh",
+            offsets.UI_WPMENU,
+            (0.2370, 0.4664),  # T69, 2026-08-05, window 1536x864
+        ),
+        UIPoint(
+            "waypoint.arcane_sanctuary",
+            offsets.UI_WPMENU,
+            (0.3503, 0.6400),  # T69, 2026-08-05, window 1536x864
+        ),
+        UIPoint(
+            "waypoint.halls_of_pain",
+            offsets.UI_WPMENU,
+            (0.2318, 0.5255),  # T69, 2026-08-05, window 1536x864
+        ),
         UIPoint(
             "waypoint.cold_plains",
             offsets.UI_WPMENU,

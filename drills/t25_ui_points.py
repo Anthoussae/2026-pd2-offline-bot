@@ -59,6 +59,12 @@ class Target:
     reach: str  # how the user gets to the screen it lives on
     hover_hint: str  # what to put the cursor on
     observe: object = None  # optional extra reading, e.g. durability
+    # What proves the click landed. "panels": the panel set changes and
+    # settles (rows, buttons — the default). "none": nothing observable
+    # changes (a waypoint ACT TAB swaps the list inside the same panel,
+    # M6 T69) — the capture is the hover alone, and the real proof is the
+    # travel on the row clicked right after it.
+    proof: str = "panels"
 
 
 @dataclass
@@ -209,6 +215,18 @@ def measure(run: DrillRun, target: Target) -> Measured:
     x, y, fx, fy = got
     print(f"[{target.point}] captured ({x}, {y}) -> ({fx:.4f}, {fy:.4f}) "
           f"— now click it", flush=True)
+
+    if target.proof == "none":
+        # A tab click changes no panel; the next target's travel is the
+        # proof. Record the capture and move straight on.
+        return Measured(
+            point=target.point,
+            fraction=(round(fx, 4), round(fy, 4)),
+            pixel=(x, y),
+            panels_before=names(before),
+            panels_after=names(before),
+            extra="(no panel change expected)",
+        )
 
     after = settled_panels(run, before, timeout_s=300)
     extra = target.observe(run) if target.observe else ""

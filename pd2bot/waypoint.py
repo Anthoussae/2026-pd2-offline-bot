@@ -60,6 +60,22 @@ class WaypointConfig:
         default_factory=lambda: {
             offsets.AREA_COLD_PLAINS: "waypoint.cold_plains",
             offsets.AREA_ROGUE_ENCAMPMENT: "waypoint.rogue_encampment",
+            offsets.AREA_BLACK_MARSH: "waypoint.black_marsh",
+            offsets.AREA_ARCANE_SANCTUARY: "waypoint.arcane_sanctuary",
+            offsets.AREA_HALLS_OF_PAIN: "waypoint.halls_of_pain",
+        }
+    )
+    # Area id -> the ACT TAB to click before the row (M6 P2, T69). The
+    # tab is clicked for EVERY destination, unconditionally: clicking the
+    # already-active tab is harmless, and "which tab is showing" is not
+    # readable from memory — an unconditional click needs no such read.
+    destination_tabs: dict[int, str] = field(
+        default_factory=lambda: {
+            offsets.AREA_COLD_PLAINS: "waypoint.tab_act1",
+            offsets.AREA_ROGUE_ENCAMPMENT: "waypoint.tab_act1",
+            offsets.AREA_BLACK_MARSH: "waypoint.tab_act1",
+            offsets.AREA_ARCANE_SANCTUARY: "waypoint.tab_act2",
+            offsets.AREA_HALLS_OF_PAIN: "waypoint.tab_act5",
         }
     )
     travel_timeout_s: float = 30.0  # row click -> arrival (includes the load)
@@ -121,6 +137,25 @@ class WaypointTravel:
         )
         report.clicks += 1
         report.log.append(f"panel edge 0->1 at waypoint object {position}")
+
+    def select_tab(self, dest_area: int, report: TravelReport) -> None:
+        """Click the destination's act tab (M6 P2). No-op for areas with
+        no configured tab (none exist today — every destination names one).
+
+        A tab click has no observable effect of its own (the list swaps
+        inside the same panel), so its condition is only "the panel is
+        still open" — one settled click, no blind retries. The real proof
+        is downstream: the ROW click closes the panel and the ARRIVAL
+        reads the area id, and a tab misclick that closed the panel makes
+        the row click fail loudly instead of clicking into nothing.
+        """
+        tab_name = self.config.destination_tabs.get(dest_area)
+        if tab_name is None:
+            return
+        tab = self.interact.point(tab_name)
+        self.interact.click_point(tab, lambda: self._panel_open())
+        report.clicks += 1
+        report.log.append(f"act tab {tab.name} clicked, panel still open")
 
     def click_destination(self, dest_area: int, report: TravelReport) -> None:
         point = self.interact.point(self._point_name(dest_area))
@@ -186,6 +221,7 @@ class WaypointTravel:
         self.interact.close_panels()
         try:
             self.open_panel(report)
+            self.select_tab(dest_area, report)
             self.click_destination(dest_area, report)
             self.await_arrival(dest_area, report)
         except InputRefused:

@@ -239,3 +239,4 @@ headings, noted in parentheses, say roughly where they fell).
 - M6 P2 R215 [inform] Hold-left-click moves without interacting · 2026-08-04
 - M6 P2 R216 [verify] Confirm the Countess candidate by eye · 2026-08-05 06:20
 - M6 P2 R217 [decision] Standing mandate for the P2 live batch · 2026-08-05 06:20
+- M6 P2 R218 [execute] Clear stash space (preamble halts) · 2026-08-05 18:40

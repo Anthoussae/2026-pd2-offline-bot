@@ -79,7 +79,15 @@ def build(state, *, config=None, points_override=None):
 
     def panel_click(panel_id, sx, sy, button="left", shift=False, **kwargs):
         state.panel_clicks.append((panel_id, sx, sy))
-        if panel_id == offsets.UI_WPMENU and state.row_travels:
+        # Only the ROW travels. An ACT TAB click (M6 P2) swaps the list
+        # inside the same panel and changes nothing observable — a fake
+        # that closed the panel on any click would make the tab look
+        # like a row and hide exactly the bug the tab step could have.
+        if (
+            panel_id == offsets.UI_WPMENU
+            and (sx, sy) == ROW_PIXEL
+            and state.row_travels
+        ):
             state.panels.discard(offsets.UI_WPMENU)
             state.area = COLD_PLAINS
 
@@ -123,9 +131,16 @@ def build(state, *, config=None, points_override=None):
 
 def test_happy_path_opens_the_edge_clicks_the_row_and_verifies_arrival(world):
     report = build(world).take(COLD_PLAINS)
-    assert report.arrived and report.clicks == 1
+    # Two clicks since M6 P2: the act tab, then the row. The tab is
+    # clicked unconditionally (which tab is showing cannot be read from
+    # memory, and re-clicking the active one is harmless).
+    assert report.arrived and report.clicks == 2
     assert world.world_clicks == [WP_POS]
-    assert world.panel_clicks == [(offsets.UI_WPMENU, *ROW_PIXEL)]
+    tab_pixel = default_points()["waypoint.tab_act1"].pixel(RECT)
+    assert world.panel_clicks == [
+        (offsets.UI_WPMENU, *tab_pixel),
+        (offsets.UI_WPMENU, *ROW_PIXEL),
+    ]
     assert world.area == COLD_PLAINS
 
 
@@ -201,7 +216,10 @@ def test_arrival_requires_the_area_to_actually_change(world):
 
     def closes_but_no_travel(panel_id, sx, sy, button="left", shift=False, **kwargs):
         world.panel_clicks.append((panel_id, sx, sy))
-        world.panels.discard(offsets.UI_WPMENU)
+        # The ROW closes the panel without travelling — the defect under
+        # test. The act tab (M6 P2) leaves the panel up, as a real one does.
+        if (sx, sy) == ROW_PIXEL:
+            world.panels.discard(offsets.UI_WPMENU)
 
     trip.interact.panel = SimpleNamespace(
         click=closes_but_no_travel,
