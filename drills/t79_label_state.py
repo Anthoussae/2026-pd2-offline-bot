@@ -47,7 +47,7 @@ from drills.t76_pickup_calibration import (  # noqa: E402
 )
 from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.input import VK_I, VK_MENU, GatedInput, InputRefused  # noqa: E402
+from pd2bot.input import VK_MENU, GatedInput, InputRefused  # noqa: E402
 from pd2bot.items import read_carried_items  # noqa: E402
 from pd2bot.memory import GameSession  # noqa: E402
 from pd2bot.menuinput import MenuInput  # noqa: E402
@@ -173,10 +173,19 @@ def _inventory_open(run: DrillRun) -> bool:
     return offsets.UI_INVENTORY in read_ui_state(run.session).open_panels
 
 
-def _stage_pile(run: DrillRun, gated: GatedInput, town: TownLayer) -> list[int]:
-    """Drop up to MAX_DROP safe inventory items onto the floor. Returns the
-    gids seen on the floor afterwards. Leaves the inventory CLOSED."""
-    before = set(_floor(run))
+def _stage_pile(run: DrillRun, town: TownLayer) -> list[int]:
+    """Ensure a pile is on the floor and return its gids, inventory CLOSED.
+
+    If the floor already holds a pile (e.g. a prior run left one), use it
+    rather than dropping more. Otherwise drop up to MAX_DROP safe items.
+    """
+    existing = list(_floor(run))
+    if len(existing) >= MIN_PILE_CROWD + 1:
+        print(f"  floor already holds {len(existing)} item(s) — measuring "
+              "those, no drop needed", flush=True)
+        return existing
+
+    before = set(existing)
     town.press_inventory_open()
     carried = read_carried_items(run.session)
     candidates = droppable(carried)
@@ -191,15 +200,20 @@ def _stage_pile(run: DrillRun, gated: GatedInput, town: TownLayer) -> list[int]:
         except Exception as exc:  # noqa: BLE001 - a stuck drop is not fatal
             print(f"    drop of unit {item.unit_id} kind {item.kind} "
                   f"failed: {exc}", flush=True)
-    # Close the inventory (clicks are refused while a panel is open).
+    # Close the inventory the PROVEN way (ESC via MenuInput). GatedInput
+    # refuses key presses AND clicks while a blocking panel is open — the
+    # reason a VK_I press did nothing and the whole run measured through an
+    # open panel. close_panels() is the town recovery path's own mechanism.
     for _ in range(6):
         if not _inventory_open(run):
             break
-        try:
-            gated.press_key(VK_I)
-        except InputRefused:
-            pass
+        town.close_panels()
         run.sleep(0.2)
+    if _inventory_open(run):
+        raise RuntimeError(
+            "could not close the inventory — refusing to 'measure' through "
+            "a panel (every click would be refused, as in run 3)"
+        )
     fresh = [uid for uid in _floor(run) if uid not in before]
     print(f"  dropped {dropped} item(s); {len(fresh)} new on the floor",
           flush=True)
@@ -277,8 +291,8 @@ def make_drill() -> tuple[Drill, object]:
         }
         town = _build_town(run, gated)
 
-        print("\n--- staging a pile from inventory ---", flush=True)
-        staged = _stage_pile(run, gated, town)
+        print("\n--- staging a pile ---", flush=True)
+        staged = _stage_pile(run, town)
         if len(staged) < MIN_PILE_CROWD + 1:
             raise RuntimeError(
                 f"staged only {len(staged)} item(s) — need > {MIN_PILE_CROWD} "

@@ -163,3 +163,4 @@ and have one fewer cell; new rows carry milestone/phase.
 | T79 | 1 | 2026-08-06 21:46 | M6 P4 | label-state experiment — does labels-OFF pick a pile? | hybrid | PASS | 7 target(s); pile measured labels-ON (6) and labels-OFF (1) |
 | T79 | 2 | 2026-08-06 22:06 | M6 P4 | label-state experiment — automated, within-subjects | bot control | NOT STARTED | announced, but the user never typed OK |
 | T79 | 3 | 2026-08-06 22:17 | M6 P4 | label-state experiment — automated, within-subjects | bot control | NOT STARTED | announced, but the user never typed OK |
+| T79 | 4 | 2026-08-06 22:26 | M6 P4 | label-state experiment — automated, within-subjects | bot control | FAILED | RuntimeError: 8 measured; INCOMPLETE — need a pile (crowd>=3) of >= 3 in BOTH states; got ON=8, OFF=0; 8 left on floor (reported) |
