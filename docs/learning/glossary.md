@@ -201,12 +201,25 @@ fragile; out-of-process is more limited and more robust. This project is
 out-of-process; kolbot is in-process, which is why a version mismatch
 stopped it dead.
 
+**honest absence** — a rule for instruments: a value that could not be
+read is recorded as *unknown*, never as a plausible-looking default. A
+log that quietly writes 0 for "couldn't tell" is worse than one that
+says nothing, because you will trust the invented number. *(First seen:
+2026-08-06, instrumenting for questions you can't predict.)*
+
 **instrumentation** — measurement code living inside a real system:
 probes, counters, and logs that observe behavior while changing none of
 it. The rule is that a broken probe must never break the system (our
 click audit swallows its own failures). Professionals instrument first
 and change code second. *(First seen: 2026-08-01, measuring what the
 bot can see.)*
+
+**JSONL (JSON Lines)** — a file format where each line is one complete
+JSON record. Because every event is its own labelled line, the file can
+be *queried* (filter by kind, correlate two event types) rather than
+merely read — the difference between the run event log and a wall of
+`print()` output. *(First seen: 2026-08-06, instrumenting for questions
+you can't predict.)*
 
 **interface / protocol** — a named shape of methods ("anything with
 `engage()` and `upkeep()`") that code can depend on without knowing the
@@ -277,6 +290,14 @@ these may run". A second elevated bridge tries to take the named mutex,
 fails, and exits instead of racing the first for queue commands. Inside
 one program the same tool is called a lock. *(First seen: 2026-08-01,
 building the workflow itself.)*
+
+**observability** — how well you can tell what a running system is
+actually doing from the record it leaves. High observability means a
+misbehaviour can be diagnosed from the logs alone, without re-running or
+guessing. The run event log is the project's observability: it records
+*every* decision, because you can't predict which one you'll need to
+ask about. *(First seen: 2026-08-06, instrumenting for questions you
+can't predict.)*
 
 **package / module** — a module is a single `.py` file; a package is a directory
 of modules imported under one name (here, `pd2bot`). The boundaries you draw
@@ -356,6 +377,14 @@ other clones. *(First seen: 2026-08-03, in chat, explaining the M5
 merge.)*
 
 **race condition** — a bug where two events arrive so close together that the processing order is effectively random, and one order is wrong. Notoriously hard to find because the wrong order may be rare, and harmless in most places it occurs. Fixed by forcing the order (waits, locks, sequencing). *(First seen: 2026-07-31, when the tools lie.)*
+
+**reasoning from silence** — the failure of explaining a behaviour you
+have no record of. With a sparse log the mind supplies a plausible
+story, and a plausible story is indistinguishable from a true one until
+checked — four confident explanations of one stuck run were all wrong.
+The discipline: read the log, and if it can't answer, add the
+instrument, not a story. *(First seen: 2026-08-06, instrumenting for
+questions you can't predict.)*
 
 **registry (pattern)** — a lookup table mapping names to
 implementations, populated at startup: our step registry maps a run

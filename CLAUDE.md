@@ -54,6 +54,15 @@ in `docs/instruction-log.md` and appended one-line to
 
 Perception, navigation, the game cycle, and the behavior layer are done
 and live-verified.
+
+**When a run misbehaves, read the run event log first — do not reason
+from silence.** Every run writes `logs/runs/<stamp>-<runname>/events.jsonl`
+(always on, schema'd, append-only); read it with `python -m pd2bot.runlog`
+(add `--pickup` for the wanted-vs-collected census). The schema and every
+event kind are documented in `docs/architecture/run-log.md`. This method
+note has been paid for repeatedly: confident hypotheses about the
+Forgotten Tower were all wrong; the log answered it on the first run.
+ADR: `docs/adr/2026-08-05-run-event-log.md` (accepted).
 Input goes through guarded send paths with **no bypass**: world input
 via `pd2bot.input.GatedInput` (guard: `can_act()` AND foreground),
 menu input via `pd2bot.menuinput.MenuInput` (guard: the complement —

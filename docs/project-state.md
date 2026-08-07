@@ -66,8 +66,10 @@ counts), `step.decision` (every decision, not just noted ones),
 `action.*`, `item.*`, `stash.*`, `npc.*`, `waypoint.*`,
 `area.transition`, `combat.write_off`, `chicken`, `death`, `refusal`,
 `reflex`. Rules: never raises, never blocks, never interprets, honest
-absence. ADR: `docs/adr/2026-08-05-run-event-log.md` (**proposed** —
-T72 run 2 is the evidence for accepting it).
+absence. ADR: `docs/adr/2026-08-05-run-event-log.md` — **accepted**
+(2026-08-06). The plan is **closed and archived**
+(`docs/archive/plans/2026-08-05-run-event-log/`, `_DONE.md`); `item.vanished`,
+`item.accidental` and enemy-death events were deferred, named there.
 
 ### 2. The phantom-hostile fix
 

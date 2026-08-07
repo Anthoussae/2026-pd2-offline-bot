@@ -1,8 +1,15 @@
 # The run event log: always-on, schema'd, append-only
 
 Date: 2026-08-05 (M6 P4 → the run-event-log plan)
-Status: **proposed** — accepted once P5 proves the log can answer a
-question the old instrumentation could not.
+Status: **accepted** (2026-08-06, plan closeout) — the acceptance
+condition is met many times over. The log answered questions the old
+instrumentation could not: the Forgotten Tower crossing (T72, the
+4.3 s-vs-173 s fix rode the decision records), the phantom-hostile
+diagnosis (the tick hostile counts), and the pickup census ("which
+wanted items did we fail to get, and why" — `runlog --pickup`, correlating
+`action.pickup_attempt` against `item.collected`, which no prior
+instrument could answer). Every diagnosis this cycle started with the
+log; the "reason from silence" failures it replaced do not recur.
 
 ## Context
 
