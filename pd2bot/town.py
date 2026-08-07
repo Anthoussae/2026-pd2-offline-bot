@@ -2031,15 +2031,19 @@ class TownLayer:
         kept: list[tuple[object, str]] = []
         for item in carried:
             if not item.is_movable:
-                # Name the actual member: the set holds the Cube AND the
-                # tomes now, and "unmovable (the Cube)" printed against a
-                # tome reads like a bug in the report (T70 run 3 did
-                # exactly that, three times in one preamble).
+                # Name the actual member: the unmovable set now holds the
+                # Cube, the tomes, the SCROLLS and dungeon MAPS (the item-
+                # exception registry, P5), so "unmovable (the Cube)" printed
+                # against a tome reads like a bug in the report (T70 run 3
+                # did exactly that, three times in one preamble). The reason
+                # comes from the registry, so each names itself.
                 kept.append(
                     (item, f"unmovable ({offsets.unmovable_reason(item.kind)})")
                 )
             elif item.kind in offsets.RIGHT_CLICK_HAZARD_KINDS:
-                kept.append((item, "right-click hazard (potion/tome)"))
+                # Only POTIONS reach here now: everything else with a
+                # harmful right-click is also unmovable and caught above.
+                kept.append((item, "right-click hazard (potion)"))
             elif item.unit_id in protected:
                 # The likeliest reason junk survives, and it was invisible.
                 # The baseline is captured the first time the cleanse runs

@@ -142,3 +142,25 @@ The registry exists with both sets derived from it; scrolls 544/545 are
 members; maps are members or explicitly recorded as unnamed pending T77;
 the Cube's policy status survives; every member has a test pinning its
 reason; docs updated.
+
+## Implementation result (2026-08-06)
+
+DONE. `offsets.py` now has `ItemException` (reason / no_transfer /
+no_drop / policy) and `ITEM_EXCEPTIONS` keyed by kind; `UNMOVABLE_KINDS`
+and `RIGHT_CLICK_HAZARD_KINDS` are **derived** from it, reproducing the
+shipped sets exactly (verified: cube+tomes unchanged, cube stays out of
+the hazard set) plus the new members. Added: **scrolls 544/545** (`tsc`,
+`isc` — the gap the old comment named), and **dungeon maps** resolved
+from `config/item_codes.toml` by the `t<dd>` code pattern (31 kinds:
+the 30-strong family T77 verified, plus the uncoded 810 it saw on the
+floor) — resolved by pattern not hardcoded (R144), behind a guarded read
+that falls back to *unprotected* rather than breaking import. The Cube's
+R172 policy status is now `policy=True` data, not a comment. `town.py`'s
+cleanse label corrected (only potions reach the hazard branch now).
+`tests/test_item_exceptions.py` pins every member by its reason. 1044
+tests, ruff clean.
+
+**Deviation:** no separate `behavior.md`/`perception.md` section — the
+registry is self-documenting (the `ItemException` docstring and
+per-member reasons), and item-handling policy has no other dedicated
+doc home. The code is the doc.

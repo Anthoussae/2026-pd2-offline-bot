@@ -16,6 +16,11 @@ Do not put a magic offset anywhere else in this codebase. Values marked
 "verified live" were confirmed against the running client during M1/M2.
 """
 
+import re
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+
 # --- module-relative pointers (add to D2Client.dll's runtime base) ----------
 
 # D2Ptrs.h:235  VARPTR(D2CLIENT, PlayerUnit, UnitAny*, 0x11BBFC, 0x11D050)
@@ -690,29 +695,6 @@ BH_LABEL_DISPLAY = 0x14D2CA
 TOME_OF_TOWN_PORTAL = 533
 TOME_OF_IDENTIFY = 534
 
-# Items whose RIGHT-CLICK does something instead of nothing, and which the
-# inventory cleanse must therefore never point its drop gesture at.
-#
-# The cleanse drops with ctrl+right-click. That gesture is only safe while
-# the modifier actually lands — and in stage B run 4 the bot opened a town
-# portal, which is precisely what an unmodified right-click on tome 533
-# does. Potions were already excluded (an unmodified right-click drinks
-# one, the hazard behind R131), and tomes belong in the same category for
-# the same reason: 533 opens a portal, 534 arms the identify cursor, and an
-# armed identify cursor turns every later click into an identify.
-#
-# Exclusion beats detection here. A portal opens in the WORLD, not in a
-# panel, so no UI read would catch it after the fact — and the identify
-# cursor is not a cursor ITEM either. Never aiming at them is the only
-# guardrail that works.
-#
-# Individual TP/ID scrolls belong here too and are not in the vocabulary
-# yet; they get added the moment a drill reads one.
-RIGHT_CLICK_HAZARD_KINDS = frozenset(POTION_KINDS) | {
-    TOME_OF_TOWN_PORTAL,
-    TOME_OF_IDENTIFY,
-}
-
 # Gold's kind. kolbot's sdk said 523, and this carried that value with a
 # note that it was unverified. It was WRONG: the live code table (T42) says
 # kind 523 is `elx`, an elixir, and gold is 538 (`gld`). Settled from data
@@ -720,59 +702,133 @@ RIGHT_CLICK_HAZARD_KINDS = frozenset(POTION_KINDS) | {
 # the P6 checklist had been waiting for (R144).
 GOLD_KIND = 538
 
-# The Horadric Cube. Right-clicking it OPENS it, so the shift+right-click
-# that transfers every other item does something else entirely here — T13
-# shift-right-clicked the cube twice, nothing moved, and the full-stash
-# guardrail halted (user diagnosis, R67). Identified live: the single
-# kind-564 item in the character's inventory.
+# --- The item-exception registry: everything whose right-click bites --------
 #
-# Anything that cannot survive a shift+right-click belongs in the set
-# below, and the town layer skips those items rather than trusting a
-# caller's keep-predicate to remember. Quest items are the obvious future
-# members; add them as they are met, with the reason.
+# Some items DO something when right-clicked — a tome arms a cursor or opens
+# a portal, the Cube opens, a scroll is consumed, a map opens its dungeon.
+# The bot handles inventory with two MODIFIED right-clicks: the cleanse
+# DROPS junk (ctrl+right-click) and the stash deposit TRANSFERS keepers
+# (shift+right-click). Either modifier can slip (R112/R113 and T70 run 2:
+# the same Tome of Identify used instead of moved, fifteen days apart, even
+# with the modifier settle in place) — and a slipped modifier fires the
+# bare right-click, whose side effect outlives the click and poisons
+# everything after it. A portal opens in the WORLD and an armed identify
+# cursor is not a cursor ITEM, so no UI read catches it afterwards: never
+# aiming the gesture at these items is the only guardrail that works.
 #
-# The Cube's membership is also POLICY, not just mechanics (user, R172):
-# the Horadric Cube is always protected — by the cleanse, the stash
-# deposit, everything — whatever else changes about item handling. If a
-# future change ever makes the cube movable again, it still must not be
-# droppable or depositable without a fresh user decision.
-CUBE_KIND = 564
-# The TOMES join it, and the reason is the same one the paragraph above
-# invited ("add them as they are met, with the reason") — met twice now,
-# on the same item, fifteen days apart:
-#
-#   R112/R113 (2026-07-31): a Tome of Identify would not stash. The user
-#     watched it happen: the right-click USED the tome instead of moving
-#     it, the identify cursor then ate every retry, and the loop reported
-#     a full stash. Fixed as a same-frame modifier RACE (_MODIFIER_SETTLE_S).
-#   T70 run 2 (2026-08-05): the identical failure, on the identical item,
-#     with the settle in place. A settle makes the race rare; rare is not
-#     never, and 400+ deposits later one attempt lost it again.
-#
-# So the settle was the right fix for the wrong layer. A tome's plain
-# right-click ARMS A CURSOR (identify) or OPENS A PORTAL (town portal) —
-# side effects that outlive the click and poison everything after it —
-# which is exactly the Cube's property, not a potion's. The Cube is not
-# right-clicked at all, and neither are these. Both tomes are useful
-# items worth keeping in the inventory anyway (2 slots), so nothing is
-# lost by never transferring them.
+# So this is ONE registry keyed by kind, recording what the right-click
+# does and therefore which gesture is unsafe, and the two sets the rest of
+# the code reads are DERIVED from it (P5 of the pickup-reliability plan).
+# Adding a member is one line here, not a hunt across two frozensets.
+
+CUBE_KIND = 564  # the single kind-564 item; right-click OPENS it (T13/R67)
 TOME_OF_IDENTIFY_KIND = 534  # R112 + T38 (72 charges)
 TOME_OF_TOWN_PORTAL_KIND = 533  # T38 (64 charges)
-UNMOVABLE_KINDS = frozenset(
-    {CUBE_KIND, TOME_OF_IDENTIFY_KIND, TOME_OF_TOWN_PORTAL_KIND}
-)
-_UNMOVABLE_REASONS = {
-    CUBE_KIND: "the Horadric Cube — right-click opens it",
-    TOME_OF_IDENTIFY_KIND: "a Tome of Identify — right-click arms the "
-    "identify cursor",
-    TOME_OF_TOWN_PORTAL_KIND: "a Tome of Town Portal — right-click opens "
-    "a portal",
+# The scrolls the old RIGHT_CLICK_HAZARD comment promised "the moment a
+# drill reads one" — their codes were in the T42 table the whole time. A
+# loose Scroll of Identify is WORSE than the tome: it is junk, so the
+# cleanse actually aims its ctrl+right-click at one, and a slipped modifier
+# arms the identify cursor. (R112 with a cheaper item and no reason to keep.)
+SCROLL_OF_TOWN_PORTAL_KIND = 544  # `tsc` (T42 code table)
+SCROLL_OF_IDENTIFY_KIND = 545  # `isc` (T42 code table)
+
+
+@dataclass(frozen=True)
+class ItemException:
+    """What an item's bare right-click does, and which gestures it forbids."""
+
+    reason: str          # operator-facing, e.g. "right-click opens a portal"
+    no_transfer: bool    # shift+right-click unsafe -> stash deposit skips it
+    no_drop: bool        # ctrl+right-click unsafe -> the cleanse never drops it
+    # Protected by DECISION, not only mechanics (the Cube, R172): even if a
+    # future change made it movable, it must not become droppable/depositable
+    # without a fresh user decision. Kept as data so a refactor cannot lose it.
+    policy: bool = False
+
+
+# Dungeon MAPS (PD2). T77 (2026-08-06) read ten off the floor and the code
+# table shows the whole family shares the `t<dd>` form (30 kinds, 737-788,
+# no non-map collision). Resolved from `config/item_codes.toml` by that
+# pattern rather than hardcoded — R144 (kinds renumber per season; the code
+# does not) — with kind 810 added explicitly because T77 saw it on the floor
+# yet it is absent from the (T42-generated) code table. A map's right-click
+# OPENS its dungeon, so both gestures are unsafe.
+_MAP_CODE_RE = re.compile(r"^t\d\d$")
+MAP_KIND_UNCODED = 810  # observed by T77; predates the current code table
+
+
+def _load_map_kinds() -> frozenset[int]:
+    """Map kinds resolved from the live code table by the `t<dd>` pattern.
+
+    Reads `config/item_codes.toml` directly (stdlib only, no import cycle);
+    any failure yields the empty set, so a missing/renamed table leaves maps
+    UNPROTECTED rather than breaking every import of this module. Regenerate
+    the table with the T42 drill after a season patch.
+    """
+    try:
+        path = Path(__file__).resolve().parent.parent / "config" / "item_codes.toml"
+        with open(path, "rb") as fh:
+            codes = tomllib.load(fh).get("codes", {})
+        return frozenset(
+            int(kind) for kind, code in codes.items() if _MAP_CODE_RE.match(code)
+        )
+    except Exception:  # noqa: BLE001 - never break import over a config read
+        return frozenset()
+
+
+MAP_KINDS: frozenset[int] = _load_map_kinds() | {MAP_KIND_UNCODED}
+
+# The registry. Cube + tomes reproduce today's exact membership (the Cube is
+# no_transfer only — the cleanse's `is_movable` check catches it before the
+# drop path, so leaving no_drop False keeps the derived hazard set identical
+# to what shipped); scrolls and maps are the new members.
+ITEM_EXCEPTIONS: dict[int, ItemException] = {
+    CUBE_KIND: ItemException(
+        "the Horadric Cube — right-click opens it",
+        no_transfer=True, no_drop=False, policy=True,
+    ),
+    TOME_OF_TOWN_PORTAL_KIND: ItemException(
+        "a Tome of Town Portal — right-click opens a portal",
+        no_transfer=True, no_drop=True,
+    ),
+    TOME_OF_IDENTIFY_KIND: ItemException(
+        "a Tome of Identify — right-click arms the identify cursor",
+        no_transfer=True, no_drop=True,
+    ),
+    SCROLL_OF_TOWN_PORTAL_KIND: ItemException(
+        "a Scroll of Town Portal — right-click opens a portal",
+        no_transfer=True, no_drop=True,
+    ),
+    SCROLL_OF_IDENTIFY_KIND: ItemException(
+        "a Scroll of Identify — right-click arms the identify cursor",
+        no_transfer=True, no_drop=True,
+    ),
+    **{
+        kind: ItemException(
+            "a dungeon Map — right-click opens its dungeon",
+            no_transfer=True, no_drop=True,
+        )
+        for kind in MAP_KINDS
+    },
 }
+
+# The two sets the rest of the code reads, DERIVED so no call site changed.
+# `UNMOVABLE_KINDS`: never shift+right-clicked (the stash deposit skips them,
+# and `items.CarriedItem.is_movable` reads this). `RIGHT_CLICK_HAZARD_KINDS`:
+# never ctrl+right-clicked — POTION_KINDS (a bare right-click drinks one,
+# R131) plus every no_drop exception.
+UNMOVABLE_KINDS = frozenset(
+    kind for kind, exc in ITEM_EXCEPTIONS.items() if exc.no_transfer
+)
+RIGHT_CLICK_HAZARD_KINDS = frozenset(POTION_KINDS) | frozenset(
+    kind for kind, exc in ITEM_EXCEPTIONS.items() if exc.no_drop
+)
 
 
 def unmovable_reason(kind: int) -> str:
     """Why this kind is never transferred, for operator-facing reports."""
-    return _UNMOVABLE_REASONS.get(kind, f"kind {kind}")
+    exc = ITEM_EXCEPTIONS.get(kind)
+    return exc.reason if exc is not None else f"kind {kind}"
 
 # --- Town NPCs and objects (Act 1, M5) --------------------------------------
 #
