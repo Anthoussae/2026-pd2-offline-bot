@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from drills.t76_pickup_calibration import (  # noqa: E402
+    arrangement_of,
     attribute,
     classify,
     compare_offsets,
@@ -114,6 +115,16 @@ def test_two_classes_measured_both_ways_is_enough():
     ]
     ok, why = sufficient(results)
     assert ok and "2 class(es)" in why
+
+
+def test_the_arrangement_is_measured_from_the_floor_not_asked_for():
+    """Run 1's staging failure: the drill demanded exact counts, the
+    census disagreed with the operator, and BOTH crowded rounds were
+    skipped. Crowding is a property of the floor, so measure it."""
+    assert arrangement_of(0) == "solo"
+    assert arrangement_of(1) == "pair"
+    assert arrangement_of(2) == "pile"
+    assert arrangement_of(7) == "pile"
 
 
 def test_one_class_measured_both_ways_is_not_enough():

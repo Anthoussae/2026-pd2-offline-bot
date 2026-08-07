@@ -74,7 +74,12 @@ from pd2bot.units import (  # noqa: E402
 
 GO_WORDS = frozenset({"go", "go!"})
 DONE_WORDS = frozenset({"done", "stop", "finish", "finished"})
-NEAR_SUBTILES = 15
+# Run 1 (2026-08-06) staged items the census could not see and reported
+# "saw 1" with no way to tell whether that meant "not dropped" or "out of
+# range". 15 was borrowed from T63, where the operator dropped at their
+# feet; here they walk between rounds. Widened, and everything just
+# outside is now REPORTED rather than silently excluded.
+NEAR_SUBTILES = 40
 CLICK_PACE_S = 1.2
 ARRIVAL_WAIT_S = 0.9
 # How close two items must be to count as crowding each other. Matches
@@ -82,12 +87,26 @@ ARRIVAL_WAIT_S = 0.9
 # arrangements and the live measurement speak the same units.
 CROWD_SUBTILES = 2
 
-# The arrangements, in order. Each is (name, how many items, what to say).
-ARRANGEMENTS = (
-    ("solo", 1, "ONE item on clear ground, nothing else within ~5 steps"),
-    ("pair", 2, f"TWO items within {CROWD_SUBTILES} subtiles of each other"),
-    ("pile", 4, f"FOUR OR MORE items packed within {CROWD_SUBTILES} subtiles"),
+# Two staging rounds, not three arrangements with exact counts.
+#
+# Run 1 demanded "drop exactly 2" / "drop exactly 4" and skipped both
+# rounds when the census disagreed with the operator. The arrangement is
+# not something the operator should have to hit precisely — it is a
+# property of the floor, which the drill can MEASURE. So: two loose
+# rounds, and every target is labelled by its own live crowding.
+STAGING = (
+    ("spread", "several items SPREAD OUT — a step or two between each"),
+    ("packed", "several items PACKED TOGETHER — dropped on the same spot"),
 )
+
+
+def arrangement_of(crowd: int) -> str:
+    """Label a target by what the floor actually looks like around it."""
+    if crowd == 0:
+        return "solo"
+    if crowd == 1:
+        return "pair"
+    return "pile"
 
 
 # -- pure helpers (unit-tested; no game required) --------------------------------
@@ -321,12 +340,28 @@ def _click_schedule(
         run.check_cancel()
         before = _floor(run)
         if target_id not in before:
-            break  # already gone (a neighbour's click took it)
+            # Run 1's silent exit. If the target vanished before we aimed
+            # at it, SAY so — it is either a neighbour's click having
+            # taken it (data) or the census losing sight of it (a defect),
+            # and those must never look alike again.
+            print(f"    ({dx:>3}, {dy:>3}): target {target_id} no longer on "
+                  "the floor — stopping this target", flush=True)
+            trail.append({"offset": [dx, dy], "result": "target vanished"})
+            break
         try:
             base = gated.project_world(*position)
             gated.click_screen(base[0] + dx, base[1] + dy)
         except InputRefused as exc:
+            # THE silent branch of run 1: eight refusals in a row produced
+            # a target that "never came up" and not one line saying why.
+            print(f"    ({dx:>3}, {dy:>3}): REFUSED — {exc}", flush=True)
             trail.append({"offset": [dx, dy], "result": f"refused: {exc}"})
+            run.sleep(CLICK_PACE_S)
+            continue
+        except Exception as exc:  # noqa: BLE001 - a probe explains itself
+            print(f"    ({dx:>3}, {dy:>3}): ERROR — "
+                  f"{type(exc).__name__}: {exc}", flush=True)
+            trail.append({"offset": [dx, dy], "result": f"error: {exc}"})
             continue
         waited = time.monotonic()
         outcome, who = "nothing", None
@@ -351,19 +386,18 @@ def make_drill() -> tuple[Drill, object]:
         kind="hybrid",
         sends_input=True,
         instructions=(
-            "THREE ARRANGEMENTS, staged by you, in a SAFE spot (town is",
-            "fine). For each one I will say what to drop; drop it, then",
-            "type GO and hands off.",
-            "  1. solo — ONE item on clear ground",
-            "  2. pair — TWO items within 2 subtiles of each other",
-            "  3. pile — FOUR OR MORE items packed together",
-            "Vary the CLASS between rounds if you can (potions, then a",
-            "rune or a gem or a charm) — the class question is half of",
-            "what this measures.",
-            "I click a schedule of offsets around each item and record",
-            "which one works and WHAT came up. Type 'done' any time to",
-            "finish early. ENDS ON ITS OWN. Abort: 'abort', drill-cancel,",
-            "ESC, or take the mouse.",
+            "TWO ROUNDS, staged by you, standing STILL in a safe spot",
+            "(town is fine — stay put so the item census can see them).",
+            "  ROUND 1 'spread': drop several items a step or two apart.",
+            "  ROUND 2 'packed': drop several ON THE SAME SPOT.",
+            "Exact counts do not matter — I measure how crowded each item",
+            "actually is. What DOES matter is variety: include potions",
+            "AND at least one small item (rune, gem or charm) in each",
+            "round, because the item-class question is half of this.",
+            "After each drop, type GO and hands off. I click a schedule",
+            "of offsets around each item and record which one works and",
+            "WHICH item came up. Type 'done' to finish early.",
+            "ENDS ON ITS OWN. Abort: 'abort', drill-cancel, ESC, mouse.",
         ),
     )
 
@@ -380,47 +414,83 @@ def make_drill() -> tuple[Drill, object]:
 
         results: list[dict] = []
         skipped: list[str] = []
-        for name, wanted, description in ARRANGEMENTS:
+        for name, description in STAGING:
             before = set(_floor(run))
-            run.say(f"ARRANGEMENT '{name}': drop {description}, then type GO.")
+            run.say(f"ROUND '{name}': drop {description}, then type GO.")
             if _await_word(run, GO_WORDS) != "heard":
                 skipped.append(f"{name} (no GO — stopped early or timed out)")
                 break
-            fresh = {
-                uid: info for uid, info in _floor(run).items() if uid not in before
-            }
-            if len(fresh) < wanted:
-                # Said out loud, never silently: a skipped arrangement
-                # changes what the run is allowed to conclude.
-                message = f"{name} (needed {wanted} items, saw {len(fresh)})"
+            floor = _floor(run)
+            fresh = {uid: info for uid, info in floor.items() if uid not in before}
+            # The census, printed. Run 1 said "saw 1" and left no way to
+            # tell "not dropped" from "out of the census radius".
+            print(f"\n--- round '{name}' ---", flush=True)
+            print(f"  player at {_origin(run)}; census radius {NEAR_SUBTILES}",
+                  flush=True)
+            print(f"  floor: {len(floor)} item(s), {len(fresh)} new this round",
+                  flush=True)
+            for uid, (kind, position) in floor.items():
+                mark = "NEW" if uid in fresh else "   "
+                print(f"    {mark} {uid} kind {kind} "
+                      f"({classify(kind, codes_by_kind)}) at {position}",
+                      flush=True)
+            if not fresh:
+                message = f"{name} (GO heard but no new items in the census)"
                 skipped.append(message)
                 run.say(f"SKIPPING {message}")
                 continue
 
-            positions = [pos for _, pos in fresh.values()]
-            print(f"\n--- arrangement '{name}': {len(fresh)} item(s) ---", flush=True)
+            # Every item on the floor crowds every other, not just the
+            # ones dropped this round — crowding is a property of the
+            # floor, and the leftovers from an earlier round are part of
+            # it. This is also what makes exact counts unnecessary.
+            everything = [pos for _, pos in floor.values()]
             for target_id, (kind, position) in list(fresh.items()):
                 if target_id not in _floor(run):
+                    print(f"  target {target_id} left the floor before we "
+                          "aimed at it — skipping", flush=True)
                     continue
-                others = [p for p in positions if p != position]
+                others = [p for p in everything if p != position]
+                crowd = crowding(position, others)
                 item_class = classify(kind, codes_by_kind)
                 print(
                     f"  target {target_id} kind {kind} ({item_class}) at "
-                    f"{position}, crowded by {crowding(position, others)}",
+                    f"{position}, crowded by {crowd} "
+                    f"-> arrangement '{arrangement_of(crowd)}'",
                     flush=True,
                 )
                 winner, trail = _click_schedule(run, gated, target_id, position)
+                print(f"    => winner {winner}, {len(trail)} attempt(s)",
+                      flush=True)
                 results.append({
-                    "arrangement": name,
+                    "arrangement": arrangement_of(crowd),
+                    "staging": name,
                     "unit_id": target_id,
                     "kind": kind,
                     "item_class": item_class,
                     "position": list(position),
-                    "crowding": crowding(position, others),
+                    "crowding": crowd,
                     "winning_offset": list(winner) if winner else None,
                     "clicks": len(trail),
                     "trail": trail,
                 })
+
+        # Round 0 was designed to run first and found an empty floor
+        # (run 1). It needs items to look at, so it runs HERE too, on
+        # whatever is still lying around.
+        print("\n--- label geometry probe, re-run with items present ---",
+              flush=True)
+        for line in probe_label_geometry(run, gated):
+            print(line, flush=True)
+
+        print("\n=== EVERY ATTEMPT ===", flush=True)
+        for row in results:
+            print(
+                f"  {row['unit_id']} {row['item_class']} "
+                f"({row['arrangement']}, crowd {row['crowding']}): "
+                f"{[(t['offset'], t['result']) for t in row['trail']]}",
+                flush=True,
+            )
 
         print("\n=== WHAT THE OFFSETS DID ===", flush=True)
         for line in compare_offsets(results):
