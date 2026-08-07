@@ -9,8 +9,13 @@ same commit as the transition itself.
 - **Phase:** P4 — the countess run and the Cellar 5 endgame (P1, P2, P3
   DONE; plan: `docs/plans/2026-08-03-m6-countess/`). **Active side
   workstream: pickup reliability**, `docs/plans/2026-08-06-pickup-reliability/`
-  — approved R224, precedes the M6 P5 acceptance battery. P1 done; P2
-  (live calibration) written and **waiting on game time**.
+  — approved R224, precedes the M6 P5 acceptance battery. **P1–P5 DONE**
+  (offline): instruments, T76/T77 calibration, the item-exception
+  registry (scrolls + maps), honest failure diagnosis (a pile miss no
+  longer suppresses all loot), draw-order collection. Only **P6**
+  remains — a live remeasure vs the 18/31 baseline. The click path is
+  accepted as erratic; the frame-perfect command path was ruled out (no
+  memory writes / injection, operator 2026-08-06).
 - **Next request ID:** R228 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
