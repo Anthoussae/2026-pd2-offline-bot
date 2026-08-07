@@ -131,7 +131,17 @@ it earns its risk — the conceptual bleed the operator named (lift
 failure mis-read as inventory-full) is dissolved by P4's command path
 anyway, since a GID command cannot miss.
 
-`drills/t78_acquire.py` written and unit-tested (`test_t78_acquire.py`),
-**not launched** — it acquires junk with no pickit on the path and
-reports per-item lift latency through the same `Actuator` seam, and is
-the harness P4's spike reuses. Awaiting game time with the others.
+`drills/t78_acquire.py` written and unit-tested (`test_t78_acquire.py`);
+it acquires junk with no pickit on the path and reports per-item lift
+latency through the same `Actuator` seam, and is the harness P4's spike
+reuses.
+
+**T78 run 1, 2026-08-06 21:28 — PASS, live.** 4/4 junk items lifted with
+no pickit on the path (kinds 131, 329, 211, 253 — the seam is real), in
+a tight cluster (all within (5868-5870, 5734-5735)). The live gate is
+closed: the refactored `collect` picks through the `Actuator` exactly as
+before. **A bonus measurement for P2**: three of the four came up in
+**0.02-0.12 s** of the click landing, against the 1.5 s the real run
+currently waits between attempts (`pickup_retry_s`) — direct evidence
+the tight confirm-poll is the speed win P2 predicts. (Caveat: only 4
+items, town, one run; not a substitute for P2's own measured window.)

@@ -22,10 +22,12 @@ same commit as the transition itself.
 **BRANCH:** `item-acquisition-spike` (off `m6-countess`) is the active
 working branch for the item-acquisition plan
 (`docs/plans/2026-08-06-item-acquisition/`). P1 landed there
-(2026-08-06, no game): the acquisition mechanism seam —
-`pd2bot/acquire.py` (`Actuator`/`ClickActuator`), `RunServices.actuator`,
-`collect` routes through it, 1043 tests green. No new *capability* yet
-(P1–P3 carry none); the risky memory-write path is P4.
+(2026-08-06): the acquisition mechanism seam — `pd2bot/acquire.py`
+(`Actuator`/`ClickActuator`), `RunServices.actuator`, `collect` routes
+through it, 1043 tests green, and **T78 PASS live** (4/4 junk lifted, no
+pickit on the path; confirm latencies 0.02-0.12 s vs the 1.5 s the run
+waits — a P2 speed signal). No new *capability* yet (P1–P3 carry none);
+the risky memory-write path is P4.
 
 **REWIND ANCHOR:** the operator's verbal *"rewind to last stable
 version"* means: `git checkout m6-countess` (tag
