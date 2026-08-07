@@ -11,13 +11,14 @@ same commit as the transition itself.
   workstream: pickup reliability**, `docs/plans/2026-08-06-pickup-reliability/`
   — approved R224, precedes the M6 P5 acceptance battery. P1 done; P2
   (live calibration) written and **waiting on game time**.
-- **Next request ID:** R224 (overall counter; R171 was never issued — a
+- **Next request ID:** R227 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
-- **Next test ID:** T77 (T75 unused; **T76 is written and unlaunched** —
-  the pickup calibration. T71 has now run 4 times; the harness counts
-  every row with the id; T72/T73/T74 twice each; check
-  `docs/drill-log.md`)
+- **Next test ID:** T78 (T75 unused; **T76 run 1 FAILED** — the drill's
+  own defects, fixed, awaiting re-run R225; **T77 written and
+  unlaunched** — the read-only PD2 map identity probe, R226. T71 has run
+  4 times; the harness counts every row with the id; T72/T73/T74 twice
+  each; check `docs/drill-log.md`)
 
 Updated: 2026-08-06. Branch `m6-countess`, pushed, **PR #2 open**
 (`https://github.com/Anthoussae/2026-pd2-offline-bot/pull/2`). 1000

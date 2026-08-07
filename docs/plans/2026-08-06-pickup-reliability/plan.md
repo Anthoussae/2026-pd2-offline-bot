@@ -45,7 +45,10 @@ failure is too high for the working bot."*
 **In**: the click aim schedule and how it is chosen; collect ordering
 and stand-off geometry; the click-budget write-off path and its
 diagnosis; pickup instrumentation end to end; the P2 calibration drill;
-a re-measurement run.
+a re-measurement run; **the item-exception registry** (P5, folded in
+2026-08-06) — scrolls of identify/town portal, PD2 maps and quest items
+grouped with the Cube and the tomes, because all of them share one
+property: a bare right-click does something that outlives the click.
 
 **Out**:
 - Speed tuning of the descent (M6 scopes it out; evidence banked in
@@ -126,11 +129,15 @@ run compared against the 18/31 baseline using the P1 report.
 | [P2](02-calibration-drill.md) | sm | The calibration: staged piles × item classes; does the hit offset shift with neighbours; probe for readable label geometry | **Yes** | **End of phase — the answer picks P3's fix** |
 | [P3](03-the-aim-fix.md) | sm | Implement the fix P2 selected | Maybe | None |
 | [P4](04-closed-loop-pickup.md) | sm | Verification and honest failure; unconflate belt-full from click-missed | No | None |
-| [P5](05-remeasure-and-closeout.md) | sm | Re-measure on a real run vs the baseline; docs, teach, cleanup | **Yes** | None |
+| [P5](05-item-exception-registry.md) | sm | The item-exception registry: scrolls, maps, quest items; one grouping in place of two overlapping sets | T77 only | None |
+| [P6](06-remeasure-and-closeout.md) | sm | Re-measure on a real run vs the baseline; docs, teach, cleanup | **Yes** | None |
 
 P1 and the *authoring* of P2's drill need no game and run immediately.
 P3 needs P2. P4 is largely independent of P2 and can be pulled forward
-if the operator's game time is delayed. P5 last.
+if the operator's game time is delayed. **P5 is independent of all of
+them** — folded in at the operator's request (2026-08-06) because it is
+the same failure family: an item whose click does something we did not
+ask for. P6 last.
 
 ## Operating constraint (operator, 2026-08-06)
 

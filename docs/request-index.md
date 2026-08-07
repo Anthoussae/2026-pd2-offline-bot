@@ -246,3 +246,5 @@ headings, noted in parentheses, say roughly where they fell).
 - M6 P4 R222 [execute] Second census with real monsters (T73 run 2) · 2026-08-06 01:52
 - M6 P4 R223 [verify] Launch the first live Countess run (T71 run 3) + judge the staging approach · 2026-08-06 02:51
 - M6 P4 R224 [decision] Approve the pickup-reliability plan: phase table + measure-first gate · 2026-08-06 05:21
+- M6 P4 R225 [decision] Re-run T76 after the drill's own defects were fixed · 2026-08-06 19:16
+- M6 P4 R226 [execute] Drop ten different PD2 maps for T77 to read · 2026-08-06 19:16
