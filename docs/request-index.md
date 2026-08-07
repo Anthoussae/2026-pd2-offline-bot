@@ -249,3 +249,4 @@ headings, noted in parentheses, say roughly where they fell).
 - M6 P4 R225 [decision] Re-run T76 after the drill's own defects were fixed · 2026-08-06 19:16
 - M6 P4 R226 [execute] Drop ten different PD2 maps for T77 to read · 2026-08-06 19:16
 - M6 P4 R226 resolved (T77 PASS) · 2026-08-06 19:28
+- M6 P4 R227 [decision] Approve item-acquisition plan + command-by-GID spike (branch) · 2026-08-06 20:36

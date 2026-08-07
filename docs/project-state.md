@@ -11,7 +11,7 @@ same commit as the transition itself.
   workstream: pickup reliability**, `docs/plans/2026-08-06-pickup-reliability/`
   — approved R224, precedes the M6 P5 acceptance battery. P1 done; P2
   (live calibration) written and **waiting on game time**.
-- **Next request ID:** R227 (overall counter; R171 was never issued — a
+- **Next request ID:** R228 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
 - **Next test ID:** T78 (T75 unused; **T76 run 1 FAILED** — the drill's
