@@ -158,6 +158,52 @@ maintenance grows by a function address, not just a struct offset. So it
 is a **spike with a hard go/no-go**, isolated and supervised, before any
 run depends on it.
 
+## T76 run 3 (2026-08-06): label state may be the pile variable
+
+A charm re-run that nearly INVERTED run 2, and the standout difference is
+not the items — it is the **ALT label display**:
+
+| | run 2 | run 3 |
+|---|---|---|
+| label display (ALT) | **ON** | **OFF** |
+| pile (crowd 8-9) result | **7 of 8 FAILED** | **all lifted, ~1 attempt each** |
+
+In run 3, a genuine pile of nine (crowd 8) was swept almost perfectly at
+the leading offset `(0,-28)` — the exact case run 2 could not pick at
+all. The one variable that flipped is label state.
+
+**Hypothesis (a lead, not a conclusion):** the stacked *label boxes*,
+not the sprites, are what create the pile occlusion. Labels OFF → click
+the sprite at `(0,-28)` and it lands, even in a pile. Labels ON → the
+vertically-displaced label boxes overlap and a fixed offset hits the
+wrong one (run 2's "clicked A got B" at scale).
+
+**Why this matters for the real bot:** the executor **ensures labels ON**
+(so small classes can be label-clicked, T65). If labels-ON is what
+defeats piles, then that policy is plausibly a *contributor* to T71 run
+4's pile failures — the bot fights the Countess chamber in exactly the
+labels-ON, dense-floor regime run 2 measured as worst-case.
+
+**The tension it exposes:** T65 measured runes/gems/charms as
+near-unclickable by sprite (245 probes, 0 hits) — they *need* labels ON
+to be hit at their label band. So "labels OFF always" is not the answer;
+"labels OFF for a pile of normal items, ON for an isolated small item"
+might be. This is a P2 question with a clean experiment: same pile,
+toggle labels, measure.
+
+**Caveats, because the confound is real:** two runs, label state was NOT
+the controlled variable (items and positions also differed), town, small
+samples. And the **charms were never directly aimed at** — all three
+(cm1/cm2/cm3, kinds 618-620, now correctly classified) were
+neighbour-swept off the floor before the schedule reached them, so
+"can we deliberately pick a charm" is still unmeasured. The classifier
+fix is validated; the charm-aim question is not.
+
+**What it does NOT change:** the command-by-GID path (Track 2) sidesteps
+all of this — no labels, no offsets, no occlusion, no label-state
+regime. That the click path's behaviour swings this wildly with a UI
+toggle is itself an argument for the command path.
+
 ## The recommendation
 
 Both tracks, in this order, because they are not exclusive — Track 1 is
