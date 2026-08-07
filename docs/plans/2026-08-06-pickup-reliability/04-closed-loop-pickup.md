@@ -111,3 +111,27 @@ Attribution emitted and tested; the early bail in with a measured
 threshold or explicitly deferred to P3's data; the three diagnoses
 distinguished and pinned by tests; alerts name the suspect; docs
 updated.
+
+## Implementation result (2026-08-06)
+
+- **§1 Attribution** — already landed with P1 (`attributed_to` on
+  `item.collected`, surfaced by `runlog --pickup` as CLICKED-THE-NEIGHBOUR).
+- **§3 Unconflated diagnoses + §4 alerts** — DONE. The write-off reason
+  now names four causes (`_write_off_reason`), and — the real fix — a
+  non-potion miss with a neighbour in reach is **pile ambiguity**, not a
+  full inventory: it writes the one item off and keeps collecting,
+  instead of setting `inventory_full` and abandoning every other
+  non-potion item this game for a single missed rune in a pile. The
+  no-neighbour case is unchanged (conservative full-grid suppression,
+  honestly labelled "aim failure OR full inventory"). The belt-full vs
+  click-miss reasoning (T56) is untouched. Alerts name the suspect for
+  every class. Tests pin each reason and the pile-ambiguity behaviour.
+- **§2 Early bail — DEFERRED, deliberately.** T76/T79 measured the click
+  path as noise-dominated: collateral pickups land at *late* offsets
+  (T79 saw a neighbour taken at offset 7), so bailing after N attempts
+  would sacrifice real pickups for a marginal time saving. With the
+  aim-tuning direction (P3) de-scoped and command-by-GID abandoned, the
+  saving is not worth reintroducing the eagerness-bug risk (T70). The
+  budget stays at the full schedule; the write-off is already loud.
+
+1046 tests, ruff clean.

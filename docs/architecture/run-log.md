@@ -133,13 +133,22 @@ as "0 away".
 was silent until 2026-08-06, and its silence is why T71 run 4's thirteen
 misses — a Nef rune and a flawless emerald among them — could only be
 found by correlating `action.pickup_attempt` against `item.collected` by
-unit id in a throwaway script. Its `reason` mirrors the decision the
-step is making rather than second-guessing it: `clicks did not land`,
-`belt full for <type>`, or `inventory full (inferred from persistence)`.
+unit id in a throwaway script. Its `reason` names the diagnosis, as far
+as observation allows (P4), distinguishing four causes rather than
+blaming the inventory for all of them:
+- `clicks did not land (belt has room)` — a potion missed, belt not full;
+- `belt full for <type>` — a potion the belt genuinely cannot take;
+- `pile ambiguity — clicks likely landed on a neighbour (<n> near)` — a
+  non-potion with items packed around it; **not** a full inventory, and
+  it no longer suppresses other loot;
+- `aim failure for this item class, or a full inventory (unreadable)` —
+  a non-potion, nothing nearby, nothing moved; persistence cannot tell
+  the two apart, so the reason says both.
+
 `aim_points` is the slice of `actions.PICKUP_AIM_POINTS` actually spent,
 so "all 8 attempts failed" is a statement with contents. `neighbours`
-counts other ground items within 2 subtiles, because item density is the
-leading hypothesis for why these clicks miss.
+counts other ground items within 2 subtiles — the signal that separates
+pile ambiguity from a full inventory.
 
 `item.collected`'s **`attributed_to`** names the unit a click was aimed
 at when a *different* item came up — the "clicked A, got B" case. Nine

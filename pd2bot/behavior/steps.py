@@ -893,55 +893,64 @@ class _PickupMixin:
             position=mapframe.describe(item.position, frame=frame),
         )
 
+    def _neighbours_within(
+        self, snap: GameSnapshot, item: GroundItem, radius: int = 2
+    ) -> int:
+        """Other ground items within `radius` subtiles of `item`."""
+        return sum(
+            1
+            for other in snap.ground_items
+            if other.unit_id != item.unit_id
+            and _chebyshev(other.position, item.position) <= radius
+        )
+
+    def _write_off_reason(self, item, potion: str | None, near: int) -> str:
+        """The diagnosis for a spent click budget, given the neighbour count.
+
+        Four causes, distinguished as far as observation allows (P4). It
+        REPORTS the caller's decision; the belt-full/inventory-full
+        reasoning stays load-bearing (T56). Item sizes are unreadable
+        (P1), so "inventory full" is always an inference from persistence.
+        """
+        if potion is not None:
+            # A potion routes to the BELT: "won't come up" means belt-full
+            # ONLY while the belt count agrees (T56), else a click miss.
+            return (
+                "clicks did not land (belt has room)"
+                if self._belt_has_room(potion)
+                else f"belt full for {potion}"
+            )
+        if near > 0:
+            # A neighbour in reach: the clicks most likely landed on IT
+            # (T71 run 4: 9 of 13 misses had a collected neighbour that
+            # close). This is NOT the inventory being full.
+            return f"pile ambiguity — clicks likely landed on a neighbour ({near} near)"
+        # No neighbour, nothing moved: either the aim schedule cannot
+        # reach this item's class (T65's kind-619, 245 probes 0 hits) or
+        # the inventory is genuinely full. Persistence cannot tell them
+        # apart — say so rather than assert one.
+        return "aim failure for this item class, or a full inventory (unreadable)"
+
     def _log_click_write_off(
         self,
         snap: GameSnapshot,
         item: GroundItem,
         attempts: int,
         potion: str | None,
+        near: int,
     ) -> None:
-        """Say why the click budget was spent without the item coming up.
-
-        The reason MIRRORS the decision the caller is about to make —
-        this reports, it does not decide (P1's constraint: the
-        belt-full/inventory-full reasoning is load-bearing and was paid
-        for by T56's starvation loop).
-
-        `neighbours` rides along because the density correlation is the
-        leading hypothesis for why these clicks miss (T71 run 4: misses
-        averaged 1.6 items within 2 subtiles against 0.9 for successes,
-        and 9 of 13 had a COLLECTED neighbour that close). Carrying the
-        number means the next investigation reads it instead of
-        re-deriving it.
-        """
+        """Emit `item.abandoned` for a spent click budget, with the reason
+        and the neighbour count that produced it. Never raises."""
         log = getattr(self.services, "runlog", None)
         if log is None or not getattr(log, "enabled", False):
             return
-        if potion is not None:
-            reason = (
-                "clicks did not land"
-                if self._belt_has_room(potion)
-                else f"belt full for {potion}"
-            )
-        else:
-            # What the caller concludes, stated as the inference it is —
-            # item sizes are unreadable, so persistence is the only
-            # signal available and it cannot tell a full grid from a
-            # missed click. P4 of the pickup plan splits these.
-            reason = "inventory full (inferred from persistence)"
-        near = 0
-        for other in snap.ground_items:
-            if other.unit_id == item.unit_id:
-                continue
-            if _chebyshev(other.position, item.position) <= 2:
-                near += 1
         frame = self.services.frame() if self.services.frame else None
         log.event(
             "item.abandoned",
             unit_id=item.unit_id,
             item=self._logged_name(item.kind),
             item_kind=item.kind,
-            reason=reason,
+            reason=self._write_off_reason(item, potion, near),
             clicks=attempts,
             aim_points=[list(p) for p in PICKUP_AIM_POINTS[:attempts]],
             neighbours=near,
@@ -1082,42 +1091,25 @@ class _PickupMixin:
         if attempts >= self.services.pickup_click_attempts:
             self.services.stuck.add(item.unit_id)
             potion = potion_type_of(item)
-            # The click budget is spent. Whatever the diagnosis below
-            # concludes, SAY SO — until 2026-08-06 every branch here
-            # returned silently, and T71 run 4's eleven click-budget
-            # write-offs (a Nef rune and a flawless emerald among them)
-            # left no event at all. "Which wanted items did we fail to
-            # get" then needed unit-id correlation in a throwaway script.
-            self._log_click_write_off(snap, item, attempts, potion)
+            near = self._neighbours_within(snap, item)
+            # The click budget is spent. Whatever the diagnosis concludes,
+            # SAY SO — until 2026-08-06 every branch here returned silently,
+            # and T71 run 4's eleven click-budget write-offs (a Nef rune and
+            # a flawless emerald among them) left no event at all.
+            self._log_click_write_off(snap, item, attempts, potion, near)
             if potion is not None:
                 # A potion routes to the BELT, so a potion that will not come
                 # up says the belt is full for its type — NOT that the
-                # inventory grid is. Stage B run 4 conflated the two and
-                # reported "INVENTORY FULL" four times for three potions,
-                # while the inventory had room the whole time. Worse, it
-                # looped: marking full queued a cleanse, the cleanse cleared
-                # `inventory_full` and `stuck`, the same potion was retried,
-                # and it failed again for the same unchanged reason.
-                #
-                # But "would not come up" only MEANS belt-full while the
-                # belt count agrees (T56: three click misses in a dense
-                # pile were diagnosed as "belt full for healing" on a belt
-                # that was SHORT, and the type-level write-off then refused
-                # every later healing potion in a game that chickened on
-                # exactly that starvation). With room in the belt the
-                # failure is the CLICK's — the item is written off (the
-                # `stuck` add above), the type stays wanted.
-                #
-                # Recorded per TYPE, because that is the granularity the belt
-                # refuses at — same reasoning as `fill_belt`'s own `full` set.
+                # inventory grid is (Stage B run 4 conflated them and starved
+                # the belt). But "won't come up" only MEANS belt-full while
+                # the belt count agrees (T56); with room in the belt the
+                # failure is the CLICK's, and the type stays wanted.
                 if self._belt_has_room(potion):
                     self.services.alert(
-                        f"pickup: a {potion} potion at {item.position} "
-                        f"would not come up after "
-                        f"{self.services.pickup_click_attempts} attempts even "
-                        f"though the belt has room — click misses "
-                        f"suspected. Leaving that one; {potion} potions "
-                        "stay wanted."
+                        f"pickup: a {potion} potion at {item.position} would "
+                        f"not come up after {self.services.pickup_click_attempts} "
+                        "attempts even though the belt has room — click misses "
+                        f"suspected. Leaving that one; {potion} potions stay wanted."
                     )
                 elif potion not in self.services.belt_full:
                     self.services.belt_full.add(potion)
@@ -1129,17 +1121,34 @@ class _PickupMixin:
                         "inventory has nothing to do with it."
                     )
                 return False
-            # A non-potion that will not come up IS the inventory-full tell.
-            # The only observable cause we can distinguish is "the inventory
-            # has no room" — item sizes are unreadable (P1), so free-cell
-            # arithmetic is not available and persistence IS the signal.
+            if near > 0:
+                # PILE AMBIGUITY (P4): a neighbour in reach almost certainly
+                # ate the clicks, so this is NOT the inventory being full —
+                # and marking it full would abandon every OTHER non-potion
+                # item this game for a single missed rune in a pile. Write
+                # THIS item off and keep going; no cleanse (junk on the floor
+                # is not junk in the grid).
+                self.services.alert(
+                    f"pickup: item kind {item.kind} at {item.position} would "
+                    f"not come up after {self.services.pickup_click_attempts} "
+                    f"attempts with {near} item(s) packed within 2 subtiles — "
+                    "pile ambiguity, the clicks likely landed on a neighbour. "
+                    "Leaving that one; still collecting the rest."
+                )
+                return False
+            # No neighbour, nothing moved: aim failure for this item class OR
+            # a genuinely full inventory — persistence cannot tell them apart
+            # (item sizes are unreadable, P1). Keep the conservative
+            # inventory-full behaviour (suppress non-potion pickups, queue a
+            # cleanse), because a real full grid must not be ignored; the
+            # honest reason above records that it might instead be an aim
+            # failure for this class (T65's kind-619).
             self._mark_inventory_full(item)
             # A failed pickup is the tell for accidental-pickup junk taking
-            # up room (R117): ask for a cleanse at the next safe moment —
-            # unless this item already failed AFTER a cleanse-and-step-off
-            # retry. That retry differed in everything a cleanse can change
-            # (space freed, pile avoided), so another cleanse cannot help
-            # it, and re-queueing one is how the R173 loop span forever.
+            # up room (R117): cleanse at the next safe moment — unless this
+            # item already failed AFTER a cleanse-and-step-off retry, which
+            # differed in everything a cleanse can change, so re-queueing one
+            # is how the R173 loop span forever.
             if item.unit_id not in self.services.cleanse_retried:
                 self.services.cleanse_queued = True
             return False

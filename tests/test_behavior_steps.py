@@ -1973,7 +1973,7 @@ def test_a_spent_click_budget_says_why_and_what_it_tried(tmp_path):
     assert gave[0]["clicks"] == svc.pickup_click_attempts
     # The belt is empty, so this is NOT a belt-full case: the honest
     # diagnosis is that the clicks missed.
-    assert gave[0]["reason"] == "clicks did not land"
+    assert gave[0]["reason"] == "clicks did not land (belt has room)"
     assert len(gave[0]["aim_points"]) == svc.pickup_click_attempts
     assert gave[0]["aim_points"][0] == list(PICKUP_AIM_POINTS[0])
     assert gave[0]["position"]["world"] == [1001, 1000]
@@ -2020,6 +2020,54 @@ def test_a_belt_full_write_off_is_still_reported_as_belt_full(tmp_path):
 
     gave = _events(log, "item.abandoned")
     assert gave[0]["reason"] == "belt full for healing"
+
+
+def test_a_non_potion_miss_in_a_pile_is_ambiguity_not_a_full_inventory(tmp_path):
+    """P4's correctness fix: a rune that will not come up with items packed
+    around it is a pile-ambiguity miss (the clicks hit a neighbour), NOT
+    the inventory being full — and it must NOT suppress every OTHER
+    non-potion pickup this game, which is what marking inventory-full did."""
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    alerts = []
+    step, svc, here, executor, ctx = sweeping(clock, alerts=alerts)
+    svc.runlog = log
+    rune = GroundItem(unit_id=930, kind=702, position=(1001, 1000), quality=RARE)
+    crowd = [
+        rune,
+        GroundItem(unit_id=931, kind=702, position=(1002, 1000), quality=RARE),
+        GroundItem(unit_id=932, kind=702, position=(1001, 1001), quality=RARE),
+    ]
+    svc.attempts[930] = svc.pickup_click_attempts
+
+    step.collect(snap(pos=HOME, items=crowd), ctx, rune)
+
+    assert not svc.inventory_full, "a pile miss must not blame the inventory"
+    assert not svc.cleanse_queued, "a pile miss is not a space problem — no cleanse"
+    assert 930 in svc.stuck, "this item is still written off"
+    reason = _events(log, "item.abandoned")[0]["reason"]
+    assert "pile ambiguity" in reason
+    assert any("pile ambiguity" in a for a in alerts)
+
+
+def test_a_non_potion_miss_alone_still_marks_the_inventory_full(tmp_path):
+    """The no-neighbour case is unchanged: aim-failure-or-full-inventory is
+    indistinguishable from persistence, so the conservative suppression
+    stays (a real full grid must not be ignored)."""
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    alerts = []
+    step, svc, here, executor, ctx = sweeping(clock, alerts=alerts)
+    svc.runlog = log
+    solo = GroundItem(unit_id=940, kind=702, position=(1001, 1000), quality=RARE)
+    svc.attempts[940] = svc.pickup_click_attempts
+
+    step.collect(snap(pos=HOME, items=[solo]), ctx, solo)
+
+    assert svc.inventory_full, "no neighbour: keep the conservative full-grid behaviour"
+    assert svc.cleanse_queued
+    reason = _events(log, "item.abandoned")[0]["reason"]
+    assert "aim failure" in reason and "full inventory" in reason
 
 
 def test_a_pickup_that_lands_on_the_neighbour_says_so(tmp_path):
