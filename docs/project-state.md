@@ -14,11 +14,18 @@ same commit as the transition itself.
 - **Next request ID:** R228 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
-- **Next test ID:** T78 (T75 unused; **T76 run 1 FAILED** — the drill's
-  own defects, fixed, awaiting re-run R225; **T77 written and
-  unlaunched** — the read-only PD2 map identity probe, R226. T71 has run
-  4 times; the harness counts every row with the id; T72/T73/T74 twice
-  each; check `docs/drill-log.md`)
+- **Next test ID:** T79 (T75 unused; **T76 PASS run 2**; **T77 PASS**;
+  **T78 written and unlaunched** — the junk-acquisition seam drill.
+  T71 ran 4 times; the harness counts every row with the id;
+  T72/T73/T74 twice each; check `docs/drill-log.md`)
+
+**BRANCH:** `item-acquisition-spike` (off `m6-countess`) is the active
+working branch for the item-acquisition plan
+(`docs/plans/2026-08-06-item-acquisition/`). P1 landed there
+(2026-08-06, no game): the acquisition mechanism seam —
+`pd2bot/acquire.py` (`Actuator`/`ClickActuator`), `RunServices.actuator`,
+`collect` routes through it, 1043 tests green. No new *capability* yet
+(P1–P3 carry none); the risky memory-write path is P4.
 
 **REWIND ANCHOR:** the operator's verbal *"rewind to last stable
 version"* means: `git checkout m6-countess` (tag

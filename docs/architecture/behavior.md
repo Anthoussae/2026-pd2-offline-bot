@@ -139,6 +139,29 @@ provably off) so small classes — runes, gems, charms — can be clicked
 at their label band. Every send lands in a trace: when a live run does
 something surprising, the trace says which decision produced it.
 
+### The acquisition seam (item-acquisition plan, P1)
+
+Item pickup is two problems the operator asked to keep apart:
+**detection** — which items are on the floor and which the pickit wants
+(`_PickupMixin.wanted_items`, the sightings memo) — and **acquisition** —
+getting a *known* item off the ground (`_PickupMixin.collect`: reach,
+walk budget, retry pacing, belt/inventory diagnosis). Detection does not
+depend on acquisition.
+
+Within acquisition, the one thing that actually *causes* a pickup — the
+swappable mechanism — is `pd2bot/acquire.py::Actuator.actuate`.
+`ClickActuator` is today's synthetic-click mechanism (it emits the
+`PickUpItem` the executor turns into an aimed click); it is wired through
+`RunServices.actuator`, so `collect`'s budgets and diagnosis are
+mechanism-independent. This is the seam a **command-by-GID** actuator
+drops into (the plan's P4 spike): kolbot's fast pickup is a `PickupItem`
+command addressed by unit id with no screen aim at all — frame-perfect,
+because identity is the address and there is nothing to miss. When it
+lands, `ClickActuator` stays as the fallback, exactly as kolbot keeps a
+screen click behind its packet path. Drill `t78_acquire` exercises the
+seam with *junk* — no pickit on the path — which is the proof the two
+problems are genuinely separate.
+
 ## The reflex ladder, with rationale
 
 Priority-ordered; first firing rung wins the tick. Rungs 1–2 live in

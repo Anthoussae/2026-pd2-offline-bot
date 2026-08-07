@@ -30,11 +30,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from pd2bot import mapframe, offsets
+from pd2bot.acquire import Actuator, ClickActuator
 from pd2bot.behavior.actions import (
     PICKUP_AIM_POINTS,
     InteractObject,
     MoveTo,
-    PickUpItem,
 )
 from pd2bot.behavior.engine import EngineContext, StepOutcome
 from pd2bot.behavior.run import ParamSpec, StepRegistry, StepSpec
@@ -198,6 +198,13 @@ class RunServices:
     # every write-off means every measured aim point was actually tried.
     pickup_click_attempts: int = 8
     pickup_retry_s: float = 1.5  # between attempts on the same item
+    # The pickup MECHANISM (item-acquisition plan, P1). Detection decides
+    # what to collect; `collect` walks and paces and diagnoses; the one
+    # thing that actually causes a pickup — the swappable primitive — is
+    # this. `ClickActuator` is the current synthetic-click mechanism;
+    # a command-by-GID actuator (P4, spike branch) drops in here with the
+    # same `actuate` and nothing else in `collect` changes.
+    actuator: Actuator = field(default_factory=ClickActuator)
     alert: Callable[[str], None] = _default_alert
     # Where per-decision detail goes. Separate from `alert`, which is for
     # things a human must act on; this is the run's record.
@@ -1165,11 +1172,10 @@ class _PickupMixin:
         # What this click was AIMED at, so a pickup that lands on the
         # neighbour can say so (`confirm_pickups`). Pure telemetry.
         self.services.last_click = (item.unit_id, item.position, now)
-        ctx.executor.execute(
-            PickUpItem(
-                item.unit_id, item.position, attempt=attempts, kind=item.kind
-            )
-        )
+        # The one line the mechanism owns (item-acquisition P1): cause the
+        # pickup. `ClickActuator` executes a `PickUpItem` exactly as this
+        # did inline; a command-by-GID actuator swaps in here untouched.
+        self.services.actuator.actuate(ctx, item, attempts)
         return True
 
     def send(self, ctx: EngineContext, action) -> bool:

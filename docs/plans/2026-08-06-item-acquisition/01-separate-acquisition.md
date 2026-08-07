@@ -109,3 +109,29 @@ seam cannot be drawn without changing a call site's behaviour.
 
 `acquire.py` exists; `collect` delegates; every existing test green
 unchanged; the junk drill written and unit-tested; behavior.md updated.
+
+## Implementation result (2026-08-06, no game)
+
+Done to the live boundary. The seam drawn is the **mechanism** seam —
+`pd2bot/acquire.py` holds `AcquireOutcome`, the `Actuator` protocol, and
+`ClickActuator`; `RunServices.actuator` carries it; `collect`'s single
+inline `PickUpItem` execute became `self.services.actuator.actuate(...)`,
+byte-for-byte the same conduct. **All 1035 pre-existing tests stayed
+green with zero assertion changes** — the behaviour-preserving proof the
+gate asked for — and `test_acquire.py` proves a substitute actuator
+receives the same call (so P4 needs no `collect` change).
+
+Deliberately NOT done: physically relocating `collect` and its ~250
+lines of hard-won belt/inventory diagnosis into a separate class. That
+move is validate-by-unit-test-only and high-regression; the mechanism
+seam already gives P4 its insertion point and gives the operator the
+detection↔acquisition split named in code and docs. The
+detection/acquisition *class* split remains available as a later tidy if
+it earns its risk — the conceptual bleed the operator named (lift
+failure mis-read as inventory-full) is dissolved by P4's command path
+anyway, since a GID command cannot miss.
+
+`drills/t78_acquire.py` written and unit-tested (`test_t78_acquire.py`),
+**not launched** — it acquires junk with no pickit on the path and
+reports per-item lift latency through the same `Actuator` seam, and is
+the harness P4's spike reuses. Awaiting game time with the others.
