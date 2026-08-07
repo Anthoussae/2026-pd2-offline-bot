@@ -20,6 +20,15 @@ same commit as the transition itself.
   4 times; the harness counts every row with the id; T72/T73/T74 twice
   each; check `docs/drill-log.md`)
 
+**REWIND ANCHOR:** the operator's verbal *"rewind to last stable
+version"* means: `git checkout m6-countess` (tag
+**`stable-pre-acquisition`**, commit `c7eebae`) and stop building on
+branch `item-acquisition-spike`. That tag is the last version with only
+the read-only + `SendInput` architecture, before the item-acquisition
+memory-write spike (`docs/plans/2026-08-06-item-acquisition/`, P4). If
+new stable work lands on `m6-countess`, move the tag and update this
+line.
+
 Updated: 2026-08-06. Branch `m6-countess`, pushed, **PR #2 open**
 (`https://github.com/Anthoussae/2026-pd2-offline-bot/pull/2`). 1000
 tests, ruff clean. The repo has no CI workflows — local validation is
