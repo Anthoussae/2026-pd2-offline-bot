@@ -40,6 +40,25 @@ def test_classes_come_from_the_game_s_own_codes():
     assert classify(445, CODES) == "other"
 
 
+def test_the_s_family_classifies_the_same_as_its_stem():
+    """R126 measured that PD2 carries parallel records and it is the `s`
+    family that ACTUALLY DROPS. Run 2 filed an Eth rune (r05s), an Eld
+    rune (r02s) and a flawless amethyst (gzvs) as 'other', which buried
+    the two most interesting results in the run."""
+    s_codes = {703: "r05s", 700: "r02s", 685: "gzvs", 616: "skzs"}
+    assert classify(703, s_codes) == "rune"
+    assert classify(700, s_codes) == "rune"
+    assert classify(685, s_codes) == "gem"
+    assert classify(616, s_codes) == "gem"
+
+
+def test_a_four_letter_code_that_is_not_an_s_variant_stays_other():
+    # `utu` -> other already; the s-stripping must not turn every 4-letter
+    # code into a rune by accident.
+    assert classify(1, {1: "7cr2"}) == "other"
+    assert classify(2, {2: "imma"}) == "other"
+
+
 def test_an_unknown_kind_is_not_guessed_at():
     # R144: a numeric guess is how the bot picked up a Wire Fleece
     # believing it was a Kraken Shell.

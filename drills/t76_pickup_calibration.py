@@ -127,13 +127,20 @@ def classify(kind: int, codes_by_kind: dict[int, str]) -> str:
     code = codes_by_kind.get(kind)
     if not code:
         return "unknown"
-    if code.startswith(("hp", "mp")) or code.startswith("rv"):
+    # PD2 carries PARALLEL records for runes and gems: `r05` and `r05s`,
+    # `gzv` and `gzvs` — and R126 measured which one matters: "it is the
+    # `s` family that actually drops". Run 2 filed an Eth rune (r05s), an
+    # Eld rune (r02s) and a flawless amethyst (gzvs) as "other" for want
+    # of these four characters, which buried the two most interesting
+    # results in the run under a generic label.
+    stem = code[:-1] if len(code) == 4 and code.endswith("s") else code
+    if stem.startswith(("hp", "mp", "rv")):
         return "potion"
-    if len(code) == 3 and code[0] == "r" and code[1:].isdigit():
+    if len(stem) == 3 and stem[0] == "r" and stem[1:].isdigit():
         return "rune"
-    if code.startswith("cm"):
+    if stem.startswith("cm"):
         return "charm"
-    if code.startswith("sk") or (len(code) == 3 and code[0] == "g"):
+    if stem.startswith("sk") or (len(stem) == 3 and stem[0] == "g"):
         return "gem"
     return "other"
 
