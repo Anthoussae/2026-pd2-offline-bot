@@ -204,6 +204,52 @@ all of this — no labels, no offsets, no occlusion, no label-state
 regime. That the click path's behaviour swings this wildly with a UI
 toggle is itself an argument for the command path.
 
+## T79 controlled runs (2026-08-06): the label lead did NOT hold up
+
+Three attempts to pin the label-state effect under control, and the
+honest outcome is that **it does not replicate** and the click
+measurement is too confounded to settle it:
+
+- **Run 1** (operator-dropped, two piles): labels-ON pile failed, but the
+  labels-OFF side was **n=1** (a single gem) — no basis.
+- **Run 2** (automated): a **drill bug** — the inventory never closed
+  (`GatedInput` refuses input through an open panel, and I closed it with
+  the wrong primitive), so every click was refused. Zero valid data;
+  fixed with `TownLayer.close_panels()` + a hard guard.
+- **Run 3** (automated, fixed, within-subjects on one pile): **labels ON
+  cleared the whole 8-item pile** — 780 lifted directly, and the rest
+  vanished as collateral/neighbour pickups while the schedule worked the
+  tight cluster. Only the fix's *side effect* mattered: measuring the
+  first items' 8-click schedules **picks up their neighbours**, so the
+  pile was consumed before the labels-OFF condition ran (OFF got no
+  data). Items all recovered (floor clear).
+
+**What this means, stated plainly:**
+
+1. **The run-2/run-3 gap was not the label flag.** A controlled
+   labels-ON pile (T79 run 3) picked up cleanly, the opposite of T76 run
+   2's labels-ON pile (7/8 failed) — same drill, same mechanism, same
+   tight-pile shape, opposite result. That is **variance**, not a label
+   effect. The lead is dead.
+2. **Within-subjects is impossible for click pickup**: measuring an item
+   consumes its neighbours, so the same pile cannot be measured twice.
+   A clean test would need matched *fresh* piles per condition
+   (between-subjects), and given (1) it is not worth the runs.
+3. **The click path is erratic** — that is the durable finding. Its
+   outcome on a pile swings from 1/8 to 8/8 with nothing but noise. You
+   cannot tune a reliable bot on a primitive this variable.
+
+**So the label experiments are CLOSED**, and their real contribution is
+negative evidence that strengthens the plan's core: command-by-GID (P4)
+is deterministic — no labels, no offsets, no collateral, no variance —
+and is the only path to reliable pickup. Do not spend more runs tuning
+clicks; the payoff is in P4.
+
+(Method note, paid again tonight: two of the three T79 runs were lost to
+drill bugs I built blind — a silent refusal branch and the wrong
+panel-close primitive. Drills that send input need their close/refusal
+paths exercised before they run, not after.)
+
 ## The recommendation
 
 Both tracks, in this order, because they are not exclusive — Track 1 is

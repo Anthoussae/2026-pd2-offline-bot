@@ -8,18 +8,15 @@ will not be frame-perfect — T76 proved a dense pile defeats any offset —
 but it banks real reliability at zero architectural risk, and it is P4's
 permanent fallback.
 
-## FIRST: the label-state question (T76 run 3, 2026-08-06)
+## The label-state question — CLOSED (T79, 2026-08-06)
 
-Run 3 swept a crowd-8 pile almost perfectly at `(0,-28)` with **labels
-OFF**, where run 2 failed 7/8 with **labels ON** — see notes.md. Before
-any of the changes below, run the clean experiment the two runs only
-hinted at: **same staged pile, toggle ALT, measure**. The executor
-currently *ensures labels ON*; if that policy is what defeats piles, the
-highest-value P2 change is a **label-state policy** (OFF to sweep a pile
-of normal items, ON only for an isolated small item), and it may make
-the offset changes below nearly moot. Do not reorder the schedule or
-tune the poll until this is settled — it could change what "the winning
-offset" even means.
+Chased and dropped. T79's controlled runs did **not** replicate the
+run-2/run-3 gap: a controlled labels-ON pile picked up cleanly, the
+opposite of T76 run 2. The click outcome on a pile swings 1/8–8/8 on
+noise, and within-subjects measurement is impossible (measuring consumes
+the pile via collateral pickup). See notes.md → "T79 controlled runs".
+**Do not pursue a label-state policy** — the lead is dead, and the real
+lesson (the click path is too erratic to tune) points at P4, not here.
 
 ## Changes, each independently measurable
 
