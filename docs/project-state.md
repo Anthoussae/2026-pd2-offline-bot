@@ -21,9 +21,23 @@ same commit as the transition itself.
   each; check `docs/drill-log.md`)
 
 Updated: 2026-08-06. Branch `m6-countess`, pushed, **PR #2 open**
-(`https://github.com/Anthoussae/2026-pd2-offline-bot/pull/2`). 1000
+(`https://github.com/Anthoussae/2026-pd2-offline-bot/pull/2`). 1035
 tests, ruff clean. The repo has no CI workflows — local validation is
 the gate.
+
+**Direction explored and ABANDONED (2026-08-06):** a frame-perfect
+pickup by GID command (kolbot's mechanism) was investigated on branch
+`item-acquisition-spike`. It required out-of-process **memory writes** /
+a remote call — and the operator declined that class of technique
+outright (*"without using dll injections etc."*). The project returned
+to this line by rewind. **Do not re-propose command-by-GID, memory-write
+actuation, or injection.** The architecture is read-only + `SendInput`,
+full stop. What survives: the measured analysis and the finding that the
+click pickup path is erratic (a pile's pick rate swings on noise; the
+labels-OFF lead did not replicate). See
+`docs/archive/plans/2026-08-06-item-acquisition-ABANDONED/`. Pickup work
+continues within the SendInput constraint via
+`docs/plans/2026-08-06-pickup-reliability/`.
 
 ## Where things actually stand
 
