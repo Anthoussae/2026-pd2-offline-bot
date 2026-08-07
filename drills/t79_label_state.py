@@ -1,27 +1,33 @@
-"""T79 — the controlled label-state experiment: does labels-OFF pick a pile?
+"""T79 — the controlled label-state experiment, AUTOMATED and within-subjects.
 
-T76 run 2 (labels **ON**) failed 7 of 8 in a dense pile; run 3 (labels
-**OFF**) swept a comparable pile at the first offset. But those two runs
-differed in more than the label flag — items and positions moved too.
-This drill controls the one variable: it **sets** the label display
-itself (an ALT press, verified against `units.label_display_on`, exactly
-as the executor does), and measures a pile in each state.
+The question, from T76 runs 2 and 3: a dense pile failed every offset
+with the ALT label display **ON** and was swept cleanly with it **OFF**
+— but those runs also moved the items, so the label flag was never the
+sole variable. This drill removes every confound:
 
-If labels-OFF genuinely picks a pile that labels-ON cannot, that is a
-large finding — the executor currently *ensures labels ON*, which would
-then be a contributor to the Countess chamber's pickup failures — and it
-is a clean P2 lever. If the two states pick the same, the run-2/run-3
-gap was noise and the label lead dies here. Either is worth knowing.
+- **within-subjects** — one pile, measured labels-ON, then the SAME
+  survivors measured labels-OFF. Same items, same positions, one flag.
+- **automated** — the bot drops the pile itself from inventory (operator
+  licence 2026-08-06: inventory items may be used for testing, EXCEPT
+  the two tomes and the Horadric Cube), so no manual staging. The
+  exclusion is `UNMOVABLE_KINDS | RIGHT_CLICK_HAZARD_KINDS` — cube,
+  tomes AND potions, because a dropped ctrl on a potion drinks it.
+- **self-recovering** — the labels-OFF pass is also the recovery pass
+  (OFF picks piles well), and anything still down at the end is reported
+  loudly for the operator to grab.
 
-**This test SENDS INPUT**: two ALT presses to set state, then a paced
-schedule of clicks per item. Misses are move orders, so the character
-wanders a little; each click re-projects.
+The executor currently *ensures labels ON* (T66, for small-class
+clickability). If OFF genuinely picks a pile that ON cannot, that policy
+is a pile liability and a clean P2 lever. Command-by-GID (P4) sidesteps
+the whole question — no labels, no aim.
+
+**This test SENDS INPUT**: drops items from inventory, presses ALT to
+set the label state, and clicks a schedule per item.
 
 ## How it ends
 
-On its own after both label states are measured, or when you type
-`done`. Abort: 'abort' in chat, tools\\drill-cancel.ps1, ESC, or the
-mouse.
+On its own once both states are measured and recovery is attempted, or
+on `done`. Abort: 'abort' in chat, tools\\drill-cancel.ps1, ESC, mouse.
 
 Run from the repo root:
     & "$HOME/.venvs/pd2bot/Scripts/python.exe" -m drills.t79_label_state
@@ -33,57 +39,50 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-# Reuse the MEASURED helpers rather than a second copy that could drift —
-# the same reason the codebase shares `_PickupMixin`.
 from drills.t76_pickup_calibration import (  # noqa: E402
-    GO_WORDS,
-    _await_word,
     _click_schedule,
     _floor,
-    _origin,
     classify,
     crowding,
 )
+from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.input import VK_MENU, GatedInput, InputRefused  # noqa: E402
+from pd2bot.input import VK_I, VK_MENU, GatedInput, InputRefused  # noqa: E402
+from pd2bot.items import read_carried_items  # noqa: E402
 from pd2bot.memory import GameSession  # noqa: E402
+from pd2bot.menuinput import MenuInput  # noqa: E402
+from pd2bot.panelinput import PanelInput  # noqa: E402
 from pd2bot.pickit import load_item_codes  # noqa: E402
+from pd2bot.snapshot import Perception  # noqa: E402
+from pd2bot.town import TownLayer  # noqa: E402
+from pd2bot.uistate import find_ui_array, read_ui_state  # noqa: E402
 from pd2bot.units import label_display_on  # noqa: E402
 
-# A "pile" worth the name — below this the label question is moot because
-# nothing is occluding anything.
 MIN_PILE_CROWD = 3
+MAX_DROP = 8   # a manageable pile; bounds the items ever at risk on the floor
+
+# Never dropped: the operator's exclusion (tomes 533/534, cube 564) plus
+# potions, whose bare right-click drinks them if the ctrl modifier slips.
+SAFE_EXCLUDE = offsets.UNMOVABLE_KINDS | offsets.RIGHT_CLICK_HAZARD_KINDS
 
 
-def _set_labels(run: DrillRun, gated: GatedInput, target: bool) -> bool | None:
-    """Drive the ALT label display to `target`, verified. Returns the
-    achieved state, or None if the flag cannot be read (never guess it).
+# -- pure logic (unit-tested; no game) -------------------------------------------
 
-    The mechanism is the executor's own (T66): read the flag, press ALT
-    only when it disagrees, re-read. A press that does not move the flag
-    after a few tries is reported, not pretended away.
-    """
-    for _ in range(4):
-        run.check_cancel()
-        state = label_display_on(run.session)
-        if state is None:
-            return None
-        if state == target:
-            return state
-        try:
-            gated.press_key(VK_MENU)
-        except InputRefused:
-            pass
-        run.sleep(0.2)
-    return label_display_on(run.session)
+
+def droppable(carried, exclude=SAFE_EXCLUDE, limit=MAX_DROP) -> list:
+    """The inventory items safe to drop for testing, capped."""
+    return [
+        item
+        for item in carried.main_inventory
+        if item.kind not in exclude
+    ][:limit]
 
 
 def verdict(results: list[dict]) -> list[str]:
     """The controlled comparison: pile pick-rate by label state.
 
-    `results` rows carry `labels` (bool, the VERIFIED state), `picked`,
-    `crowding`. Only genuine piles (crowd >= MIN_PILE_CROWD) speak to the
-    question; solo items are reported but excluded from the verdict.
+    Rows carry `labels` (the VERIFIED state), `picked`, `crowding`. Only
+    genuine piles (crowd >= MIN_PILE_CROWD) speak to the question.
     """
     lines: list[str] = []
     for state in (True, False):
@@ -94,10 +93,9 @@ def verdict(results: list[dict]) -> list[str]:
             continue
         picked = sum(1 for r in pile if r["picked"])
         lines.append(
-            f"  labels {'ON' if state else 'OFF'}: "
-            f"pile {picked}/{len(pile)} lifted"
-            + (f" (crowd>={MIN_PILE_CROWD})" if pile else " — no pile staged")
-            + f"; all arrangements {sum(1 for r in rows if r['picked'])}/{len(rows)}"
+            f"  labels {'ON' if state else 'OFF'}: pile {picked}/{len(pile)} lifted"
+            + (f" (crowd>={MIN_PILE_CROWD})" if pile else " — no pile")
+            + f"; all {sum(1 for r in rows if r['picked'])}/{len(rows)}"
         )
     on = [r for r in results if r["labels"] is True and r["crowding"] >= MIN_PILE_CROWD]
     off = [r for r in results if r["labels"] is False and r["crowding"] >= MIN_PILE_CROWD]
@@ -114,123 +112,200 @@ def verdict(results: list[dict]) -> list[str]:
             lines.append("  -> labels ON is better; the run-3 result was the outlier.")
         else:
             lines.append(
-                "  -> no meaningful label-state difference on the pile; "
-                "the run-2/run-3 gap was not the label flag."
+                "  -> no meaningful label-state difference on the pile."
             )
     else:
         lines.append(
             "  -> inconclusive: need a genuine pile "
-            f"(crowd>={MIN_PILE_CROWD}) measured in BOTH label states."
+            f"(crowd>={MIN_PILE_CROWD}) in BOTH label states."
         )
     return lines
 
 
-def sufficient(results: list[dict]) -> tuple[bool, str]:
-    """PASS needs a real pile measured in BOTH verified label states (the
-    T72 lesson: do not pass on the easy half)."""
+def sufficient(results: list[dict], min_per_state: int = 3) -> tuple[bool, str]:
+    """PASS needs a real pile measured in BOTH verified states, with at
+    least `min_per_state` items each (the T72 lesson AND run 1's n=1 trap:
+    do not conclude from a single OFF item)."""
     on = [r for r in results if r["labels"] is True and r["crowding"] >= MIN_PILE_CROWD]
     off = [r for r in results if r["labels"] is False and r["crowding"] >= MIN_PILE_CROWD]
-    if on and off:
-        return True, f"pile measured labels-ON ({len(on)}) and labels-OFF ({len(off)})"
+    if len(on) >= min_per_state and len(off) >= min_per_state:
+        return True, f"pile measured ON ({len(on)}) and OFF ({len(off)})"
     return False, (
-        "INCOMPLETE — need a pile "
-        f"(crowd>={MIN_PILE_CROWD}) in BOTH label states; got "
-        f"ON={len(on)}, OFF={len(off)}"
+        f"INCOMPLETE — need a pile (crowd>={MIN_PILE_CROWD}) of >= "
+        f"{min_per_state} in BOTH states; got ON={len(on)}, OFF={len(off)}"
     )
+
+
+# -- live plumbing ---------------------------------------------------------------
+
+
+def _set_labels(run: DrillRun, gated: GatedInput, target: bool) -> bool | None:
+    """Drive the ALT label display to `target`, verified (the executor's
+    own mechanism, T66). None if the flag cannot be read (never guessed)."""
+    for _ in range(4):
+        run.check_cancel()
+        state = label_display_on(run.session)
+        if state is None:
+            return None
+        if state == target:
+            return state
+        try:
+            gated.press_key(VK_MENU)
+        except InputRefused:
+            pass
+        run.sleep(0.2)
+    return label_display_on(run.session)
+
+
+def _build_town(run: DrillRun, gated: GatedInput) -> TownLayer:
+    ui_array = find_ui_array(run.session)
+    return TownLayer(
+        run.session,
+        gated,
+        PanelInput(run.session, ui_array=ui_array),
+        MenuInput(run.session, ui_array=ui_array),
+        walk_to=lambda pos: None,   # drop_item never walks
+        snapshot=Perception(run.session).snapshot,
+    )
+
+
+def _inventory_open(run: DrillRun) -> bool:
+    return offsets.UI_INVENTORY in read_ui_state(run.session).open_panels
+
+
+def _stage_pile(run: DrillRun, gated: GatedInput, town: TownLayer) -> list[int]:
+    """Drop up to MAX_DROP safe inventory items onto the floor. Returns the
+    gids seen on the floor afterwards. Leaves the inventory CLOSED."""
+    before = set(_floor(run))
+    town.press_inventory_open()
+    carried = read_carried_items(run.session)
+    candidates = droppable(carried)
+    print(f"  {len(candidates)} safe drop candidate(s) "
+          f"(excluding tomes/cube/potions)", flush=True)
+    dropped = 0
+    for item in candidates:
+        run.check_cancel()
+        try:
+            if town.drop_item(item):
+                dropped += 1
+        except Exception as exc:  # noqa: BLE001 - a stuck drop is not fatal
+            print(f"    drop of unit {item.unit_id} kind {item.kind} "
+                  f"failed: {exc}", flush=True)
+    # Close the inventory (clicks are refused while a panel is open).
+    for _ in range(6):
+        if not _inventory_open(run):
+            break
+        try:
+            gated.press_key(VK_I)
+        except InputRefused:
+            pass
+        run.sleep(0.2)
+    fresh = [uid for uid in _floor(run) if uid not in before]
+    print(f"  dropped {dropped} item(s); {len(fresh)} new on the floor",
+          flush=True)
+    return fresh
+
+
+def _measure(run, gated, codes, staged: list[int], labels: bool) -> list[dict]:
+    """Click-schedule every staged item still on the floor, in the current
+    (verified `labels`) state."""
+    rows = []
+    for gid in list(staged):
+        run.check_cancel()
+        floor = _floor(run)
+        if gid not in floor:
+            continue
+        kind, pos = floor[gid]
+        here = label_display_on(run.session)
+        others = [p for u, (_, p) in floor.items() if u != gid]
+        crowd = crowding(pos, others)
+        item_class = classify(kind, codes)
+        print(f"  target {gid} kind {kind} ({item_class}) crowd {crowd} "
+              f"labels={here}", flush=True)
+        winner, trail = _click_schedule(run, gated, gid, pos)
+        rows.append({
+            "labels": bool(here) if here is not None else labels,
+            "unit_id": gid, "kind": kind, "item_class": item_class,
+            "crowding": crowd, "picked": winner is not None,
+            "winning_offset": list(winner) if winner else None,
+            "clicks": len(trail),
+        })
+    return rows
 
 
 def make_drill() -> tuple[Drill, object]:
     drill = Drill(
         test_id="T79",
-        title="label-state experiment — does labels-OFF pick a pile?",
-        kind="hybrid",
+        title="label-state experiment — automated, within-subjects",
+        kind="bot control",
         sends_input=True,
         instructions=(
-            "TWO ROUNDS, same shape, one variable: the ALT label display,",
-            "which I set and verify myself before each round.",
-            "  ROUND 1: labels ON.  ROUND 2: labels OFF.",
-            "Each round: I confirm the label state, then you drop a PILE",
-            "(several items PACKED on one spot — include a small item if",
-            "you can), stand still, and type GO. I click the schedule and",
-            "record what came up. Type 'done' to finish early.",
-            "ENDS ON ITS OWN. Abort: 'abort', drill-cancel, ESC, mouse.",
+            "AUTOMATED: I drop a pile from your inventory (NEVER the two",
+            "tomes or the Horadric Cube, and never potions), then measure",
+            "the SAME pile with labels ON and again with labels OFF — one",
+            "variable, same items. The labels-OFF pass also recovers the",
+            "pile; anything still on the floor at the end I call out.",
+            "Stand somewhere safe and clear (town). Type OK to begin.",
+            "Abort: 'abort', drill-cancel, ESC, or take the mouse.",
         ),
     )
 
     def body(run: DrillRun) -> str:
         gated = GatedInput(run.session)
-        codes_by_kind = {
+        codes = {
             kind: code
             for code, kinds in load_item_codes(
                 REPO / "config" / "item_codes.toml"
             ).items()
             for kind in kinds
         }
+        town = _build_town(run, gated)
+
+        print("\n--- staging a pile from inventory ---", flush=True)
+        staged = _stage_pile(run, gated, town)
+        if len(staged) < MIN_PILE_CROWD + 1:
+            raise RuntimeError(
+                f"staged only {len(staged)} item(s) — need > {MIN_PILE_CROWD} "
+                "for a pile; inventory may be short of droppable items"
+            )
 
         results: list[dict] = []
-        skipped: list[str] = []
         for target in (True, False):
             name = "ON" if target else "OFF"
             achieved = _set_labels(run, gated, target)
-            if achieved is None:
-                skipped.append(f"labels {name} (flag unreadable — not set)")
-                run.say(f"SKIPPING labels {name}: cannot read the label flag.")
-                continue
             if achieved != target:
-                skipped.append(f"labels {name} (press did not move the flag)")
-                run.say(f"SKIPPING labels {name}: ALT did not change the display.")
+                run.say(f"labels {name}: could not set (got {achieved}) — "
+                        "measuring skipped for this state")
                 continue
-            print(f"\n--- round: labels {name} (verified {achieved}) ---", flush=True)
+            print(f"\n--- labels {name} (verified) ---", flush=True)
+            results += _measure(run, gated, codes, staged, target)
 
-            before = set(_floor(run))
-            run.say(
-                f"Labels are {name}. Drop a PILE (several packed on one "
-                "spot), stand still, then type GO."
-            )
-            if _await_word(run, GO_WORDS) != "heard":
-                skipped.append(f"labels {name} (no GO)")
+        # Recovery: whatever is still down, sweep it with labels OFF (which
+        # the experiment expects to work) so nothing valuable is abandoned.
+        _set_labels(run, gated, False)
+        left = [uid for uid in staged if uid in _floor(run)]
+        for _ in range(2):
+            if not left:
                 break
-            floor = _floor(run)
-            fresh = {uid: info for uid, info in floor.items() if uid not in before}
-            print(f"  player {_origin(run)}; {len(fresh)} new item(s)", flush=True)
-            for uid, (kind, pos) in floor.items():
-                mark = "NEW" if uid in fresh else "   "
-                print(f"    {mark} {uid} kind {kind} "
-                      f"({classify(kind, codes_by_kind)}) at {pos}", flush=True)
-            if not fresh:
-                skipped.append(f"labels {name} (no new items in census)")
-                run.say(f"SKIPPING labels {name}: saw no new items.")
-                continue
-
-            everything = [p for _, p in floor.values()]
-            for gid, (kind, pos) in list(fresh.items()):
-                # Re-verify the flag did not drift mid-round (a stray ALT,
-                # a UI event): the label state on THIS item is the datum.
-                here = label_display_on(run.session)
-                if gid not in _floor(run):
-                    print(f"  {gid} left before we aimed — skipping", flush=True)
-                    continue
-                others = [p for p in everything if p != pos]
-                crowd = crowding(pos, others)
-                item_class = classify(kind, codes_by_kind)
-                print(f"  target {gid} kind {kind} ({item_class}) crowd {crowd} "
-                      f"labels={here}", flush=True)
-                winner, trail = _click_schedule(run, gated, gid, pos)
-                results.append({
-                    "labels": bool(here) if here is not None else target,
-                    "unit_id": gid, "kind": kind, "item_class": item_class,
-                    "crowding": crowd, "winning_offset": list(winner) if winner else None,
-                    "picked": winner is not None, "clicks": len(trail), "trail": trail,
-                })
+            print(f"\n--- recovery pass: {len(left)} item(s) still down ---",
+                  flush=True)
+            _measure(run, gated, codes, left, False)
+            left = [uid for uid in staged if uid in _floor(run)]
 
         print("\n=== LABEL-STATE VERDICT ===", flush=True)
         for line in verdict(results):
             print(line, flush=True)
+        if left:
+            floor = _floor(run)
+            leftover = [(u, floor[u][0], floor[u][1]) for u in left if u in floor]
+            run.say(f"HEADS UP: {len(left)} test item(s) still on the floor — "
+                    "please grab them.")
+            print(f"  LEFTOVER (please collect): {leftover}", flush=True)
 
         ok, why = sufficient(results)
-        summary = f"{len(results)} target(s); {why}"
-        if skipped:
-            summary += f"; SKIPPED: {'; '.join(skipped)}"
+        summary = f"{len(results)} measured; {why}"
+        if left:
+            summary += f"; {len(left)} left on floor (reported)"
         if not ok:
             raise RuntimeError(summary)
         return summary
