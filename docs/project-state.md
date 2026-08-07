@@ -5,6 +5,21 @@ markers (`🔶 M<m> P<p> R<n>`) and Drill Kit test headers read their M/P
 from here — update it at every milestone or phase transition, in the
 same commit as the transition itself.
 
+> ## ⛔ HALTED 2026-08-07 — a chicken-starvation DEATH, safety fix owed
+>
+> The M6 P5 acceptance run (T71, chicken 35) **died in Tower Cellar 4**:
+> a blocking `walk_to` spun for **24 seconds** stuck 3 subtiles from the
+> exit amid a 26–29 hostile pack, and the `SafetyMonitor` only runs at
+> the TOP of each tick — so a blocked engine cannot chicken. The death
+> latch worked (halted after death, game untouched); the *chicken* was
+> starved. **Full analysis + preserved run log:**
+> `docs/reviews/2026-08-07-chicken-starvation-death/`. **Do NOT launch
+> any input-sending run until the monitor can no longer be starved.** A
+> fix DECISION is owed (poll safety inside `walk_to` / hard-cap its
+> block / both / a separate chicken process — the operator's idea). NOT
+> caused by the pickup changes (the block was in traverse's walk to the
+> exit). See the startup prompt / handoff below.
+
 - **Milestone:** M6 — Countess flagship
 - **Phase:** P4 — the countess run and the Cellar 5 endgame (P1, P2, P3
   DONE; plan: `docs/plans/2026-08-03-m6-countess/`). **Active side
@@ -19,11 +34,10 @@ same commit as the transition itself.
 - **Next request ID:** R228 (overall counter; R171 was never issued — a
   handoff off-by-one, left as a hole rather than backfilled; check
   `docs/request-index.md` for the highest issued)
-- **Next test ID:** T78 (T75 unused; **T76 run 1 FAILED** — the drill's
-  own defects, fixed, awaiting re-run R225; **T77 written and
-  unlaunched** — the read-only PD2 map identity probe, R226. T71 has run
-  4 times; the harness counts every row with the id; T72/T73/T74 twice
-  each; check `docs/drill-log.md`)
+- **Next test ID:** T80 (T75 unused; T76/T77 ran during the pickup
+  calibration; T78/T79 were on the now-abandoned item-acquisition
+  branch; **T71 ran 5× — run 5 DIED 2026-08-07** (chicken-starvation).
+  The harness counts every row with the id; check `docs/drill-log.md`)
 
 Updated: 2026-08-06. Branch `m6-countess`, pushed, **PR #2 open**
 (`https://github.com/Anthoussae/2026-pd2-offline-bot/pull/2`). 1035

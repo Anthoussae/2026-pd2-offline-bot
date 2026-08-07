@@ -1,0 +1,57 @@
+03:21:58  run: town_preamble -> waypoint -> traverse -> traverse -> traverse -> traverse -> traverse -> traverse -> clear_countess -> pickup -> done
+03:21:58  heal: skipped (hp 100%, mana 100%, merc 100%) (0.0s)
+03:21:58  repair: nothing damaged (8 worn item(s) checked) (0.0s)
+03:22:09  belt: 2 moved; full for healing; cleanse: 15 item(s) in the inventory, 0 judged junk, 15 kept; nothing to drop; belt: minimums hold; stash: 10 deposited on the displayed tab; stash: 391 items stashed; stash: skipped 4 unmovable (cube/quest); gold: 272065 deposited (10.7s)
+03:22:09  merc: alive (0.0s)
+03:22:09  town_preamble: done after 11s — heal: skipped (hp 100%, mana 100%, merc 100%); repair: nothing damaged (8 worn item(s) checked); belt: 2 moved; full for healing; cleanse: KEEP kind 564 quality 2 sockets None at (0, 0) — unmovable (the Horadric Cube — right-click opens it); cleanse: KEEP kind 534 quality 2 sockets 0 at (0, 2) — unmovable (a Tome of Identify — right-click arms the identify cursor); cleanse: KEEP kind 533 quality 2 sockets 0 at (1, 2) — unmovable (a Tome of Town Portal — right-click opens a portal); cleanse: KEEP kind 558 quality 2 sockets 0 at (3, 2) — protected: predates this bot session; cleanse: KEEP kind 690 quality 2 sockets 0 at (9, 3) — protected: predates this bot session; cleanse: KEEP kind 711 quality 2 sockets 0 at (8, 3) — protected: predates this bot session; cleanse: KEEP kind 704 quality 2 sockets 0 at (6, 3) — protected: predates this bot session; cleanse: KEEP kind 691 quality 2 sockets 0 at (4, 3) — protected: predates this bot session; cleanse: KEEP kind 738 quality 2 sockets 0 at (3, 3) — unmovable (a dungeon Map — right-click opens its dungeon); cleanse: KEEP kind 707 quality 2 sockets 0 at (9, 2) — protected: predates this bot session; cleanse: KEEP kind 674 quality 2 sockets 0 at (2, 3) — protected: predates this bot session; cleanse: KEEP kind 605 quality 2 sockets None at (2, 2) — right-click hazard (potion); cleanse: KEEP kind 818 quality 6 sockets 0 at (4, 0) — protected: predates this bot session; cleanse: KEEP kind 535 quality 4 sockets None at (9, 1) — protected: predates this bot session; cleanse: KEEP kind 706 quality 2 sockets 0 at (9, 0) — protected: predates this bot session; cleanse: 15 item(s) in the inventory, 0 judged junk, 15 kept; nothing to drop; belt: minimums hold; stash: 10 deposited on the displayed tab; stash: 391 items stashed; stash: skipped 4 unmovable (cube/quest); gold: 272065 deposited; merc: alive
+03:22:20  waypoint: done after 11s — arrived at (15218, 5788), stepped off to (15208, 5798)
+03:22:21  combat posture: brisk
+03:22:21  traverse: exit toward Forgotten Tower at (15251, 5785)
+03:22:34  traverse: done after 14s — arrived in Forgotten Tower at (10006, 8002)
+03:22:34  combat posture: brisk
+03:22:34  traverse: exit toward Tower Cellar Level 1 at (10002, 8013)
+03:22:38  traverse: done after 4s — arrived in Tower Cellar Level 1 at (12515, 5183)
+03:22:39  combat posture: brisk
+03:22:48  traverse: exit toward Tower Cellar Level 2 at (12621, 5101) (remembered)
+03:23:38  pickup: kind 610 at (12609, 5150) (mana potions to belt and reserve)
+03:23:46  pickup: kind 610 at (12609, 5150) came up — belt healing 7/8, mana 4/4, rejuv 3/4
+03:23:48  pickup: kind 605 at (12594, 5151) (healing potions to belt and reserve)
+03:23:50  pickup: kind 605 at (12594, 5151) came up — belt healing 8/8, mana 4/4, rejuv 3/4
+03:23:50  pickup: kind 605 at (12595, 5149) (healing potions to belt and reserve)
+03:24:03  pickup: kind 611 at (12591, 5149) (mana potions to belt and reserve)
+03:24:17  pickup: kind 611 at (12591, 5149) came up — belt healing 8/8, mana 4/4, rejuv 3/4
+03:24:34  pickup: kind 530 at (12651, 5145) (rejuvs to belt and reserve)
+03:24:36  pickup: kind 530 at (12651, 5145) came up — belt healing 8/8, mana 4/4, rejuv 4/4
+03:25:19  pickup: kind 605 at (12645, 5107) (healing potions to belt and reserve)
+03:25:21  pickup: kind 605 at (12645, 5107) came up — belt healing 7/8, mana 4/4, rejuv 4/4
+03:25:34  pickup: gave up on the item at (12636, 5100) (walks keep arriving short)
+03:25:41  pickup: gave up on the item at (12635, 5101) (walks keep arriving short)
+03:25:43  pickup: kind 605 at (12634, 5100) (healing potions to belt and reserve)
+03:25:45  pickup: kind 605 at (12634, 5100) came up — belt healing 8/8, mana 4/4, rejuv 4/4
+03:25:49  traverse: done after 191s — arrived in Tower Cellar Level 2 at (12506, 6635)
+03:25:49  combat posture: brisk
+03:25:49  traverse: exit toward Tower Cellar Level 3 at (12586, 6521) (remembered)
+03:26:11  pickup: kind 606 at (12606, 6683) (healing potions to belt and reserve)
+03:26:21  pickup: gave up on the item at (12606, 6683) (walks keep arriving short)
+03:26:24  pickup: kind 605 at (12604, 6683) (healing potions to belt and reserve)
+03:26:32  pickup: kind 605 at (12604, 6683) came up — belt healing 8/8, mana 4/4, rejuv 4/4
+03:27:28  traverse: done after 99s — arrived in Tower Cellar Level 3 at (12520, 8049)
+03:27:29  combat posture: brisk
+03:27:29  traverse: exit toward Tower Cellar Level 4 at (12641, 8096) (remembered)
+03:28:59  pickup: kind 606 at (12609, 8131) (healing potions to belt and reserve)
+03:29:12  pickup: kind 606 at (12609, 8131) came up — belt healing 6/8, mana 4/4, rejuv 4/4
+03:29:53  pickup: kind 606 at (12608, 8123) (healing potions to belt and reserve)
+03:30:09  pickup: kind 606 at (12627, 8142) (healing potions to belt and reserve)
+03:30:11  pickup: kind 606 at (12627, 8142) came up — belt healing 7/8, mana 4/4, rejuv 4/4
+03:30:34  pickup: kind 606 at (12599, 8130) (healing potions to belt and reserve)
+03:30:48  pickup: gave up on the item at (12599, 8130) (walks keep arriving short)
+03:30:49  pickup: kind 606 at (12597, 8131) (healing potions to belt and reserve)
+03:31:03  pickup: kind 606 at (12597, 8130) (healing potions to belt and reserve)
+03:31:12  pickup: kind 606 at (12597, 8130) came up — belt healing 8/8, mana 4/4, rejuv 4/4
+03:31:19  pickup: gave up on the item at (12594, 8111) (walks keep arriving short)
+03:31:33  pickup: kind 606 at (12603, 8123) (healing potions to belt and reserve)
+03:31:35  pickup: kind 606 at (12603, 8123) came up — belt healing 8/8, mana 4/4, rejuv 4/4
+03:31:45  traverse: done after 257s — arrived in Tower Cellar Level 4 at (12720, 9507)
+03:31:45  combat posture: brisk
+03:31:45  traverse: exit toward Tower Cellar Level 5 at (12586, 9641) (remembered)
+03:32:11  pickup: kind 605 at (12684, 9540) (healing potions to belt and reserve)
