@@ -782,6 +782,26 @@ class _PickupMixin:
             found.append(item)
         return found
 
+    @staticmethod
+    def _draw_order(items: list[GroundItem]) -> list[GroundItem]:
+        """Collection order for a pile: the FRONT sprite first (P3, C).
+
+        A click at one item's aim offset lands on whatever sprite is drawn
+        OVER that screen point — the neighbour in front — which is the
+        "clicked A got B" that cost T71 run 4 nine of thirteen misses.
+        Lifting the front item first uncovers the one behind it, so the
+        next click has a clear target. Front = largest screen depth, and
+        the codebase's projection convention fixes that direction:
+        `mapframe` has `sy = wx + wy` (larger y is lower on screen, drawn
+        last, on top), so front-first is `wx + wy` DESCENDING. Replaces
+        the old nearest-to-player sort, whose order was unrelated to which
+        sprite occludes which; the extra walk within a pickup radius is
+        negligible against the click cost a miss spends (T71: 12 s).
+        """
+        return sorted(
+            items, key=lambda i: i.position[0] + i.position[1], reverse=True
+        )
+
     def confirm_pickups(self, snap: GameSnapshot) -> None:
         """Narrate clicked items that actually left the ground.
 
@@ -1843,7 +1863,9 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
             # Nothing to do offensively this tick (everything freshly
             # poisoned, or waiting for the revives): pick up loot instead of
             # standing still. Potions especially — the belt is the supply.
-            items = self.wanted_items(snap, snap.player.position, self.services.pickup_radius)
+            items = self._draw_order(
+                self.wanted_items(snap, snap.player.position, self.services.pickup_radius)
+            )
             if items and self.collect(snap, ctx, items[0]):
                 return StepOutcome(done=False, acted=True)
             if self.maybe_cleanse(snap, ctx):
@@ -1944,7 +1966,7 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
             )
         # Sweep loot while the settle timer runs; it is free time — and so
         # is a queued cleanse, with nothing alive to punish standing still.
-        items = self.wanted_items(snap, centre, self.radius)
+        items = self._draw_order(self.wanted_items(snap, centre, self.radius))
         if items and self.collect(snap, ctx, items[0]):
             return StepOutcome(done=False, acted=True)
         if self.maybe_cleanse(snap, ctx):
@@ -2021,10 +2043,8 @@ class PickupStep(_PatrolMixin, _PickupMixin):
             # Space first, sweep second: a written-off item may be liftable
             # once the junk is gone.
             return StepOutcome(done=False, acted=True, note="inventory cleansed")
-        items = self.wanted_items(snap, self._centre, self.radius)
+        items = self._draw_order(self.wanted_items(snap, self._centre, self.radius))
         if items:
-            if snap.player is not None:
-                items.sort(key=lambda i: _chebyshev(i.position, snap.player.position))
             acted = self.collect(snap, ctx, items[0])
             return StepOutcome(done=False, acted=acted)
         # Nothing WE CAN SEE is wanted — which is not the same as nothing
@@ -2506,9 +2526,10 @@ class TraverseStep(_PickupMixin):
         # brisk posture that means no hostile owns the tick, and the
         # ladder still gets its look between every click.
         self.confirm_pickups(snap)
-        items = self.wanted_items(snap, origin, self.services.pickup_radius)
+        items = self._draw_order(
+            self.wanted_items(snap, origin, self.services.pickup_radius)
+        )
         if items:
-            items.sort(key=lambda i: _chebyshev(i.position, origin))
             if self.collect(snap, ctx, items[0]):
                 return StepOutcome(
                     done=False, acted=True,

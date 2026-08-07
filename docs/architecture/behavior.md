@@ -139,6 +139,20 @@ provably off) so small classes — runes, gems, charms — can be clicked
 at their label band. Every send lands in a trace: when a live run does
 something surprising, the trace says which decision produced it.
 
+**Pile collection order (pickup-reliability P3).** When several wanted
+items are on the ground, `_PickupMixin` collects them in **draw order** —
+front sprite first, `wx + wy` descending — not nearest-to-player. A
+click at one item's aim offset lands on whatever sprite is drawn *over*
+that screen point (T71 run 4: nine of thirteen misses picked the
+neighbour instead), so lifting the front item first uncovers the one
+behind it and gives the next click a clear target. This is the surviving
+half of the pickup work: the calibration (T76/T79) found the click path
+itself **noise-dominated** — a dense pile's pick rate swings 1/8–8/8 and
+no aim-offset schedule reorder is stable — so the aim schedule is left
+as-is and the frame-perfect command path was ruled out (operator
+decision: no memory writes / injection). Draw-order collection reduces
+the occlusion misses; the residual erraticism is accepted.
+
 ## The reflex ladder, with rationale
 
 Priority-ordered; first firing rung wins the tick. Rungs 1–2 live in

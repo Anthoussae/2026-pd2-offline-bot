@@ -2022,6 +2022,29 @@ def test_a_belt_full_write_off_is_still_reported_as_belt_full(tmp_path):
     assert gave[0]["reason"] == "belt full for healing"
 
 
+def test_draw_order_collects_the_front_sprite_first(tmp_path):
+    """P3 (Direction C): the item drawn ON TOP (largest screen depth,
+    wx+wy) is what a click hits, so lift it first to uncover the next —
+    instead of the old nearest-to-player order, unrelated to occlusion."""
+    clock = Clock()
+    step, svc, here, executor, ctx = sweeping(clock)
+    a = GroundItem(unit_id=1, kind=702, position=(1000, 1000), quality=RARE)  # depth 2000
+    b = GroundItem(unit_id=2, kind=702, position=(1003, 1003), quality=RARE)  # depth 2006, front
+    c = GroundItem(unit_id=3, kind=702, position=(1001, 1000), quality=RARE)  # depth 2001
+    ordered = step._draw_order([a, b, c])
+    assert [i.unit_id for i in ordered] == [2, 3, 1], "front (largest wx+wy) first"
+
+
+def test_draw_order_is_stable_for_a_single_item():
+    from tests.test_behavior_steps import sweeping  # noqa: F401
+
+    clock = Clock()
+    step, *_ = sweeping(clock)
+    lone = GroundItem(unit_id=9, kind=606, position=(5, 7), quality=2)
+    assert step._draw_order([lone]) == [lone]
+    assert step._draw_order([]) == []
+
+
 def test_a_non_potion_miss_in_a_pile_is_ambiguity_not_a_full_inventory(tmp_path):
     """P4's correctness fix: a rune that will not come up with items packed
     around it is a pile-ambiguity miss (the clicks hit a neighbour), NOT

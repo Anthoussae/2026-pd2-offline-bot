@@ -82,3 +82,38 @@ The selected direction implemented, tested, ruff-clean; `behavior.md`
 updated to describe how an aim point is now chosen; the P2 drill
 re-run clean (that re-run needs game time — coordinate with the
 operator).
+
+## Implementation result (2026-08-06)
+
+P2's calibration selected **Direction C** by elimination:
+
+- **Direction A (read label geometry)** — the T79 probe found no
+  screen-like coordinate pairs in an item's unit block. Provisionally
+  dead (only the unit block was scanned, not BH.dll's data sections), so
+  not pursued.
+- **Direction B (derive the offset)** — dead. T76/T79 measured **no
+  predictable winning offset**: a dense pile's pick rate swings 1/8–8/8
+  on noise and the winner scatters across four offsets. There is no
+  stable shift to derive.
+- **Direction C (unstack the pile)** — SHIPPED. `_PickupMixin._draw_order`
+  collects front-sprite-first (`wx + wy` descending, the codebase's
+  projection convention), so the occluding neighbour is lifted before it
+  can eat the click aimed at the item behind it. Applied at all four
+  collect-selection sites (the two nearest-first sorts replaced, the two
+  unsorted `items[0]` picks ordered). Tested; the direction is pinned.
+
+**Not done, and why** (the aim schedule was NOT reordered, per the
+"don't do more than one direction" rule and the data): the offset
+schedule is noise-dominated, so reordering it is unsupported. The
+`step-and-reproject` and `pick-then-re-approach` sub-options of C were
+left out — draw-order is the cheapest and the others add walking without
+measured benefit. The retry-pacing speedup that T78 hinted at
+(`pickup_retry_s` 1.5 s vs 0.12 s live confirms) is a **speed** change,
+not an aim fix, and wants a live confirm-window measurement before
+tuning — noted for the P6 remeasure, not changed blind here.
+
+The honest frame: the click path stays erratic. Draw-order removes the
+occlusion class of miss; the rest is accepted, because the deterministic
+answer (command-by-GID) was ruled out. 1048 tests, ruff clean.
+`behavior.md` updated. **P6's remeasure run is the live regression
+check.**
