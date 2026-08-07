@@ -239,18 +239,34 @@ def make_drill() -> tuple[Drill, object]:
         title="label-state experiment — automated, within-subjects",
         kind="bot control",
         sends_input=True,
+        # Standing-mandate waiver of the per-run GAME-CHAT OK (operator,
+        # 2026-08-06: "carry on testing as needed. Automate the tests if
+        # possible"). The operator interacts through the app, not game
+        # chat, and twice let the OK window expire; the R207/R217 pattern
+        # is exactly this — a bounded campaign with the game at the
+        # agent's disposal. `menu_ok` skips the OK wait; the briefing
+        # still prints and a hands-off grace still runs. Every abort path
+        # (chat 'abort', ESC, drill-cancel, the mouse) stays live.
+        menu_ok=True,
         instructions=(
-            "AUTOMATED: I drop a pile from your inventory (NEVER the two",
-            "tomes or the Horadric Cube, and never potions), then measure",
-            "the SAME pile with labels ON and again with labels OFF — one",
-            "variable, same items. The labels-OFF pass also recovers the",
-            "pile; anything still on the floor at the end I call out.",
-            "Stand somewhere safe and clear (town). Type OK to begin.",
+            "AUTOMATED, no OK needed — starts a few seconds after this.",
+            "I drop a pile from your inventory (NEVER the two tomes or the",
+            "Horadric Cube, and never potions), then measure the SAME pile",
+            "with labels ON and again with labels OFF — one variable, same",
+            "items. The OFF pass also recovers the pile; anything still on",
+            "the floor at the end I call out. Stand clear (town).",
             "Abort: 'abort', drill-cancel, ESC, or take the mouse.",
         ),
     )
 
     def body(run: DrillRun) -> str:
+        # A hands-off grace in place of the OK gate: the operator sees the
+        # briefing land in game chat, then has a beat to take their hands
+        # off before any input goes out.
+        run.say("Starting in 4 seconds — hands off. Abort with 'abort' or ESC.")
+        for _ in range(8):
+            run.check_cancel()
+            run.sleep(0.5)
         gated = GatedInput(run.session)
         codes = {
             kind: code

@@ -161,3 +161,5 @@ and have one fewer cell; new rows carry milestone/phase.
 | T78 | 1 | 2026-08-06 21:28 | M6 P4 | acquisition seam — lift junk with no pickit on the path | hybrid | PASS | 4/4 lifted with no pickit on the path (the seam is real); mechanism ClickActuator |
 | T76 | 3 | 2026-08-06 21:32 | M6 P4 | pickup calibration — does the clickable point move in a pile? | hybrid | PASS | 9 target(s) across 2 arrangement(s); 1 neighbour-steal(s); solo+pile measured for 2 class(es): ['other', 'potion'] |
 | T79 | 1 | 2026-08-06 21:46 | M6 P4 | label-state experiment — does labels-OFF pick a pile? | hybrid | PASS | 7 target(s); pile measured labels-ON (6) and labels-OFF (1) |
+| T79 | 2 | 2026-08-06 22:06 | M6 P4 | label-state experiment — automated, within-subjects | bot control | NOT STARTED | announced, but the user never typed OK |
+| T79 | 3 | 2026-08-06 22:17 | M6 P4 | label-state experiment — automated, within-subjects | bot control | NOT STARTED | announced, but the user never typed OK |
