@@ -44,6 +44,7 @@ from pd2bot.behavior.reflex import ReflexLadder, read_armor_ratio
 from pd2bot.behavior.run import build_states, default_registry, load_run
 from pd2bot.behavior.runner import BehaviorRunner
 from pd2bot.behavior.steps import RunServices, build_registry
+from pd2bot.behavior.town import PreambleReport, TownConfig, TownLayer
 from pd2bot.cycle import GameCycle
 from pd2bot.input.chat import Chat
 from pd2bot.input.gated import GatedInput
@@ -65,7 +66,6 @@ from pd2bot.pickit import Pickit, cleanse_keep, load_item_table, load_pickit
 from pd2bot.runlog import RunLog
 from pd2bot.runlog.narrate import Narrator
 from pd2bot.safety import SafetyConfig, SafetyInterrupt, SafetyMonitor, Verdict, watchdog
-from pd2bot.town import PreambleReport, TownConfig, TownLayer
 
 REPO = Path(__file__).resolve().parent.parent
 CONFIG = REPO / "config"

@@ -12,15 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from pd2bot import offsets
-from pd2bot.input.window import ClientRect
-from pd2bot.perception import uistate
-from pd2bot.perception.items import CarriedItem, CarriedItems
-from pd2bot.perception.player import Player
-from pd2bot.perception.snapshot import GameSnapshot
-from pd2bot.perception.uistate import UIState
-from pd2bot.perception.units import GameObject, Monster
-from pd2bot.perception.world import Area
-from pd2bot.town import (
+from pd2bot.behavior.town import (
     BeltBelowMinimum,
     PreambleReport,
     StashFull,
@@ -29,6 +21,14 @@ from pd2bot.town import (
     TownLayer,
     Uncalibrated,
 )
+from pd2bot.input.window import ClientRect
+from pd2bot.perception import uistate
+from pd2bot.perception.items import CarriedItem, CarriedItems
+from pd2bot.perception.player import Player
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.perception.uistate import UIState
+from pd2bot.perception.units import GameObject, Monster
+from pd2bot.perception.world import Area
 from pd2bot.uipoints import default_points
 
 RECT = ClientRect(left=0, top=0, width=1536, height=864)
@@ -436,10 +436,12 @@ class FakeClock:
 @pytest.fixture
 def town(monkeypatch):
     state = Town()
-    monkeypatch.setattr("pd2bot.town.uistate.read_ui_state", state.ui_state)
+    monkeypatch.setattr("pd2bot.perception.uistate.read_ui_state", state.ui_state)
     # Nothing worn by default, so the conditional repair step stays out of
     # the way of tests about other steps; repair tests patch this again.
-    monkeypatch.setattr("pd2bot.town.read_equipped_durability", lambda session: ())
+    monkeypatch.setattr(
+        "pd2bot.behavior.town.services.read_equipped_durability", lambda session: ()
+    )
     return state
 
 
@@ -1617,7 +1619,7 @@ def with_durability(town_state, monkeypatch, items):
     """Patch the durability reader; `items` is re-read each call so the fake
     repair can change it."""
     monkeypatch.setattr(
-        "pd2bot.town.read_equipped_durability", lambda session: tuple(items)
+        "pd2bot.behavior.town.services.read_equipped_durability", lambda session: tuple(items)
     )
 
 
@@ -1825,7 +1827,7 @@ def test_all_three_npc_steps_share_one_interaction_path(town, monkeypatch):
     not. One path means they cannot drift apart again."""
     import inspect
 
-    from pd2bot.town import TownLayer as Layer
+    from pd2bot.behavior.town import TownLayer as Layer
 
     for method in (Layer.heal_at_akara, Layer.repair_at_charsi,
                    Layer.resurrect_merc_if_dead):
@@ -1881,7 +1883,7 @@ def test_a_stop_request_breaks_out_of_the_retry_ladders(town):
     harness could only cancel its own waits, so a human watched a dozen
     approach-and-chat cycles run to exhaustion. Every ladder now honours an
     outside veto."""
-    from pd2bot.town import TownStopped
+    from pd2bot.behavior.town import TownStopped
 
     stop = {"now": False}
     town.panels.add(offsets.UI_NPCMENU)
@@ -2508,7 +2510,7 @@ def test_a_walker_that_returns_nothing_still_works(town):
 def test_endless_capped_legs_give_up_rather_than_spin(town):
     """The second bound: something that crawls forever without ever quite
     failing must not hold the run open."""
-    from pd2bot.town import TownError
+    from pd2bot.behavior.town import TownError
 
     clock = {"now": 0.0}
 

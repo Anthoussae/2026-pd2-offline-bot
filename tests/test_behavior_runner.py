@@ -12,9 +12,9 @@ from pd2bot.behavior.runner import (
     TownStepFailed,
     TownStepHalt,
 )
+from pd2bot.behavior.town import StashFull, TownError
 from pd2bot.cycle import CycleError
 from pd2bot.safety import ChickenExit, DeathHalt
-from pd2bot.town import StashFull, TownError
 
 
 class ScriptedEngine:

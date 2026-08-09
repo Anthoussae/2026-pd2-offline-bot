@@ -12,12 +12,12 @@ from types import SimpleNamespace
 import pytest
 
 from pd2bot import offsets
+from pd2bot.behavior.town import TownConfig, TownError, TownLayer
 from pd2bot.input.window import ClientRect
 from pd2bot.nav.waypoint import WaypointConfig, WaypointError, WaypointTravel
 from pd2bot.perception.uistate import UIState
 from pd2bot.perception.units import GameObject
 from pd2bot.perception.world import Area
-from pd2bot.town import TownConfig, TownError, TownLayer
 from pd2bot.uipoints import default_points
 
 RECT = ClientRect(left=100, top=50, width=1536, height=864)
@@ -60,7 +60,7 @@ def world(monkeypatch):
     state = World()
     read_ui = lambda session=None, ui_array=None: UIState(frozenset(state.panels))  # noqa: E731
     monkeypatch.setattr("pd2bot.nav.waypoint.uistate.read_ui_state", read_ui)
-    monkeypatch.setattr("pd2bot.town.uistate.read_ui_state", read_ui)
+    monkeypatch.setattr("pd2bot.perception.uistate.read_ui_state", read_ui)
     area = lambda session=None: Area(  # noqa: E731
         level_no=state.area, position=(0, 0), size=(100, 100)
     )
@@ -153,7 +153,7 @@ def test_unknown_destination_refuses_before_moving(world):
 def test_uncalibrated_destination_refuses_before_moving(world):
     """An uncalibrated row can only fail; failing after the walk teaches
     nothing that failing here does not."""
-    from pd2bot.town import Uncalibrated
+    from pd2bot.behavior.town import Uncalibrated
 
     trip = build(world, points_override={"waypoint.cold_plains": None})
     with pytest.raises(Uncalibrated, match=r"waypoint\.cold_plains"):

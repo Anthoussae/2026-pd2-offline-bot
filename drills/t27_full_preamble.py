@@ -50,6 +50,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import offsets  # noqa: E402
+from pd2bot.behavior.town import PreambleReport, TownConfig, TownLayer  # noqa: E402
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
 from pd2bot.input.gated import GatedInput  # noqa: E402
 from pd2bot.input.menu import MenuInput  # noqa: E402
@@ -60,7 +61,6 @@ from pd2bot.perception.items import read_carried_items, read_equipped_durability
 from pd2bot.perception.memory import GameSession  # noqa: E402
 from pd2bot.perception.player import read_player  # noqa: E402
 from pd2bot.perception.snapshot import Perception  # noqa: E402
-from pd2bot.town import PreambleReport, TownConfig, TownLayer  # noqa: E402
 
 # Which points the preamble may need. The merc row is listed separately
 # because it is only REQUIRED when the merc is actually dead.

@@ -41,11 +41,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from pd2bot import offsets
+from pd2bot.behavior.town import TownLayer
 from pd2bot.input.gated import InputRefused
 from pd2bot.perception import uistate
 from pd2bot.perception.memory import GameSession
 from pd2bot.perception.world import read_area
-from pd2bot.town import TownLayer
 
 
 class WaypointError(RuntimeError):

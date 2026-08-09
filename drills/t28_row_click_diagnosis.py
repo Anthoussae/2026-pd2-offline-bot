@@ -36,6 +36,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import offsets  # noqa: E402
+from pd2bot.behavior.town import TownConfig, TownLayer  # noqa: E402
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
 from pd2bot.input.gated import GatedInput  # noqa: E402
 from pd2bot.input.menu import MenuInput  # noqa: E402
@@ -45,7 +46,6 @@ from pd2bot.nav.navigate import live_navigator  # noqa: E402
 from pd2bot.perception import uistate  # noqa: E402
 from pd2bot.perception.memory import GameSession  # noqa: E402
 from pd2bot.perception.snapshot import Perception  # noqa: E402
-from pd2bot.town import TownConfig, TownLayer  # noqa: E402
 
 POINT = "charsi.trade_repair"
 

@@ -8,7 +8,7 @@ Three drills in one run so the user sets up once and stays in the game:
     T14  belt refill        open inventory, shift-click potions into the
                             belt, verify counts, check minimums
 
-Every step is the real `pd2bot.town.TownLayer` wired to the real gates and
+Every step is the real `pd2bot.behavior.town.TownLayer` wired to the real gates and
 the live navigator — nothing here reimplements behaviour, so a PASS is
 evidence about the shipping code, not about the drill.
 
@@ -28,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import offsets  # noqa: E402
+from pd2bot.behavior.town import PreambleReport, TownConfig, TownLayer  # noqa: E402
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
 from pd2bot.input.gated import GatedInput, InputRefused  # noqa: E402
 from pd2bot.input.menu import MenuInput  # noqa: E402
@@ -37,7 +38,6 @@ from pd2bot.nav.navigate import live_navigator  # noqa: E402
 from pd2bot.perception.items import read_carried_items  # noqa: E402
 from pd2bot.perception.memory import GameSession  # noqa: E402
 from pd2bot.perception.snapshot import Perception  # noqa: E402
-from pd2bot.town import PreambleReport, TownConfig, TownLayer  # noqa: E402
 
 
 def build_town(run: DrillRun) -> TownLayer:
