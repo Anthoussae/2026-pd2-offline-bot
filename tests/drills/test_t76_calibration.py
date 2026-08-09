@@ -9,7 +9,7 @@ failure as PASS; review 001).
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from drills.t76_pickup_calibration import (  # noqa: E402
     arrangement_of,

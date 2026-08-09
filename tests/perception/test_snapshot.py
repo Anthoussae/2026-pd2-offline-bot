@@ -5,9 +5,9 @@ import struct
 from pd2bot import offsets
 from pd2bot.perception.snapshot import Perception
 from tests.conftest import CLIENT_BASE, FakeSession, u32
-from tests.test_player import UNIT
-from tests.test_player import build as build_player_world
-from tests.test_uistate import GET_UI_VAR_CODE, UI_ARRAY, ui_array_bytes
+from tests.perception.test_player import UNIT
+from tests.perception.test_player import build as build_player_world
+from tests.perception.test_uistate import GET_UI_VAR_CODE, UI_ARRAY, ui_array_bytes
 
 
 def build(in_game: bool = True, open_panels: set[int] | None = None) -> FakeSession:

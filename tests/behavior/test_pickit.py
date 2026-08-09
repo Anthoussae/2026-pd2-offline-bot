@@ -21,7 +21,7 @@ from pd2bot.pickit import (
     load_pickit,
 )
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 SHIPPED = REPO / "config" / "pickit.toml"
 SHIPPED_TABLE = REPO / "config" / "item_ids.toml"
 

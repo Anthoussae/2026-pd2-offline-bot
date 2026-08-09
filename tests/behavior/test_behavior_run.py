@@ -15,7 +15,7 @@ from pd2bot.behavior.run import (
     load_run,
 )
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 
 
 def write_run(tmp_path, text):

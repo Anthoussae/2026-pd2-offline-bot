@@ -20,7 +20,7 @@ from pd2bot.perception.units import GameObject, GroundItem, Monster
 from pd2bot.perception.world import Area
 from pd2bot.pickit import Pickit, Rule
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 FIELD = 3
 HOME = (1000, 1000)
 HEAL, RARE = 606, 6
@@ -2036,7 +2036,7 @@ def test_draw_order_collects_the_front_sprite_first(tmp_path):
 
 
 def test_draw_order_is_stable_for_a_single_item():
-    from tests.test_behavior_steps import sweeping  # noqa: F401
+    from tests.behavior.test_behavior_steps import sweeping  # noqa: F401
 
     clock = Clock()
     step, *_ = sweeping(clock)

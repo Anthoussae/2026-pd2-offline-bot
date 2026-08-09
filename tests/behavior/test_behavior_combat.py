@@ -14,7 +14,7 @@ from pd2bot.behavior.combat import (
 from pd2bot.input.gated import VK_F1, VK_F2, VK_F5
 from pd2bot.perception.snapshot import GameSnapshot
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 NECRO = REPO / "config" / "necro.toml"
 
 
