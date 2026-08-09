@@ -267,3 +267,4 @@ headings, noted in parentheses, say roughly where they fell).
 - R236 [decision] CI plan: confirmations Q1–Q5 · 2026-08-09 02:43
 - R236 resolved (all yes; plan written, sm) · 2026-08-09 03:05
 - R237 [decision] Approve the CI commit + push (the push IS the validation) · 2026-08-09 03:11
+- R237 resolved (all yes; CI live, first run green 40s) · 2026-08-09 03:18

@@ -87,9 +87,11 @@ pushing" with a machine that never forgets, and it checks the code as
 committed — catching the classic "works on my machine because of an
 uncommitted file" failure. The common implementation is **GitHub
 Actions**: a small YAML file in `.github/workflows/` tells GitHub what
-to run. This project has the checks (`pytest`, `ruff`) but as of
-2026-08-09 nothing runs them automatically — CI is the missing piece,
-not the tests.
+to run. This project added CI on 2026-08-09: every push runs the full
+pytest suite and ruff on a Windows **runner** (the machine GitHub rents
+you per run) — Windows because the code imports Win32 APIs at module
+load, so a Linux machine cannot even import it. *(See:
+2026-08-09, continuous integration.)*
 
 **complement guard** — a second guarded path whose allowed condition is
 the logical opposite of the first's, so between them every state has
