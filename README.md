@@ -148,6 +148,13 @@ against fixed byte buffers. They cannot tell you an offset still points at the
 right thing after a game patch — only running `pd2bot.dump` next to the live
 game can.
 
+CI runs both checks automatically on every push: GitHub Actions
+(`.github/workflows/ci.yml`) runs the full pytest suite and `ruff check` on a
+Windows runner (the code imports Win32 APIs at module load, so Linux runners
+cannot collect it). Green CI means the offline half is sound; it verifies
+nothing about the live game — offsets and calibrations remain the job of
+`pd2bot.dump` and the drills.
+
 ## Setting up a new machine
 
 Install the agent-toolkit workflow skills globally, then clone this project and

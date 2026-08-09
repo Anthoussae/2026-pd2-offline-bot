@@ -264,3 +264,6 @@ headings, noted in parentheses, say roughly where they fell).
 - M6 P5 R234 resolved (self-run via the bridge: classification fixed and proven, allies 1->11; clearance rule measured as the second cause)
 - M6 P4 R235 [decision] Fix the cleanse gap before the Countess run, or run first? (numbered at closeout; R234 taken concurrently) · 2026-08-08 03:05
 - M6 P4 R235 resolved (a then b: cleanse fixed, Countess attempted twice, not yet successful) · 2026-08-08 05:10
+- R236 [decision] CI plan: confirmations Q1–Q5 · 2026-08-09 02:43
+- R236 resolved (all yes; plan written, sm) · 2026-08-09 03:05
+- R237 [decision] Approve the CI commit + push (the push IS the validation) · 2026-08-09 03:11

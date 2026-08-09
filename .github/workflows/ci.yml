@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+# Metered minutes: if several pushes land quickly, only the newest
+# commit's run survives per branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    # Not a preference: pd2bot touches ctypes.windll at import time,
+    # so the suite cannot even be collected on Linux (see
+    # docs/archive/plans/2026-08-09-ci-github-actions/notes.md).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The README recipe. Deliberately NOT an editable install —
+      # pyproject.toml has no build system, by design.
+      - run: pip install pymem pytest ruff
+      - run: python -m pytest -q
+      - run: python -m ruff check .

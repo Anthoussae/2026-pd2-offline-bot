@@ -80,6 +80,17 @@ first observation at-or-below the line, which after a burst of damage
 can be well below it. First seen in
 [the game cycle](2026-07-29-the-game-cycle.md).
 
+**CI (continuous integration)** — a server that automatically runs your
+checks (tests, linter) on every push, and marks each commit or pull
+request pass/fail. It replaces "I remembered to run pytest before
+pushing" with a machine that never forgets, and it checks the code as
+committed — catching the classic "works on my machine because of an
+uncommitted file" failure. The common implementation is **GitHub
+Actions**: a small YAML file in `.github/workflows/` tells GitHub what
+to run. This project has the checks (`pytest`, `ruff`) but as of
+2026-08-09 nothing runs them automatically — CI is the missing piece,
+not the tests.
+
 **complement guard** — a second guarded path whose allowed condition is
 the logical opposite of the first's, so between them every state has
 exactly one legal actor and a bypass flag never needs to exist. Our
