@@ -1,5 +1,7 @@
 # 2026-pd2-offline-bot
 
+[![CI](https://github.com/Anthoussae/2026-pd2-offline-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/Anthoussae/2026-pd2-offline-bot/actions/workflows/ci.yml)
+
 A from-scratch Python bot for Project Diablo 2, targeting the offline
 single-player client on Windows. It reads the running game's memory
 out-of-process and drives it with synthetic input — it never injects code into
