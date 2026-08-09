@@ -1,6 +1,6 @@
 """Coordinate frames: local conversion, screen bearings, honest fallback."""
 
-from pd2bot.mapframe import (
+from pd2bot.nav.mapframe import (
     MapFrame,
     area_name,
     bearing,

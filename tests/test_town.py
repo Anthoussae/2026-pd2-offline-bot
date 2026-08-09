@@ -1260,7 +1260,7 @@ def test_walk_recovers_when_a_travel_click_opens_a_dialog(town):
     destination, and a click landing on a bystander opens their dialog
     instead — the bot was correctly aimed at Akara and waylaid by Kashya en
     route. Close the dialog and resume; every attempt makes real progress."""
-    from pd2bot.navigate import NavigationError
+    from pd2bot.nav.navigate import NavigationError
 
     attempts = []
 
@@ -1281,7 +1281,7 @@ def test_walk_recovers_when_a_travel_click_opens_a_dialog(town):
 def test_walk_does_not_retry_a_genuine_pathing_failure(town):
     """A NavigationError with no panel open means the route really failed;
     retrying would just burn time and hide it."""
-    from pd2bot.navigate import NavigationError
+    from pd2bot.nav.navigate import NavigationError
 
     attempts = []
 
@@ -1302,7 +1302,7 @@ def test_a_repeating_misclick_provokes_a_sidestep(town):
     panel and re-walking aims down the same line at the same object. The
     waypoint sits almost in front of Akara, so every travel click toward her
     rakes across it. A step sideways changes the angle."""
-    from pd2bot.navigate import NavigationError
+    from pd2bot.nav.navigate import NavigationError
 
     destination = (5921, 5711)
     attempts = []
@@ -1333,7 +1333,7 @@ def test_a_known_obstacle_is_routed_around_not_merely_stepped_past(town):
     sits at the same y as Akara's approach point, dead on the route, and four
     recoveries all clicked it again. So when the panel names a known object,
     the detour goes around THAT."""
-    from pd2bot.navigate import NavigationError
+    from pd2bot.nav.navigate import NavigationError
 
     destination = (5917, 5709)
     waypoint = CALIBRATED.object_positions[offsets.OBJ_WAYPOINT_A1]
@@ -1364,7 +1364,7 @@ def test_the_first_recovery_does_not_sidestep(town):
     """One interruption may be bad luck — a bystander wandering across the
     route. Only a REPEAT means the route itself is the problem, and a
     sidestep on every recovery would add a detour to ordinary town traffic."""
-    from pd2bot.navigate import NavigationError
+    from pd2bot.nav.navigate import NavigationError
 
     destination = (5921, 5711)
     attempts = []
@@ -1383,7 +1383,7 @@ def test_the_first_recovery_does_not_sidestep(town):
 
 
 def test_walk_gives_up_after_bounded_dialog_recoveries(town):
-    from pd2bot.navigate import NavigationError
+    from pd2bot.nav.navigate import NavigationError
 
     def walk(pos):
         town.panels.add(offsets.UI_NPCMENU)
@@ -1401,7 +1401,7 @@ def test_walk_recovers_from_any_blocking_panel_not_just_dialogs(town):
     an NPC dialog — but town.py listed only three panels and so could
     neither recognise nor close it, and the walk died as a bare
     NavigationError. The recovery list now comes from `uistate`."""
-    from pd2bot.navigate import NavigationError
+    from pd2bot.nav.navigate import NavigationError
 
     attempts = []
 
@@ -2446,7 +2446,7 @@ def test_a_retry_clears_the_cursor_before_re_clicking(town):
 
 
 def _capped(target, arrived_at):
-    from pd2bot.navigate import WalkResult
+    from pd2bot.nav.navigate import WalkResult
 
     return WalkResult(
         target=target, arrived_at=arrived_at, duration_seconds=2.0,
@@ -2455,7 +2455,7 @@ def _capped(target, arrived_at):
 
 
 def _arrived(target):
-    from pd2bot.navigate import WalkResult
+    from pd2bot.nav.navigate import WalkResult
 
     return WalkResult(
         target=target, arrived_at=target, duration_seconds=1.0, waypoints=2,

@@ -26,11 +26,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from pd2bot import mapframe, offsets  # noqa: E402
+from pd2bot import offsets  # noqa: E402
 from pd2bot.cycle import GameCycle  # noqa: E402
 from pd2bot.input.menu import MenuInput  # noqa: E402
-from pd2bot.mapstore import MapStore  # noqa: E402
-from pd2bot.navigate import live_navigator  # noqa: E402
+from pd2bot.nav import mapframe  # noqa: E402
+from pd2bot.nav.mapstore import MapStore  # noqa: E402
+from pd2bot.nav.navigate import live_navigator  # noqa: E402
 from pd2bot.perception.memory import GameSession  # noqa: E402
 from pd2bot.perception.player import read_player  # noqa: E402
 from pd2bot.perception.snapshot import Perception  # noqa: E402

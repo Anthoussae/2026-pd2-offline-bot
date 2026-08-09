@@ -20,8 +20,8 @@ with NON-walkable, -1 ending each row; `exits` keyed by destination area.
 The grid covers exactly the crop rect; world subtile of cell (cx, cy) =
 (offset.x + crop.x0 + cx, offset.y + crop.y0 + cy).
 
-    python -m pd2bot.mapdata --exe PATH --area 3 --seed 0x... [--difficulty 2]
-    python -m pd2bot.mapdata --exe PATH --fidelity [--areas 3 4]   (live game)
+    python -m pd2bot.nav.mapdata --exe PATH --area 3 --seed 0x... [--difficulty 2]
+    python -m pd2bot.nav.mapdata --exe PATH --fidelity [--areas 3 4]   (live game)
 """
 
 from __future__ import annotations
@@ -257,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
         print("nothing to do: pass --area + --seed, or --fidelity", file=sys.stderr)
         return 2
 
-    from pd2bot.collision import read_local_collision
+    from pd2bot.nav.collision import read_local_collision
     from pd2bot.perception.memory import GameNotRunning, GameSession, NeedsAdministrator
     from pd2bot.perception.world import read_area, read_map_seed
 

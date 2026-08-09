@@ -49,7 +49,7 @@ from pd2bot.behavior.necro import NecroCombat
 from pd2bot.behavior.reflex import ReflexLadder
 from pd2bot.behavior.run import build_states, load_run
 from pd2bot.behavior.steps import RunServices, build_registry
-from pd2bot.mapframe import MapFrame
+from pd2bot.nav.mapframe import MapFrame
 from pd2bot.perception.exits import ExitScan, LevelExit
 from pd2bot.perception.items import CarriedItem, CarriedItems
 from pd2bot.perception.player import ActiveSkills, Player

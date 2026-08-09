@@ -9,7 +9,7 @@ re-plan, give up — and the UI-refusal waiting.
 import pytest
 
 from pd2bot.input.gated import InputRefused
-from pd2bot.navigate import (
+from pd2bot.nav.navigate import (
     AVOID_RADIUS,
     MAX_FAILURES,
     NavigationError,
@@ -145,7 +145,7 @@ def test_travel_clicks_avoid_interactive_units():
     opens kills the walk. So clicks aimed near a known hazard are nudged
     away before being sent — Akara's approach can pass the town waypoint
     without ever clicking it."""
-    from pd2bot.navigate import AVOID_RADIUS
+    from pd2bot.nav.navigate import AVOID_RADIUS
 
     world = World()
     sim = Sim(world)
@@ -545,7 +545,7 @@ def test_a_cluster_of_hazards_still_yields_a_clear_click():
     circle and back onto the character, who then never moved and failed the
     walk as "stuck". Nudging must CONVERGE, not just happen.
     """
-    from pd2bot.navigate import AVOID_RADIUS
+    from pd2bot.nav.navigate import AVOID_RADIUS
 
     world = World()
     sim = Sim(world)
@@ -585,7 +585,7 @@ def _hazards_for(monkeypatch, *, objects, allies, in_town, ground_items=None):
     """Run `live_navigator`'s hazard provider over a scripted snapshot."""
     from types import SimpleNamespace
 
-    from pd2bot.navigate import live_navigator
+    from pd2bot.nav.navigate import live_navigator
 
     snap = SimpleNamespace(
         objects=objects, allies=allies, in_town=in_town,
@@ -595,7 +595,7 @@ def _hazards_for(monkeypatch, *, objects, allies, in_town, ground_items=None):
         "pd2bot.perception.snapshot.Perception",
         lambda session: SimpleNamespace(snapshot=lambda: snap),
     )
-    monkeypatch.setattr("pd2bot.navigate.GatedInput", lambda session: object())
+    monkeypatch.setattr("pd2bot.nav.navigate.GatedInput", lambda session: object())
     navigator = live_navigator(object(), store=None, difficulty=2)
     return set(navigator._avoid())
 
@@ -675,7 +675,7 @@ def test_the_sprite_box_matches_what_the_game_actually_did():
     """The three measured clicks, classified. This is the whole fix in one
     assertion: identical world distance, opposite outcomes, and the box has
     to agree with the client rather than with Chebyshev."""
-    from pd2bot.navigate import _inside_sprite
+    from pd2bot.nav.navigate import _inside_sprite
 
     assert _inside_sprite(KASHYA, CLICK_UP_KASHYAS_SPRITE), (
         "the click that opened her dialog is not being avoided"
@@ -701,7 +701,7 @@ def test_an_escape_never_goes_up_screen():
     """Up-screen is behind the unit and is the far wall of a box 150 px tall
     — and it is what the old world-space push chose when it produced the
     click that opened the dialog."""
-    from pd2bot.navigate import _screen_offset, _sprite_escapes
+    from pd2bot.nav.navigate import _screen_offset, _sprite_escapes
 
     for escape in _sprite_escapes(KASHYA):
         _, sy = _screen_offset(KASHYA, escape)
@@ -709,7 +709,7 @@ def test_an_escape_never_goes_up_screen():
 
 
 def test_every_escape_actually_leaves_the_sprite():
-    from pd2bot.navigate import _inside_sprite, _sprite_escapes
+    from pd2bot.nav.navigate import _inside_sprite, _sprite_escapes
 
     for escape in _sprite_escapes(KASHYA):
         assert not _inside_sprite(KASHYA, escape)
@@ -719,7 +719,7 @@ def test_an_escape_also_clears_the_world_radius():
     """A sprite hazard is a world hazard too. An escape that cleared the
     box but sat inside `AVOID_RADIUS` would be rejected by the very next
     check, and the nudge would spin until it ran out of tries."""
-    from pd2bot.navigate import _sprite_escapes
+    from pd2bot.nav.navigate import _sprite_escapes
 
     for escape in _sprite_escapes(KASHYA):
         span = max(abs(escape[0] - KASHYA[0]), abs(escape[1] - KASHYA[1]))
@@ -738,7 +738,7 @@ def test_a_click_up_a_sprite_is_nudged_out_of_it():
 
     point, nudges = nav._nudged_click_point(CLICK_UP_KASHYAS_SPRITE, result)
 
-    from pd2bot.navigate import _inside_sprite
+    from pd2bot.nav.navigate import _inside_sprite
 
     assert nudges >= 1
     assert not _inside_sprite(KASHYA, point)
@@ -862,7 +862,7 @@ def test_an_item_merely_NEAR_the_destination_is_still_avoided():
     Of 39 goal-exempt clicks in one run, 31 were this; 21 landed inside
     the avoid radius and five landed exactly on an item.
     """
-    from pd2bot.navigate import AVOID_MARGIN, AVOID_RADIUS
+    from pd2bot.nav.navigate import AVOID_MARGIN, AVOID_RADIUS
 
     world = World()
     sim = Sim(world)
@@ -938,7 +938,7 @@ def test_a_failing_audit_cannot_break_a_walk():
 def test_a_hazard_short_of_the_destination_is_still_avoided():
     """The narrowing must not disarm the mechanism generally: only what sits
     AT the goal is exempt, not everything on the way to it."""
-    from pd2bot.navigate import AVOID_RADIUS
+    from pd2bot.nav.navigate import AVOID_RADIUS
 
     world = World()
     sim = Sim(world)

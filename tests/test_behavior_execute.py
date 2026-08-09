@@ -468,7 +468,7 @@ class CapturingLog:
 
 
 def test_a_capped_walk_is_recorded(monkeypatch):
-    from pd2bot.navigate import WalkResult
+    from pd2bot.nav.navigate import WalkResult
 
     result = WalkResult(
         target=(150, 100), arrived_at=(120, 100), duration_seconds=2.0,
@@ -486,7 +486,7 @@ def test_a_capped_walk_is_recorded(monkeypatch):
 
 
 def test_an_ordinary_walk_records_no_cap(monkeypatch):
-    from pd2bot.navigate import WalkResult
+    from pd2bot.nav.navigate import WalkResult
 
     result = WalkResult(
         target=(150, 100), arrived_at=(150, 100), duration_seconds=1.0,

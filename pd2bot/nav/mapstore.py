@@ -31,7 +31,7 @@ import json
 import struct
 from pathlib import Path
 
-from pd2bot.collision import LocalCollision, RoomCollision, strip_transient
+from pd2bot.nav.collision import LocalCollision, RoomCollision, strip_transient
 
 FORMAT_VERSION = 1
 DEFAULT_ROOT = Path("maps")

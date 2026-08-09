@@ -214,7 +214,7 @@ def test_shift_released_when_the_key_send_fails(sent, monkeypatch):
 
 
 def test_a_fresh_watchdog_latch_refuses_world_input(tmp_path):
-    from pd2bot.watchdog import write_latch
+    from pd2bot.safety.watchdog import write_latch
 
     latch = tmp_path / "watchdog-latch"
     write_latch("life", latch, pct=28.0)
@@ -230,7 +230,7 @@ def test_a_stale_latch_does_not_disarm_the_bot_for_ever(tmp_path):
     lesson the drill cancel file already taught this project."""
     import time as _time
 
-    from pd2bot.watchdog import LATCH_STALE_AFTER_S, write_latch
+    from pd2bot.safety.watchdog import LATCH_STALE_AFTER_S, write_latch
 
     latch = tmp_path / "watchdog-latch"
     write_latch("life", latch, now=_time.time() - LATCH_STALE_AFTER_S - 60)
@@ -257,7 +257,7 @@ def test_the_latch_check_is_cached_rather_than_stat_per_click(tmp_path):
     )
     guarded.check()  # primes the cache: no latch
 
-    from pd2bot.watchdog import write_latch
+    from pd2bot.safety.watchdog import write_latch
 
     write_latch("life", latch)
     guarded.check()  # still cached, so still allowed -- documented behaviour
@@ -271,7 +271,7 @@ def test_menu_input_ignores_the_latch(tmp_path):
     a watchdog pause would leave the bot unable to finish the exit that
     should follow it."""
     from pd2bot.input.menu import MenuInput
-    from pd2bot.watchdog import write_latch
+    from pd2bot.safety.watchdog import write_latch
 
     write_latch("life", tmp_path / "watchdog-latch")
     menu = MenuInput(

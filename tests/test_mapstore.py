@@ -5,8 +5,8 @@ import json
 import struct
 
 from pd2bot import offsets
-from pd2bot.collision import LocalCollision, RoomCollision, strip_transient
-from pd2bot.mapstore import MapStore
+from pd2bot.nav.collision import LocalCollision, RoomCollision, strip_transient
+from pd2bot.nav.mapstore import MapStore
 
 SEED = 0x1234ABCD
 HELL = 2

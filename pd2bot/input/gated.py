@@ -33,12 +33,13 @@ from pathlib import Path
 # the latch cache must not be the reason input becomes untestable.
 from time import monotonic as _monotonic
 
-from pd2bot import offsets, watchdog
+from pd2bot import offsets
 from pd2bot.input.screen import clickable, projection_for
 from pd2bot.input.window import GameWindow
 from pd2bot.perception import uistate
 from pd2bot.perception.memory import GameSession
 from pd2bot.perception.units import player_unit, unit_position
+from pd2bot.safety import watchdog
 
 user32 = ctypes.windll.user32
 
@@ -246,7 +247,7 @@ class GatedInput:
         self._ui_array = (
             ui_array if ui_array is not None else uistate.find_ui_array(session)
         )
-        # The watchdog's latch (see `pd2bot.watchdog`). Cached for a beat
+        # The watchdog's latch (see `pd2bot.safety.watchdog`). Cached for a beat
         # because `check()` runs on EVERY send and a stat per click is a
         # syscall nobody asked for; half a second is far shorter than any
         # window in which it matters.

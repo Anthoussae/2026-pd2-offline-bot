@@ -11,7 +11,7 @@ from pd2bot.behavior.execute import RecordingExecutor
 from pd2bot.behavior.necro import CombatConfig, NecroCombat
 from pd2bot.behavior.run import RunError, build_states, load_run
 from pd2bot.behavior.steps import RunServices, _chebyshev, build_registry
-from pd2bot.navigate import NavigationError
+from pd2bot.nav.navigate import NavigationError
 from pd2bot.perception.items import CarriedItems
 from pd2bot.perception.player import Player
 from pd2bot.perception.snapshot import GameSnapshot

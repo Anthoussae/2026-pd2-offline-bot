@@ -32,7 +32,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from pd2bot import mapframe, offsets
+from pd2bot import offsets
 from pd2bot.behavior.actions import (
     PICKUP_AIM_POINTS,
     Action,
@@ -53,6 +53,7 @@ from pd2bot.input.skills import (
     belt_give_merc,
     ensure_right_skill,
 )
+from pd2bot.nav import mapframe
 from pd2bot.perception.memory import GameSession
 from pd2bot.perception.player import read_player
 from pd2bot.perception.units import label_display_on

@@ -3,7 +3,7 @@
 import struct
 
 from pd2bot import offsets
-from pd2bot.collision import (
+from pd2bot.nav.collision import (
     LocalCollision,
     RoomCollision,
     ascii_map,

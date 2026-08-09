@@ -43,8 +43,8 @@ sys.path.insert(0, str(REPO))
 
 from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.mapstore import MapStore  # noqa: E402
-from pd2bot.navigate import (  # noqa: E402
+from pd2bot.nav.mapstore import MapStore  # noqa: E402
+from pd2bot.nav.navigate import (  # noqa: E402
     WALK_BUDGET_SECONDS,
     Navigator,
     live_navigator,

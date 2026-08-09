@@ -4,9 +4,9 @@ import struct
 from pathlib import Path
 
 from pd2bot import offsets
-from pd2bot.collision import RoomCollision
-from pd2bot.mapstore import ExploredArea
-from pd2bot.survey import CLUSTER, coverage, frontier_targets
+from pd2bot.nav.collision import RoomCollision
+from pd2bot.nav.mapstore import ExploredArea
+from pd2bot.nav.survey import CLUSTER, coverage, frontier_targets
 
 WALL = offsets.COLL_BLOCK_WALL
 

@@ -19,7 +19,7 @@ from pd2bot.cycle import (
 )
 from pd2bot.input.gated import InputRefused
 from pd2bot.input.window import ClientRect
-from pd2bot.navigate import NavigationError
+from pd2bot.nav.navigate import NavigationError
 from pd2bot.perception import oog, uistate
 
 RECT = ClientRect(left=0, top=0, width=1536, height=864)

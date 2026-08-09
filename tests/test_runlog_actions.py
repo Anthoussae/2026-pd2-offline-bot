@@ -12,7 +12,7 @@ from pd2bot.behavior.actions import (
     PickUpItem,
 )
 from pd2bot.behavior.execute import RecordingExecutor
-from pd2bot.mapframe import MapFrame
+from pd2bot.nav.mapframe import MapFrame
 from pd2bot.perception.world import Area
 from pd2bot.pickit import ItemTable
 from pd2bot.runlog import NullRunLog, RunLog, load

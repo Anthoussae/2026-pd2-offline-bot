@@ -53,7 +53,7 @@ from dataclasses import dataclass, field
 from pd2bot import offsets
 from pd2bot.input.gated import InputRefused
 from pd2bot.input.menu import MenuInput
-from pd2bot.navigate import NavigationError
+from pd2bot.nav.navigate import NavigationError
 from pd2bot.perception import oog, uistate, world
 from pd2bot.perception.memory import GameSession
 from pd2bot.safety import ChickenExit, DeathHalt

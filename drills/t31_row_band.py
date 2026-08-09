@@ -45,8 +45,8 @@ from pd2bot.input.gated import GatedInput  # noqa: E402
 from pd2bot.input.menu import MenuInput  # noqa: E402
 from pd2bot.input.panel import PanelInput  # noqa: E402
 from pd2bot.input.screen import projection_for  # noqa: E402
-from pd2bot.mapstore import MapStore  # noqa: E402
-from pd2bot.navigate import live_navigator  # noqa: E402
+from pd2bot.nav.mapstore import MapStore  # noqa: E402
+from pd2bot.nav.navigate import live_navigator  # noqa: E402
 from pd2bot.perception.memory import GameSession  # noqa: E402
 from pd2bot.perception.player import read_player  # noqa: E402
 from pd2bot.perception.snapshot import Perception  # noqa: E402

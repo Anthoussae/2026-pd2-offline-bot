@@ -8,7 +8,7 @@ d2mapapi_mod's own collisionmap.h (X = collision, . = open):
 
 import pytest
 
-from pd2bot.mapdata import MapServiceError, compare_with_live, decode_area_map
+from pd2bot.nav.mapdata import MapServiceError, compare_with_live, decode_area_map
 
 
 def payload(**overrides):

@@ -11,7 +11,7 @@ criteria rather than in a comment.
 from __future__ import annotations
 
 from drills.t80_safety_interrupt import CAP_SLACK_S, PROMPT_S, verdict
-from pd2bot.navigate import WALK_BUDGET_SECONDS
+from pd2bot.nav.navigate import WALK_BUDGET_SECONDS
 
 GOOD_CAP = WALK_BUDGET_SECONDS
 GOOD_LATENCY = 0.1

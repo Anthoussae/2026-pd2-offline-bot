@@ -23,7 +23,7 @@ store. Everything here is unit-testable with hand-built rooms.
 
 from __future__ import annotations
 
-from pd2bot.mapstore import ExploredArea
+from pd2bot.nav.mapstore import ExploredArea
 
 Point = tuple[int, int]
 

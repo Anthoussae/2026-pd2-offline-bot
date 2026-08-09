@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from pd2bot.narrate import Narrator, noop
+from pd2bot.runlog.narrate import Narrator, noop
 
 
 class Clock:

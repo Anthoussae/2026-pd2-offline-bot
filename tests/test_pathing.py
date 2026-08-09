@@ -2,7 +2,7 @@
 
 import pytest
 
-from pd2bot.pathing import (
+from pd2bot.nav.pathing import (
     OverlayGrid,
     SearchLimitExceeded,
     astar,

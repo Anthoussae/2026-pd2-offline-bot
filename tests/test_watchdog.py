@@ -16,7 +16,7 @@ import pytest
 from pd2bot import offsets
 from pd2bot.perception.player import Player
 from pd2bot.perception.world import Area
-from pd2bot.watchdog import (
+from pd2bot.safety.watchdog import (
     DEATH_CONFIRMATIONS,
     HEARTBEAT_STALE_AFTER_S,
     LATCH_STALE_AFTER_S,
@@ -318,8 +318,8 @@ def test_clear_latch_is_safe_when_there_is_nothing_to_clear(tmp_path):
 def test_the_default_threshold_sits_below_the_bots(monkeypatch):
     """A backstop that fires first is not a backstop: the bot's own leave
     is graceful and live-verified, and should win whenever it can."""
-    from pd2bot import watchdog as module
     from pd2bot.behavior import combat
+    from pd2bot.safety import watchdog as module
 
     monkeypatch.setattr(
         combat, "load_class_config",
@@ -329,8 +329,8 @@ def test_the_default_threshold_sits_below_the_bots(monkeypatch):
 
 
 def test_an_unreadable_class_config_still_leaves_it_armed(monkeypatch):
-    from pd2bot import watchdog as module
     from pd2bot.behavior import combat
+    from pd2bot.safety import watchdog as module
 
     def explode(path):
         raise OSError("no config here")
@@ -647,7 +647,7 @@ def test_nothing_in_the_poll_loop_uses_the_beeping_alarm():
     """
     import inspect
 
-    from pd2bot import watchdog as module
+    from pd2bot.safety import watchdog as module
 
     # The rule is not "never alert in the loop" — it is "never alert on a
     # path that CONTINUES". `tick`'s death alarm is exempt and should be:

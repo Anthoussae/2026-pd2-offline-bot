@@ -13,12 +13,12 @@ import pytest
 
 from pd2bot import offsets
 from pd2bot.input.window import ClientRect
+from pd2bot.nav.waypoint import WaypointConfig, WaypointError, WaypointTravel
 from pd2bot.perception.uistate import UIState
 from pd2bot.perception.units import GameObject
 from pd2bot.perception.world import Area
 from pd2bot.town import TownConfig, TownError, TownLayer
 from pd2bot.uipoints import default_points
-from pd2bot.waypoint import WaypointConfig, WaypointError, WaypointTravel
 
 RECT = ClientRect(left=100, top=50, width=1536, height=864)
 WP_POS = (5884, 5709)
@@ -59,12 +59,12 @@ class FakeClock:
 def world(monkeypatch):
     state = World()
     read_ui = lambda session=None, ui_array=None: UIState(frozenset(state.panels))  # noqa: E731
-    monkeypatch.setattr("pd2bot.waypoint.uistate.read_ui_state", read_ui)
+    monkeypatch.setattr("pd2bot.nav.waypoint.uistate.read_ui_state", read_ui)
     monkeypatch.setattr("pd2bot.town.uistate.read_ui_state", read_ui)
     area = lambda session=None: Area(  # noqa: E731
         level_no=state.area, position=(0, 0), size=(100, 100)
     )
-    monkeypatch.setattr("pd2bot.waypoint.read_area", area)
+    monkeypatch.setattr("pd2bot.nav.waypoint.read_area", area)
     return state
 
 

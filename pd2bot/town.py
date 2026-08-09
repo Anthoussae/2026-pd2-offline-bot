@@ -58,7 +58,7 @@ from pd2bot.input.gated import VK_DOWN, VK_I, VK_RETURN, GatedInput
 from pd2bot.input.menu import MenuInput
 from pd2bot.input.panel import PanelInput
 from pd2bot.input.screen import projection_for
-from pd2bot.navigate import NavigationError
+from pd2bot.nav.navigate import NavigationError
 from pd2bot.perception import uistate
 from pd2bot.perception.items import (
     CarriedItem,

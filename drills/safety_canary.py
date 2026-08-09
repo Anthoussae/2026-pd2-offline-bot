@@ -52,7 +52,7 @@ from drills.t80_safety_interrupt import (  # noqa: E402
     CAP_SLACK_S,
     PROMPT_S,
 )
-from pd2bot import offsets, watchdog  # noqa: E402
+from pd2bot import offsets  # noqa: E402
 from pd2bot.behavior.engine import (  # noqa: E402
     BehaviorEngine,
     EngineConfig,
@@ -61,8 +61,8 @@ from pd2bot.behavior.engine import (  # noqa: E402
 from pd2bot.cycle import GameCycle  # noqa: E402
 from pd2bot.input.gated import GatedInput, InputRefused  # noqa: E402
 from pd2bot.input.menu import MenuInput  # noqa: E402
-from pd2bot.mapstore import MapStore  # noqa: E402
-from pd2bot.navigate import (  # noqa: E402
+from pd2bot.nav.mapstore import MapStore  # noqa: E402
+from pd2bot.nav.navigate import (  # noqa: E402
     WALK_BUDGET_SECONDS,
     live_navigator,
     pick_reachable_target,
@@ -75,6 +75,7 @@ from pd2bot.safety import (  # noqa: E402
     SafetyConfig,
     SafetyInterrupt,
     SafetyMonitor,
+    watchdog,  # noqa: E402
 )
 
 WATCHDOG_FIRE_TIMEOUT_S = 20.0
@@ -275,7 +276,7 @@ def round_watchdog_fires(session, ui_array) -> tuple[Round, subprocess.Popen | N
         # --mana 100 for the same reason round 2 uses 100: at full mana a
         # 99% threshold is never crossed, and the round would time out
         # while appearing to test something.
-        [sys.executable, "-m", "pd2bot.watchdog", "--mana", "100", "--in-town"],
+        [sys.executable, "-m", "pd2bot.safety.watchdog", "--mana", "100", "--in-town"],
         cwd=str(REPO),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

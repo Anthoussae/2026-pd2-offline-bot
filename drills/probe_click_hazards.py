@@ -35,7 +35,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pd2bot.navigate import AVOID_RADIUS  # noqa: E402
+from pd2bot.nav.navigate import AVOID_RADIUS  # noqa: E402
 from pd2bot.perception.memory import GameSession  # noqa: E402
 from pd2bot.perception.snapshot import Perception  # noqa: E402
 
