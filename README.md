@@ -131,8 +131,15 @@ and putting thousands of venv files there makes every install crawl.
 
 ```bash
 py -3.12 -m venv "$HOME/.venvs/pd2bot"
-"$HOME/.venvs/pd2bot/Scripts/python.exe" -m pip install pytest ruff pymem
+"$HOME/.venvs/pd2bot/Scripts/python.exe" -m pip install -r requirements.txt
 ```
+
+`requirements.txt` is the locked dependency set: every install (yours,
+CI's, a new machine's) gets exactly the versions validated here. To
+upgrade a dependency: `pip install --upgrade <package>` in the venv, run
+the tests and lint, edit the pin in `requirements.txt` to match, and
+push — CI re-proves the new set on a fresh machine. Never regenerate the
+file with a bare `pip freeze` (the venv carries unrelated build tools).
 
 The package is imported from the repo root rather than installed, so run
 commands from there.
@@ -153,9 +160,12 @@ game can.
 CI runs both checks automatically on every push: GitHub Actions
 (`.github/workflows/ci.yml`) runs the full pytest suite and `ruff check` on a
 Windows runner (the code imports Win32 APIs at module load, so Linux runners
-cannot collect it). Green CI means the offline half is sound; it verifies
-nothing about the live game — offsets and calibrations remain the job of
-`pd2bot.dump` and the drills.
+cannot collect it). A separate weekly canary job runs the same checks against
+the *latest unpinned* dependency versions, so upstream breakage is noticed on
+schedule rather than during setup on a new machine — a red canary never blocks
+merges. Green CI means the offline half is sound; it verifies nothing about
+the live game — offsets and calibrations remain the job of `pd2bot.dump` and
+the drills.
 
 ## Setting up a new machine
 

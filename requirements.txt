@@ -1,0 +1,15 @@
+# The locked dependency set. The ONE install command (README has the ritual):
+#     pip install -r requirements.txt
+# Direct dependencies — the intent behind these lives in pyproject.toml:
+Pymem==1.14.0
+pytest==9.1.1
+ruff==0.16.0
+# Transitive (pulled in by pytest), pinned so installs are fully reproducible:
+colorama==0.4.6
+iniconfig==2.3.0
+packaging==26.2
+pluggy==1.6.0
+Pygments==2.20.0
+# Never regenerate this file with a bare `pip freeze`: the dev venv carries
+# non-bot tools (cmake, ninja — d2mapapi_mod build leftovers) that must not
+# be locked in here.
