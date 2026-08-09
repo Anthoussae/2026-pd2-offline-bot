@@ -736,3 +736,56 @@ def test_a_dead_critter_is_not_revive_fuel():
     scan = scan_units(FakeSession(mem))
     assert [c.unit_id for c in scan.critters] == [650373]
     assert not scan.corpses, "a dead critter was filed as revive fuel"
+
+
+def _town_npc_scan(**npc_kwargs):
+    """Akara as the client actually holds her: friendly, and carrying no
+    combat stats — no level, no resistances, no experience, exactly the
+    stat list that makes a decorative bat scenery."""
+    mem = FakeMemory()
+    mem.write(CLIENT_BASE + offsets.PLAYER_UNIT_PTR, u32(PLAYER))
+    mem.write_fields(PLAYER, {offsets.UNIT_PATH: u32(PLAYER_PATH)})
+    mem.write_fields(
+        PLAYER_PATH,
+        {offsets.PATH_ROOM1: u32(ROOM_A),
+         offsets.PATH_X: u32(100)[:2], offsets.PATH_Y: u32(200)[:2]},
+    )
+    akara = add_monster(
+        mem, 0x0B035000, 77, offsets.NPC_AKARA, (104, 204), 0, 0,
+        level=None, alignment=offsets.ALIGNMENT_FRIENDLY, **npc_kwargs,
+    )
+    mem.write_fields(
+        ROOM_A,
+        {offsets.ROOM1_UNIT_FIRST: u32(akara),
+         offsets.ROOM1_ROOMS_NEAR: u32(0), offsets.ROOM1_ROOMS_NEAR_COUNT: u32(0)},
+    )
+    hash_table(mem, {offsets.UNIT_TYPE_MONSTER: [akara]})
+    return scan_units(FakeSession(mem))
+
+
+def test_a_town_npc_is_an_ally_not_a_critter():
+    """2026-08-08. Review 002 hoisted the combat-rated test above the ally
+    test to get it above the CORPSE test, and town NPCs carry no combat
+    stats either — so Akara filed as scenery. Everything that looks for an
+    NPC looks in `allies`, so the heal step could no longer see her
+    ("still not visible after walking to (5922, 5714)") and travel clicks
+    stopped avoiding her, which put the R66/R68 misclick back in the game.
+
+    Friendly is the discriminator: T72's bats were being ATTACKED, so they
+    were never friendly, while the pre-regression run log counted 11
+    friendly units in the Rogue Encampment.
+    """
+    scan = _town_npc_scan()
+    assert [a.kind for a in scan.allies] == [offsets.NPC_AKARA]
+    assert not scan.critters, "a town NPC was filed as decorative scenery"
+    assert not scan.monsters, "a town NPC became a combat target"
+
+
+def test_a_town_npc_survives_carrying_no_hp_stat():
+    """The NPC arrives whatever her HP stat says. Consumers must not filter
+    her on `is_alive` — see the hazard rule in `navigate.clickable_hazards`,
+    which is why this asserts the field rather than trusting it."""
+    scan = _town_npc_scan()
+    akara = scan.allies[0]
+    assert not akara.combat_rated  # she is not a fighter; she is still an ally
+    assert not akara.is_corpse

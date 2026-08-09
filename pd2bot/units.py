@@ -569,7 +569,7 @@ def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitSca
             monster = _read_monster(session, unit)
             if monster is not None and near(monster.position):
                 seen.add(key)
-                if not monster.combat_rated:
+                if not monster.combat_rated and not monster.is_ally:
                     # Scenery, not an enemy (T74). The bot spent 173 s of
                     # T72 attacking two decorative bats 23 times each
                     # because "did not prove itself friendly" was the
@@ -582,6 +582,27 @@ def scan_units(session: GameSession, radius: int = PERCEPTION_RADIUS) -> UnitSca
                     # are revive fuel — the bot could raise a decorative bat
                     # into the wall its whole combat design depends on.
                     # Scenery is scenery whether it is standing or not.
+                    #
+                    # ...but a FRIENDLY unit is never scenery, and that
+                    # clause is load-bearing (2026-08-08). Review 002
+                    # hoisted this test to the top to get it above the
+                    # corpse check; that also put it above the ally check,
+                    # and **town NPCs carry no combat stats either** — no
+                    # level, no resistances, no experience, exactly like
+                    # the bat. So Akara, Kashya and Charsi quietly became
+                    # critters, and both things that look for an NPC look
+                    # in `allies`: `town._find_ally` (the heal and repair
+                    # steps stopped being able to see an NPC they were
+                    # standing next to) and `navigate.clickable_hazards`
+                    # (travel clicks stopped avoiding NPCs, so crossing
+                    # town went back to opening their dialogs — the
+                    # R66/R68 misclick, returned).
+                    #
+                    # Measured in the run event log rather than argued:
+                    # town ticks at 02:26 on 2026-08-06 report 11 allies
+                    # and 2-5 critters; every run after 02:36 that day
+                    # reports 1 ally (the merc) and 12-15 critters. Ten
+                    # units changed list, and nothing else changed.
                     critters.append(monster)
                 elif monster.is_corpse:
                     corpses.append(monster)
