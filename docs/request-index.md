@@ -272,3 +272,4 @@ headings, noted in parentheses, say roughly where they fell).
 - R238 resolved (all yes; lockfile + canary live, CI green) · 2026-08-09 03:51
 - R239 [decision] Package-restructure plan: timing + confirmations Q1–Q7 · 2026-08-09 04:01
 - R239 resolved (now + all yes; 7-phase md plan, branch restructure) · 2026-08-09 05:06
+- R240 [execute] Clear the client for the restructure smoke run · 2026-08-09 05:33
