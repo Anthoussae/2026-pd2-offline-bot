@@ -291,6 +291,21 @@ trigger exactly two commands (a whitelist), only while a test is
 active; it cannot become a general remote control by accident. *(First
 seen: 2026-08-01, building the workflow itself.)*
 
+**lockfile / pinning** — pinning is declaring exact dependency versions
+(`pytest==9.1.1`) instead of "whatever is newest"; a lockfile is the
+file recording the exact version of *everything* the project installs,
+transitives included, so every machine reproduces the validated
+environment. Must be curated, not dumped from a venv (which accumulates
+unrelated tools). Ours is `requirements.txt`. *(First seen: 2026-08-09,
+dependency pinning.)*
+
+**canary** — a small, expendable check exposed to danger first so the
+real thing doesn't find it the hard way: a deployment to 1% of users, or
+our weekly CI job that installs the latest *unpinned* dependencies and
+runs the suite. Red canary = upstream moved and broke us; nothing else
+is blocked. Named for the mine bird. See also *staged rollout*.
+*(First seen: 2026-08-09, dependency pinning.)*
+
 **linter / formatter** — a linter reads source code and flags likely mistakes and
 style violations; a formatter rewrites layout into one consistent shape so the
 team never argues about it. This project uses `ruff` for both. First seen in
@@ -515,6 +530,12 @@ can ask. Ours kills monsters slowly, refuses one pickup outright, and
 treats a keypress as a request whose effect must be read back — and it
 found two real bugs on its first run. First seen in
 [simulating the game](2026-07-31-simulating-the-game.md).
+
+**transitive dependency** — a dependency of your dependency: install
+pytest and pip silently brings five more packages pytest needs. They are
+part of your real environment whether or not you name them, which is why
+a lockfile pins them too — three declared packages here are eight
+installed ones. *(First seen: 2026-08-09, dependency pinning.)*
 
 **transient vs persistent state** — data with a short lifetime (a
 monster's position this instant) versus data that stays true (a wall).

@@ -269,3 +269,4 @@ headings, noted in parentheses, say roughly where they fell).
 - R237 [decision] Approve the CI commit + push (the push IS the validation) · 2026-08-09 03:11
 - R237 resolved (all yes; CI live, first run green 40s) · 2026-08-09 03:18
 - R238 [decision] Dependency-pinning plan: confirmations Q1–Q5 · 2026-08-09 03:35
+- R238 resolved (all yes; lockfile + canary live, CI green) · 2026-08-09 03:51

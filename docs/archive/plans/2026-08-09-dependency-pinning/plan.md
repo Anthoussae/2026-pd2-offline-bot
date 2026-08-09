@@ -2,9 +2,11 @@
 kind: plan
 size: sm
 depth: small
-status: active
+status: done
 repo: 2026-pd2-offline-bot
 created: 2026-08-09
+completed: 2026-08-09
+commit: fa56adb
 adr: none
 ---
 
