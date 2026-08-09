@@ -48,10 +48,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot.behavior.combat import load_class_config  # noqa: E402
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
-from pd2bot.input import GatedInput  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.player import read_active_skills, read_player  # noqa: E402
-from pd2bot.skills import SkillSwitchFailed, ensure_right_skill  # noqa: E402
+from pd2bot.input.gated import GatedInput  # noqa: E402
+from pd2bot.input.skills import SkillSwitchFailed, ensure_right_skill  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.player import read_active_skills, read_player  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 

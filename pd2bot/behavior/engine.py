@@ -37,15 +37,16 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from pd2bot import mapframe, offsets
+from pd2bot import offsets
 from pd2bot.behavior.actions import ActionExecutor
 from pd2bot.behavior.reflex import ReflexLadder
-from pd2bot.input import InputRefused
-from pd2bot.narrate import noop as narrate_noop
+from pd2bot.input.gated import InputRefused
+from pd2bot.input.skills import SkillSwitchFailed
+from pd2bot.nav import mapframe
+from pd2bot.perception.snapshot import GameSnapshot
 from pd2bot.runlog import NullRunLog
+from pd2bot.runlog.narrate import noop as narrate_noop
 from pd2bot.safety import ChickenExit, DeathHalt, SafetyInterrupt
-from pd2bot.skills import SkillSwitchFailed
-from pd2bot.snapshot import GameSnapshot
 
 # Two different ways a send can fail to land, treated identically on
 # purpose. `InputRefused` is the guard saying "not now"; `SkillSwitchFailed`
@@ -247,7 +248,7 @@ class EngineConfig:
     # the menu instead); beyond it, the menu is the operator's.
     operator_escape_grace_s: float = 1.5
     # Whether this run insists the out-of-process chicken watchdog is
-    # alive (`pd2bot.watchdog`). OPT-IN, and the default must stay False:
+    # alive (`pd2bot.safety.watchdog`). OPT-IN, and the default must stay False:
     # sims and the many drills that build an engine bare have no watchdog
     # and must keep working. `tools/live-run.ps1` — the real entry point,
     # and the one that starts a watchdog — turns it on.
@@ -315,7 +316,7 @@ class BehaviorEngine:
         # None = no kill switch in this environment (sims, drills that
         # build the engine bare).
         self._bot_escape_at = bot_escape_at
-        # The out-of-process safety layer (`pd2bot.watchdog`): is it
+        # The out-of-process safety layer (`pd2bot.safety.watchdog`): is it
         # alive, and has it fired? Both None in every environment that
         # has no watchdog — sims, drills, the CLI — which is why the
         # dead-man check is opt-in rather than default-on.
@@ -440,7 +441,7 @@ class BehaviorEngine:
         raise WatchdogDown(
             "the chicken watchdog is not running (no fresh heartbeat) and "
             "this run requires it — start it with "
-            "`python -m pd2bot.watchdog` and launch again"
+            "`python -m pd2bot.safety.watchdog` and launch again"
         )
 
     def _watchdog_chickened(self) -> dict | None:

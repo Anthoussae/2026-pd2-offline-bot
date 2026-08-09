@@ -144,7 +144,7 @@ dormant alternative for maps the bot has never walked; it is blocked on
 this machine by PD2's modified DLLs. History and unblock path: the
 map-knowledge ADR and the M3 planning dir's `generator-status.md`.
 
-## Planning and walking (`pathing.py`, `navigate.py`)
+## Planning and walking (`nav/pathing.py`, `nav/navigate.py`)
 
 `pathing.py` is pure logic (no game, no OS, fully unit-tested): A* over
 anything with `is_walkable`/`is_known` — 8-directional, integer costs
@@ -155,7 +155,7 @@ width and the game wall-slides where pointsized math would clip).
 cap keeps every hop clickable on screen. `OverlayGrid` merges the
 generated base with live patches (live wins where known).
 
-`navigate.py` follows waypoints with gated clicks and watches the
+`nav/navigate.py` follows waypoints with gated clicks and watches the
 player's actual position. The escalation ladder when position stops
 changing: re-click → re-plan from where we really are (fresh grids) →
 after 5 *no-progress* plan cycles, raise `NavigationError` with the
@@ -172,7 +172,7 @@ navigator's world is still one area with static walls, and M6's
 Countess route (Black Marsh → Forgotten Tower → five cellar levels)
 is where that changes.
 
-## Where a travel click may land (`navigate.py`, the nudge)
+## Where a travel click may land (`nav/navigate.py`, the nudge)
 
 A click's only job is to make the character walk that way, so landing a
 few subtiles off costs nothing — the loop re-plans freely, and arrival is
@@ -233,7 +233,7 @@ border cannot flip which area's grid plans the next walk (T55 run 2's
 lesson).
 
 All timing is injected, so the whole ladder is tested against a scripted
-fake world in `tests/test_navigate.py` — the game is only needed for the
+fake world in `tests/nav/test_navigate.py` — the game is only needed for the
 acceptance walks (`python -m pd2bot.navigate --demo`).
 
 ## The route service: steps ask the map too (R181)

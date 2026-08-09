@@ -41,7 +41,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 OUT_PATH = REPO / "config" / "item_codes.toml"

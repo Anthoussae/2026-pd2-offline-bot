@@ -39,11 +39,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pd2bot import offsets, uistate  # noqa: E402
+from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
-from pd2bot.items import read_equipped_durability  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.snapshot import Perception  # noqa: E402
+from pd2bot.perception import uistate  # noqa: E402
+from pd2bot.perception.items import read_equipped_durability  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.snapshot import Perception  # noqa: E402
 from pd2bot.uipoints import default_points  # noqa: E402
 
 SETTLE_S = 1.2  # a transition counts only once the panel set stops moving

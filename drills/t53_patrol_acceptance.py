@@ -43,7 +43,7 @@ from pd2bot.drill import (  # noqa: E402
     DrillRun,
     run_drill,
 )
-from pd2bot.memory import GameSession  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
 from pd2bot.wiring import BotPaths, build_bot, describe  # noqa: E402
 
 T53 = Drill(

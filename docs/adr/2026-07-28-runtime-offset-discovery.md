@@ -71,3 +71,6 @@ lockstep with the automap key.
   have revealed: several slots are always-on flags rather than panel
   indicators. That was settled by live calibration and is recorded in a
   table in `pd2bot/uistate.py`.
+
+*(2026-08-09: module paths above predate the package restructure; see
+docs/adr/2026-08-09-package-layout.md for the current layout.)*

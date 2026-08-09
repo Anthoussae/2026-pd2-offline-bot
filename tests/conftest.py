@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import struct
 
-from pd2bot.memory import GameSession
+from pd2bot.perception.memory import GameSession
 
 CLIENT_BASE = 0x6FAB0000
 WIN_BASE = 0x6F8E0000

@@ -49,16 +49,16 @@ from pd2bot.behavior.necro import NecroCombat
 from pd2bot.behavior.reflex import ReflexLadder
 from pd2bot.behavior.run import build_states, load_run
 from pd2bot.behavior.steps import RunServices, build_registry
-from pd2bot.exits import ExitScan, LevelExit
-from pd2bot.items import CarriedItem, CarriedItems
-from pd2bot.mapframe import MapFrame
+from pd2bot.nav.mapframe import MapFrame
+from pd2bot.perception.exits import ExitScan, LevelExit
+from pd2bot.perception.items import CarriedItem, CarriedItems
+from pd2bot.perception.player import ActiveSkills, Player
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.perception.units import GroundItem, Monster
+from pd2bot.perception.world import Area
 from pd2bot.pickit import Pickit, Rule
-from pd2bot.player import ActiveSkills, Player
 from pd2bot.runlog import NullRunLog
 from pd2bot.safety import SafetyConfig, SafetyMonitor
-from pd2bot.snapshot import GameSnapshot
-from pd2bot.units import GroundItem, Monster
-from pd2bot.world import Area
 
 REPO = Path(__file__).resolve().parent.parent
 TOWN, COLD_PLAINS = offsets.AREA_ROGUE_ENCAMPMENT, offsets.AREA_COLD_PLAINS
@@ -575,12 +575,12 @@ def build_sim(
 
     if monkeypatch is not None:
         monkeypatch.setattr(
-            "pd2bot.skills.read_active_skills", world.active_skills
+            "pd2bot.input.skills.read_active_skills", world.active_skills
         )
         monkeypatch.setattr("pd2bot.behavior.execute.read_player", world.player)
         # Skill verification polls; give it the world's clock so no test
         # ever sleeps for real.
-        monkeypatch.setattr("pd2bot.skills.time.sleep", lambda s: None)
+        monkeypatch.setattr("pd2bot.input.skills.time.sleep", lambda s: None)
 
     gated = SimGated(world, config.hotkeys)
     log = runlog if runlog is not None else NullRunLog()
@@ -836,7 +836,7 @@ def main() -> int:  # pragma: no cover - the artifact generator
     import sys
 
     import pd2bot.behavior.execute as execute_mod
-    import pd2bot.skills as skills_mod
+    import pd2bot.input.skills as skills_mod
 
     which = sys.argv[1] if len(sys.argv) > 1 else "cold-plains"
     world, run_file, budget = {

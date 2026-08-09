@@ -28,10 +28,10 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from pd2bot.behavior.engine import BehaviorEngine, IdleBail
+from pd2bot.behavior.town import StashFull, TownError
 from pd2bot.cycle import CycleError
-from pd2bot.memory import GameSession
+from pd2bot.perception.memory import GameSession
 from pd2bot.safety import ChickenExit, DeathHalt
-from pd2bot.town import StashFull, TownError
 
 
 class IdleLoopHalt(CycleError):

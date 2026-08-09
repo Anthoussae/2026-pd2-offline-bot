@@ -48,7 +48,7 @@ eventually forget:
 
 ## Coordinates
 
-Every spatial field carries three frames (`pd2bot/mapframe.py`):
+Every spatial field carries three frames (`pd2bot/nav/mapframe.py`):
 
 ```json
 {"world": [10002, 8013], "local": [2, 13], "rel": [-4, 11],

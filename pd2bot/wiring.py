@@ -35,7 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from pd2bot import mapframe, offsets, survey, watchdog
+from pd2bot import offsets
 from pd2bot.behavior.combat import ClassConfig, load_class_config
 from pd2bot.behavior.engine import BehaviorEngine, EngineConfig
 from pd2bot.behavior.execute import GameActionExecutor
@@ -44,27 +44,28 @@ from pd2bot.behavior.reflex import ReflexLadder, read_armor_ratio
 from pd2bot.behavior.run import build_states, default_registry, load_run
 from pd2bot.behavior.runner import BehaviorRunner
 from pd2bot.behavior.steps import RunServices, build_registry
-from pd2bot.chat import Chat
+from pd2bot.behavior.town import PreambleReport, TownConfig, TownLayer
 from pd2bot.cycle import GameCycle
-from pd2bot.exits import ExitMemory, read_level_exits
-from pd2bot.input import GatedInput
-from pd2bot.items import read_carried_items
-from pd2bot.mapstore import MapStore
-from pd2bot.memory import GameSession
-from pd2bot.menuinput import MenuInput
-from pd2bot.narrate import Narrator
-from pd2bot.navigate import live_navigator
-from pd2bot.panelinput import PanelInput
-from pd2bot.pathing import astar, nearest_walkable, simplify
+from pd2bot.input.chat import Chat
+from pd2bot.input.gated import GatedInput
+from pd2bot.input.menu import MenuInput
+from pd2bot.input.panel import PanelInput
+from pd2bot.nav import mapframe, survey
+from pd2bot.nav.mapstore import MapStore
+from pd2bot.nav.navigate import live_navigator
+from pd2bot.nav.pathing import astar, nearest_walkable, simplify
+from pd2bot.nav.waypoint import WaypointTravel
+from pd2bot.perception.exits import ExitMemory, read_level_exits
+from pd2bot.perception.items import read_carried_items
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.player import read_player
+from pd2bot.perception.snapshot import Perception
+from pd2bot.perception.uistate import find_ui_array
+from pd2bot.perception.world import read_area, read_map_seed
 from pd2bot.pickit import Pickit, cleanse_keep, load_item_table, load_pickit
-from pd2bot.player import read_player
 from pd2bot.runlog import RunLog
-from pd2bot.safety import SafetyConfig, SafetyInterrupt, SafetyMonitor, Verdict
-from pd2bot.snapshot import Perception
-from pd2bot.town import PreambleReport, TownConfig, TownLayer
-from pd2bot.uistate import find_ui_array
-from pd2bot.waypoint import WaypointTravel
-from pd2bot.world import read_area, read_map_seed
+from pd2bot.runlog.narrate import Narrator
+from pd2bot.safety import SafetyConfig, SafetyInterrupt, SafetyMonitor, Verdict, watchdog
 
 REPO = Path(__file__).resolve().parent.parent
 CONFIG = REPO / "config"
@@ -825,8 +826,8 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
     import sys
 
     from pd2bot.behavior.run import RunError
-    from pd2bot.memory import GameNotRunning, NeedsAdministrator
-    from pd2bot.window import WindowNotFound
+    from pd2bot.input.window import WindowNotFound
+    from pd2bot.perception.memory import GameNotRunning, NeedsAdministrator
 
     parser = argparse.ArgumentParser(
         description="Run the bot: create a Hell game, run the run, leave, repeat."
@@ -885,7 +886,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
         # spin: a run that can never take a step should never take a game.
         print(
             "\nREFUSING TO RUN: the chicken watchdog is not answering.\n"
-            "  Start it (elevated) with:  python -m pd2bot.watchdog\n"
+            "  Start it (elevated) with:  python -m pd2bot.safety.watchdog\n"
             "  Then launch again. Nothing has been sent to the game.",
             file=sys.stderr,
         )

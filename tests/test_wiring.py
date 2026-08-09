@@ -16,7 +16,7 @@ import pytest
 
 from pd2bot import offsets
 from pd2bot.behavior.combat import load_class_config
-from pd2bot.items import CarriedItem, CarriedItems
+from pd2bot.perception.items import CarriedItem, CarriedItems
 from pd2bot.pickit import cleanse_keep, load_item_table, load_pickit
 from pd2bot.safety import SafetyInterrupt, Verdict
 from pd2bot.wiring import (
@@ -336,7 +336,7 @@ def test_the_safety_poll_is_quiet_when_all_is_well():
 
 def test_live_navigator_hands_the_poll_to_the_navigator(monkeypatch):
     """The test that catches "the fix exists but nothing calls it"."""
-    from pd2bot import navigate
+    from pd2bot.nav import navigate
 
     monkeypatch.setattr(navigate, "GatedInput", lambda session: SimpleNamespace())
     sentinel = safety_poll_for(PollingMonitor(), None)
@@ -346,7 +346,7 @@ def test_live_navigator_hands_the_poll_to_the_navigator(monkeypatch):
 
 def test_a_navigator_built_without_a_monitor_still_walks(monkeypatch):
     """The CLI, the survey tool and the drills have no monitor at all."""
-    from pd2bot import navigate
+    from pd2bot.nav import navigate
 
     monkeypatch.setattr(navigate, "GatedInput", lambda session: SimpleNamespace())
     nav = navigate.live_navigator(None, None, 2)

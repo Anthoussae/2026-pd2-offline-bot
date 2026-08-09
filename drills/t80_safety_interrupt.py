@@ -43,20 +43,20 @@ sys.path.insert(0, str(REPO))
 
 from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.mapstore import MapStore  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.navigate import (  # noqa: E402
+from pd2bot.nav.mapstore import MapStore  # noqa: E402
+from pd2bot.nav.navigate import (  # noqa: E402
     WALK_BUDGET_SECONDS,
     Navigator,
     live_navigator,
     pick_reachable_target,
 )
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.units import player_unit, unit_position  # noqa: E402
 from pd2bot.safety import (  # noqa: E402
     SafetyConfig,
     SafetyInterrupt,
     SafetyMonitor,
 )
-from pd2bot.units import player_unit, unit_position  # noqa: E402
 
 GO_WORDS = frozenset({"go", "go!"})
 GO_TIMEOUT_S = 180.0

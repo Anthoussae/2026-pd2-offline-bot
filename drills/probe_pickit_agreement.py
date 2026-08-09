@@ -38,14 +38,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import offsets  # noqa: E402
-from pd2bot.items import read_carried_items  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
+from pd2bot.perception.items import read_carried_items  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.snapshot import Perception  # noqa: E402
 from pd2bot.pickit import (  # noqa: E402
     cleanse_keep,
     load_item_table,
     load_pickit,
 )
-from pd2bot.snapshot import Perception  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 

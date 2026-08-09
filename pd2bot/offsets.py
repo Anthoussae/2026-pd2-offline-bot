@@ -301,7 +301,7 @@ ROOM1_ROOM_NEXT = 0x7C
 # Both end with `WORD* pMapStart; //0x20` and `WORD* pMapEnd; //0x22`, and
 # 0x22 cannot be right for a pointer following a pointer at 0x20. Reading
 # 0x24 as pMapEnd instead was ALSO wrong, and the live client said so
-# (`python -m pd2bot.collision --debug`, 2026-07-28): every room reported
+# (`python -m pd2bot.nav.collision --debug`, 2026-07-28): every room reported
 # pMapStart == Coll + 0x24, i.e. the grid is stored **inline right after a
 # 0x24-byte header**, and the dword at 0x24 is the first two collision
 # cells (observed 0x00010001 = two blocked, 0x00000000 = two open) — not a

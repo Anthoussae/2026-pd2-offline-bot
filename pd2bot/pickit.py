@@ -45,8 +45,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from pd2bot import offsets
-from pd2bot.items import CarriedItem, CarriedItems
-from pd2bot.units import GroundItem
+from pd2bot.perception.items import CarriedItem, CarriedItems
+from pd2bot.perception.units import GroundItem
 
 
 class PickitError(RuntimeError):

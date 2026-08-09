@@ -32,7 +32,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from pd2bot import mapframe, offsets
+from pd2bot import offsets
 from pd2bot.behavior.actions import (
     PICKUP_AIM_POINTS,
     Action,
@@ -46,17 +46,18 @@ from pd2bot.behavior.actions import (
     ParkSkill,
     PickUpItem,
 )
-from pd2bot.input import VK_MENU, GatedInput, InputRefused
-from pd2bot.memory import GameSession
-from pd2bot.player import read_player
-from pd2bot.runlog import NullRunLog
-from pd2bot.skills import (
+from pd2bot.input.gated import VK_MENU, GatedInput, InputRefused
+from pd2bot.input.skills import (
     SkillSwitchFailed,
     belt_drink,
     belt_give_merc,
     ensure_right_skill,
 )
-from pd2bot.units import label_display_on
+from pd2bot.nav import mapframe
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.player import read_player
+from pd2bot.perception.units import label_display_on
+from pd2bot.runlog import NullRunLog
 
 # The aim schedule now lives beside the action whose `attempt` field
 # indexes it (`actions.PICKUP_AIM_POINTS`), so the step that writes an

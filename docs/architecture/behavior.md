@@ -94,7 +94,7 @@ bot moves. Steps communicate through a shared blackboard
 `clear_radius` reads it back, `pickup` adopts the clearance circle — no
 step knows another. A second run is a new file, not new code.
 
-**Step handlers** (`behavior/steps.py`) come in two shapes, and the
+**Step handlers** (`behavior/steps/`) come in two shapes, and the
 difference is load-bearing. *Blocking* steps (`town_preamble`,
 `waypoint`) do their whole job in one tick, safe exactly where they run:
 town is where the ladder has nothing to say, and the waypoint trip is a
@@ -308,7 +308,7 @@ what made runtime switching safe to build.
 
 ## The Countess endgame (M6 P4: `clear_countess`)
 
-One ticked step (`steps.py::ClearCountessStep`) encodes the user's
+One ticked step (`behavior/steps/countess.py::ClearCountessStep`) encodes the user's
 tactics for the Cellar 5 chamber, in four beats: a **neighborhood
 clearance** around the arrival staircase (a composed `ClearRadiusStep`
 — the same machinery and budgets, a modest radius, no patrol) so the

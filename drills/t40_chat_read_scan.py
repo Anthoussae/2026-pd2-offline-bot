@@ -1,6 +1,6 @@
 """T40 — where does text the USER types into the chat line live in memory?
 
-The bot can talk (M4's `pd2bot.chat`) and the user cannot answer. The one
+The bot can talk (M4's `pd2bot.input.chat`) and the user cannot answer. The one
 thing the bot already knows about the user's typing is the *envelope*: UI
 slot 0x05 (UI_CHAT_CONSOLE) goes 1 the moment Enter opens the chat line and
 0 when it is posted or cancelled, which is exactly the flag chat.py checks
@@ -50,8 +50,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.player import read_player  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.player import read_player  # noqa: E402
 
 # Lowercase letters and digits only: no shift, no punctuation, nothing a
 # keyboard layout could turn into a different character than the one we

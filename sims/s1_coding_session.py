@@ -28,9 +28,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.stdout.reconfigure(errors="backslashreplace")  # the T41 lesson
 
-from pd2bot.chatread import ChatListener  # noqa: E402
 from pd2bot.drill import DrillRun  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
+from pd2bot.perception.chatread import ChatListener  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
 
 WINDOW_IN_PATIENCE_S = 600.0
 REPLY_TIMEOUT_S = 300.0
