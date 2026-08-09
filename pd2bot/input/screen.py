@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pd2bot.window import ClientRect
+from pd2bot.input.window import ClientRect
 
 # Pixels per subtile along each isometric axis.
 #

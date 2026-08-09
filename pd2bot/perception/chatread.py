@@ -1,6 +1,6 @@
 """Reading the chat line the client last displayed — the return channel.
 
-`pd2bot.chat` types INTO the game; this reads back OUT of it, so a human
+`pd2bot.input.chat` types INTO the game; this reads back OUT of it, so a human
 watching the game can answer without alt-tabbing to a console. The address it
 reads (`offsets.CHAT_LAST_LINE`) was derived by content scan in T40 and
 re-derived, then exercised, in T41: three rounds of call-and-response, 3/3

@@ -1,6 +1,6 @@
 """Projection math: world subtiles <-> screen pixels."""
 
-from pd2bot.screen import (
+from pd2bot.input.screen import (
     EDGE_MARGIN_PX,
     PX_PER_SUBTILE_X,
     PX_PER_SUBTILE_Y,
@@ -9,7 +9,7 @@ from pd2bot.screen import (
     hud_height,
     projection_for,
 )
-from pd2bot.window import ClientRect
+from pd2bot.input.window import ClientRect
 
 RECT = ClientRect(left=100, top=50, width=800, height=600)
 CENTER = (500, 350)

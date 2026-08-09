@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.input import (  # noqa: E402
+from pd2bot.input.gated import (  # noqa: E402
     GatedInput,
     InputRefused,
     _cursor_pos,

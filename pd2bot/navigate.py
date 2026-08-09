@@ -29,7 +29,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from pd2bot.input import GatedInput, InputRefused
+from pd2bot.input.gated import GatedInput, InputRefused
 from pd2bot.pathing import Grid, Point, astar, nearest_walkable, simplify
 
 # Move speed varies a lot in play (run vs walk, boots, chill, Holy Freeze),
@@ -192,7 +192,7 @@ def _screen_offset(origin: Point, point: Point) -> tuple[float, float]:
 
     Screen y grows DOWNWARD, so a negative `sy` means drawn ABOVE.
     """
-    from pd2bot.screen import PX_PER_SUBTILE_X, PX_PER_SUBTILE_Y
+    from pd2bot.input.screen import PX_PER_SUBTILE_X, PX_PER_SUBTILE_Y
 
     dx, dy = point[0] - origin[0], point[1] - origin[1]
     return ((dx - dy) * PX_PER_SUBTILE_X, (dx + dy) * PX_PER_SUBTILE_Y)
@@ -234,7 +234,7 @@ def _sprite_escapes(hazard: Point) -> tuple[Point, ...]:
     purely down-screen (2k * 10 px). So one integer `k` per axis, big
     enough to clear both rules.
     """
-    from pd2bot.screen import PX_PER_SUBTILE_X, PX_PER_SUBTILE_Y
+    from pd2bot.input.screen import PX_PER_SUBTILE_X, PX_PER_SUBTILE_Y
 
     def steps(needed_px: float, px_per_step: int) -> int:
         return max(
@@ -1077,9 +1077,9 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
     import sys
 
+    from pd2bot.input.window import WindowNotFound
     from pd2bot.mapstore import DEFAULT_ROOT, MapStore
     from pd2bot.perception.memory import GameNotRunning, GameSession, NeedsAdministrator
-    from pd2bot.window import WindowNotFound
 
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)

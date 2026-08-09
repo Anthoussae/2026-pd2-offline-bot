@@ -20,12 +20,13 @@ import argparse
 import sys
 import time
 
-from pd2bot import offsets, screen
-from pd2bot.input import GatedInput, InputRefused
+from pd2bot import offsets
+from pd2bot.input import screen
+from pd2bot.input.gated import GatedInput, InputRefused
+from pd2bot.input.screen import projection_for
+from pd2bot.input.window import WindowNotFound
 from pd2bot.perception.memory import GameNotRunning, GameSession, NeedsAdministrator
 from pd2bot.perception.units import player_unit, unit_position
-from pd2bot.screen import projection_for
-from pd2bot.window import WindowNotFound
 
 # A hop big enough to measure, small enough to stay on screen and (usually)
 # walkable: 20 subtiles toward +x (screen: down-right).

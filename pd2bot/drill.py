@@ -35,14 +35,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pd2bot import offsets
-from pd2bot.chat import Chat
-from pd2bot.menuinput import MenuInput
+from pd2bot.input.chat import Chat
+from pd2bot.input.menu import MenuInput
+from pd2bot.input.window import GameWindow
 from pd2bot.perception import uistate
 from pd2bot.perception.chatread import ChatListener
 from pd2bot.perception.items import CarriedItem, read_carried_items
 from pd2bot.perception.memory import GameSession
 from pd2bot.perception.player import read_player
-from pd2bot.window import GameWindow
 
 DEFAULT_LOG = Path("docs/drill-log.md")
 PROJECT_STATE = Path("docs/project-state.md")

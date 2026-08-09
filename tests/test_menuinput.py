@@ -9,10 +9,10 @@ from types import SimpleNamespace
 import pytest
 
 from pd2bot import offsets
-from pd2bot.input import InputRefused
-from pd2bot.menuinput import MenuInput, menu_to_screen
+from pd2bot.input.gated import InputRefused
+from pd2bot.input.menu import MenuInput, menu_to_screen
+from pd2bot.input.window import ClientRect
 from pd2bot.perception import oog
-from pd2bot.window import ClientRect
 from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, u32
 
 UI_ARRAY = 0x0F000000
@@ -50,14 +50,14 @@ def make_session(
 def sent(monkeypatch):
     record = []
     monkeypatch.setattr(
-        "pd2bot.menuinput._send_mouse_flag", lambda f: record.append(("mouse", f))
+        "pd2bot.input.menu._send_mouse_flag", lambda f: record.append(("mouse", f))
     )
     monkeypatch.setattr(
-        "pd2bot.menuinput._send_key", lambda vk, f: record.append(("key", vk, f))
+        "pd2bot.input.menu._send_key", lambda vk, f: record.append(("key", vk, f))
     )
-    monkeypatch.setattr("pd2bot.menuinput.time", SimpleNamespace(sleep=lambda s: None))
+    monkeypatch.setattr("pd2bot.input.menu.time", SimpleNamespace(sleep=lambda s: None))
     monkeypatch.setattr(
-        "pd2bot.menuinput.user32",
+        "pd2bot.input.menu.user32",
         SimpleNamespace(SetCursorPos=lambda x, y: record.append(("cursor", x, y))),
     )
     return record

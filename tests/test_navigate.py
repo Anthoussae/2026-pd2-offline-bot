@@ -8,7 +8,7 @@ re-plan, give up — and the UI-refusal waiting.
 
 import pytest
 
-from pd2bot.input import InputRefused
+from pd2bot.input.gated import InputRefused
 from pd2bot.navigate import (
     AVOID_RADIUS,
     MAX_FAILURES,

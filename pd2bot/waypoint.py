@@ -41,7 +41,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from pd2bot import offsets
-from pd2bot.input import InputRefused
+from pd2bot.input.gated import InputRefused
 from pd2bot.perception import uistate
 from pd2bot.perception.memory import GameSession
 from pd2bot.perception.world import read_area

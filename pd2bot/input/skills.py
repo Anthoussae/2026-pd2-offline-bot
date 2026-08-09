@@ -24,7 +24,7 @@ import time
 from collections.abc import Callable
 
 from pd2bot import offsets
-from pd2bot.input import (
+from pd2bot.input.gated import (
     VK_1,
     VK_2,
     VK_3,

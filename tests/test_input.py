@@ -9,9 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from pd2bot import offsets, screen
-from pd2bot.input import GatedInput, InputRefused
-from pd2bot.window import ClientRect
+from pd2bot import offsets
+from pd2bot.input import screen
+from pd2bot.input.gated import GatedInput, InputRefused
+from pd2bot.input.window import ClientRect
 from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, u16, u32
 
 UI_ARRAY = 0x0F000000
@@ -60,16 +61,18 @@ def make_session(
 def sent(monkeypatch):
     """Capture every OS-level send; neutralize sleeps and the cursor move."""
     record = []
-    monkeypatch.setattr("pd2bot.input._send_mouse_flag", lambda f: record.append(("mouse", f)))
-    monkeypatch.setattr("pd2bot.input._send_key", lambda vk, f: record.append(("key", vk, f)))
-    monkeypatch.setattr("pd2bot.input.time", SimpleNamespace(sleep=lambda s: None))
+    monkeypatch.setattr(
+        "pd2bot.input.gated._send_mouse_flag", lambda f: record.append(("mouse", f))
+    )
+    monkeypatch.setattr("pd2bot.input.gated._send_key", lambda vk, f: record.append(("key", vk, f)))
+    monkeypatch.setattr("pd2bot.input.gated.time", SimpleNamespace(sleep=lambda s: None))
     # The cursor move is a real SendInput event since T60; tests record it
     # under the same ("cursor", x, y) shape the SetCursorPos era used.
     monkeypatch.setattr(
-        "pd2bot.input._send_mouse_move", lambda x, y: record.append(("cursor", x, y))
+        "pd2bot.input.gated._send_mouse_move", lambda x, y: record.append(("cursor", x, y))
     )
     monkeypatch.setattr(
-        "pd2bot.input.user32",
+        "pd2bot.input.gated.user32",
         SimpleNamespace(SetCursorPos=lambda x, y: record.append(("cursor", x, y))),
     )
     return record
@@ -153,7 +156,7 @@ def test_stand_still_shift_released_when_the_click_fails(sent, monkeypatch):
         sent.append(("mouse", flag))
         raise OSError("SendInput failed")
 
-    monkeypatch.setattr("pd2bot.input._send_mouse_flag", explode)
+    monkeypatch.setattr("pd2bot.input.gated._send_mouse_flag", explode)
     with pytest.raises(OSError):
         gated(make_session()).click_screen(400, 300, stand_still=True)
     assert ("key", 0x10, 0x0002) in sent
@@ -195,7 +198,7 @@ def test_shift_released_when_the_key_send_fails(sent, monkeypatch):
         if vk == 0x33 and flags == 0:
             raise OSError("SendInput failed")
 
-    monkeypatch.setattr("pd2bot.input._send_key", explode)
+    monkeypatch.setattr("pd2bot.input.gated._send_key", explode)
     with pytest.raises(OSError):
         gated(make_session()).press_key_with_shift(0x33)
     assert ("key", 0x10, 0x0002) in sent
@@ -267,7 +270,7 @@ def test_menu_input_ignores_the_latch(tmp_path):
     """The asymmetry, pinned: the latch must not block `leave_game`, or
     a watchdog pause would leave the bot unable to finish the exit that
     should follow it."""
-    from pd2bot.menuinput import MenuInput
+    from pd2bot.input.menu import MenuInput
     from pd2bot.watchdog import write_latch
 
     write_latch("life", tmp_path / "watchdog-latch")

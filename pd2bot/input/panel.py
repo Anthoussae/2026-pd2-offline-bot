@@ -38,7 +38,7 @@ from __future__ import annotations
 import time
 
 from pd2bot import offsets
-from pd2bot.input import (
+from pd2bot.input.gated import (
     _CLICK_HOLD_S,
     _KEY_UP,
     _MODIFIER_SETTLE_S,
@@ -54,9 +54,9 @@ from pd2bot.input import (
     _send_mouse_flag,
     user32,
 )
+from pd2bot.input.window import GameWindow
 from pd2bot.perception import uistate
 from pd2bot.perception.memory import GameSession
-from pd2bot.window import GameWindow
 
 
 class PanelInput:

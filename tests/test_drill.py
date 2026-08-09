@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from pd2bot.drill import Drill, DrillAborted, DrillRun, append_log_row, run_drill
-from pd2bot.window import ClientRect
+from pd2bot.input.window import ClientRect
 
 RECT = ClientRect(left=0, top=0, width=1536, height=864)
 

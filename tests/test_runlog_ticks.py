@@ -161,7 +161,7 @@ def test_a_tick_that_ends_by_raising_is_still_recorded(tmp_path):
 
 
 def test_a_refused_send_is_its_own_event(tmp_path):
-    from pd2bot.input import InputRefused
+    from pd2bot.input.gated import InputRefused
 
     class Refusing:
         name = "traverse"

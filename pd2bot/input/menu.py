@@ -34,7 +34,7 @@ from __future__ import annotations
 import time
 
 from pd2bot import offsets
-from pd2bot.input import (
+from pd2bot.input.gated import (
     _CLICK_HOLD_S,
     _MOUSE_LEFTDOWN,
     _MOUSE_LEFTUP,
@@ -44,9 +44,9 @@ from pd2bot.input import (
     _send_mouse_flag,
     user32,
 )
+from pd2bot.input.window import ClientRect, GameWindow
 from pd2bot.perception import oog, uistate
 from pd2bot.perception.memory import GameSession
-from pd2bot.window import ClientRect, GameWindow
 
 VK_ESCAPE = 0x1B
 _KEY_UP = 0x0002

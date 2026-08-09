@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from pd2bot import offsets
-from pd2bot.chat import Chat, ChatError, _split
-from pd2bot.input import InputRefused
+from pd2bot.input.chat import Chat, ChatError, _split
+from pd2bot.input.gated import InputRefused
 from pd2bot.perception import uistate
 from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, u32
 
@@ -59,10 +59,10 @@ class Rig:
 def rig(monkeypatch):
     def build(**kwargs) -> tuple[Chat, Rig]:
         r = Rig(**kwargs)
-        monkeypatch.setattr("pd2bot.chat._send_key", r.send_key)
-        monkeypatch.setattr("pd2bot.chat._send_char", r.send_char)
+        monkeypatch.setattr("pd2bot.input.chat._send_key", r.send_key)
+        monkeypatch.setattr("pd2bot.input.chat._send_char", r.send_char)
         monkeypatch.setattr(
-            "pd2bot.chat.time",
+            "pd2bot.input.chat.time",
             SimpleNamespace(sleep=lambda s: None, monotonic=__import__("time").monotonic),
         )
         chat = Chat(r.session, window=FakeWindow(), ui_array=UI_ARRAY)
@@ -82,7 +82,7 @@ def test_say_types_and_posts(rig):
 
 def test_console_never_opens_means_zero_typed(rig):
     chat, r = rig(console_opens=False)
-    import pd2bot.chat as chat_module
+    import pd2bot.input.chat as chat_module
 
     # collapse the open-timeout for the test
     orig = chat_module._CONSOLE_OPEN_TIMEOUT_S
@@ -106,9 +106,9 @@ def test_console_closing_mid_message_stops_instantly(rig):
             r.set_console(False)  # death screen / load mid-message
 
     r.send_char = closing_send
-    import pd2bot.chat  # re-patch with the wrapper
+    import pd2bot.input.chat  # re-patch with the wrapper
 
-    pd2bot.chat._send_char = closing_send
+    pd2bot.input.chat._send_char = closing_send
     with pytest.raises(ChatError, match="mid-message"):
         chat.say("hello")
     assert r.typed == ["h", "e"]  # stopped at the close, not sprayed

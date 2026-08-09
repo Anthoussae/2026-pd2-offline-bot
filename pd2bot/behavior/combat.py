@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Protocol
 from pd2bot.behavior.actions import Action
 from pd2bot.behavior.necro import CombatConfig
 from pd2bot.behavior.reflex import ReflexConfig
-from pd2bot.input import VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6
+from pd2bot.input.gated import VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6
 from pd2bot.perception.snapshot import GameSnapshot
 
 if TYPE_CHECKING:  # pragma: no cover - typing only

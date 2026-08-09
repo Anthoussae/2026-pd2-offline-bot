@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from pd2bot import offsets
+from pd2bot.input.window import ClientRect
 from pd2bot.perception import uistate
 from pd2bot.perception.items import CarriedItem, CarriedItems
 from pd2bot.perception.player import Player
@@ -29,7 +30,6 @@ from pd2bot.town import (
     Uncalibrated,
 )
 from pd2bot.uipoints import default_points
-from pd2bot.window import ClientRect
 
 RECT = ClientRect(left=0, top=0, width=1536, height=864)
 

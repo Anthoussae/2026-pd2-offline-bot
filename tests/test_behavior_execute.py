@@ -24,7 +24,7 @@ from pd2bot.behavior.execute import (
     GameActionExecutor,
     RecordingExecutor,
 )
-from pd2bot.input import VK_1, VK_3, VK_F1, VK_F5, InputRefused
+from pd2bot.input.gated import VK_1, VK_3, VK_F1, VK_F5, InputRefused
 from pd2bot.perception.player import ActiveSkills, Player
 
 HOME = (1000, 1000)
@@ -248,7 +248,7 @@ def test_cast_at_point_verifies_then_clicks_the_target(monkeypatch):
 def test_an_unverifiable_switch_sends_no_click(monkeypatch):
     # The rule the whole module exists for: SkillSwitchFailed propagates and
     # nothing is clicked on a skill the game may not have selected.
-    from pd2bot.skills import SkillSwitchFailed
+    from pd2bot.input.skills import SkillSwitchFailed
 
     def refuse(session, gated, skill_id, *, hotkeys=None, **kw):
         raise SkillSwitchFailed("never read back")

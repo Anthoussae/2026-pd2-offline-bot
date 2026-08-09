@@ -44,14 +44,14 @@ from pd2bot.behavior.reflex import ReflexLadder, read_armor_ratio
 from pd2bot.behavior.run import build_states, default_registry, load_run
 from pd2bot.behavior.runner import BehaviorRunner
 from pd2bot.behavior.steps import RunServices, build_registry
-from pd2bot.chat import Chat
 from pd2bot.cycle import GameCycle
-from pd2bot.input import GatedInput
+from pd2bot.input.chat import Chat
+from pd2bot.input.gated import GatedInput
+from pd2bot.input.menu import MenuInput
+from pd2bot.input.panel import PanelInput
 from pd2bot.mapstore import MapStore
-from pd2bot.menuinput import MenuInput
 from pd2bot.narrate import Narrator
 from pd2bot.navigate import live_navigator
-from pd2bot.panelinput import PanelInput
 from pd2bot.pathing import astar, nearest_walkable, simplify
 from pd2bot.perception.exits import ExitMemory, read_level_exits
 from pd2bot.perception.items import read_carried_items
@@ -825,8 +825,8 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
     import sys
 
     from pd2bot.behavior.run import RunError
+    from pd2bot.input.window import WindowNotFound
     from pd2bot.perception.memory import GameNotRunning, NeedsAdministrator
-    from pd2bot.window import WindowNotFound
 
     parser = argparse.ArgumentParser(
         description="Run the bot: create a Hell game, run the run, leave, repeat."

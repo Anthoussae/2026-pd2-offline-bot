@@ -59,9 +59,9 @@ from pd2bot.behavior.engine import (  # noqa: E402
     WatchdogDown,
 )
 from pd2bot.cycle import GameCycle  # noqa: E402
-from pd2bot.input import GatedInput, InputRefused  # noqa: E402
+from pd2bot.input.gated import GatedInput, InputRefused  # noqa: E402
+from pd2bot.input.menu import MenuInput  # noqa: E402
 from pd2bot.mapstore import MapStore  # noqa: E402
-from pd2bot.menuinput import MenuInput  # noqa: E402
 from pd2bot.navigate import (  # noqa: E402
     WALK_BUDGET_SECONDS,
     live_navigator,

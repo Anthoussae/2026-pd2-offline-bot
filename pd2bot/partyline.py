@@ -47,7 +47,7 @@ import os
 import time
 from pathlib import Path
 
-from pd2bot.chat import Chat
+from pd2bot.input.chat import Chat
 from pd2bot.perception.chatread import BOT_PREFIX, ChatListener
 from pd2bot.perception.memory import GameSession
 

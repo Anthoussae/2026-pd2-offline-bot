@@ -20,7 +20,7 @@ from pd2bot.behavior.engine import (
     StopRequested,
 )
 from pd2bot.behavior.reflex import ReflexDecision
-from pd2bot.input import InputRefused
+from pd2bot.input.gated import InputRefused
 from pd2bot.perception.player import Player
 from pd2bot.perception.snapshot import GameSnapshot
 from pd2bot.perception.uistate import UIState
@@ -807,7 +807,7 @@ def test_a_dropped_hotkey_press_is_absorbed_like_a_refusal():
     nothing reached the game — which is exactly what InputRefused means, so
     it gets exactly the same handling: absorb, do not commit, decide again
     next tick. It used to end the session."""
-    from pd2bot.skills import SkillSwitchFailed
+    from pd2bot.input.skills import SkillSwitchFailed
 
     class DroppingExecutor:
         def __init__(self):

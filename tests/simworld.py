@@ -575,12 +575,12 @@ def build_sim(
 
     if monkeypatch is not None:
         monkeypatch.setattr(
-            "pd2bot.skills.read_active_skills", world.active_skills
+            "pd2bot.input.skills.read_active_skills", world.active_skills
         )
         monkeypatch.setattr("pd2bot.behavior.execute.read_player", world.player)
         # Skill verification polls; give it the world's clock so no test
         # ever sleeps for real.
-        monkeypatch.setattr("pd2bot.skills.time.sleep", lambda s: None)
+        monkeypatch.setattr("pd2bot.input.skills.time.sleep", lambda s: None)
 
     gated = SimGated(world, config.hotkeys)
     log = runlog if runlog is not None else NullRunLog()
@@ -836,7 +836,7 @@ def main() -> int:  # pragma: no cover - the artifact generator
     import sys
 
     import pd2bot.behavior.execute as execute_mod
-    import pd2bot.skills as skills_mod
+    import pd2bot.input.skills as skills_mod
 
     which = sys.argv[1] if len(sys.argv) > 1 else "cold-plains"
     world, run_file, budget = {

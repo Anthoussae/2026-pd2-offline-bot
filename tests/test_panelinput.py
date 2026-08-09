@@ -15,9 +15,9 @@ from types import SimpleNamespace
 import pytest
 
 from pd2bot import offsets
-from pd2bot.input import InputRefused
-from pd2bot.panelinput import PanelInput
-from pd2bot.window import ClientRect
+from pd2bot.input.gated import InputRefused
+from pd2bot.input.panel import PanelInput
+from pd2bot.input.window import ClientRect
 from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, u32
 
 UI_ARRAY = 0x0F000000
@@ -54,17 +54,17 @@ def make_session(
 def sent(monkeypatch):
     record = []
     monkeypatch.setattr(
-        "pd2bot.panelinput._send_mouse_flag", lambda f: record.append(("mouse", f))
+        "pd2bot.input.panel._send_mouse_flag", lambda f: record.append(("mouse", f))
     )
     monkeypatch.setattr(
-        "pd2bot.panelinput._send_key", lambda vk, f: record.append(("key", vk, f))
+        "pd2bot.input.panel._send_key", lambda vk, f: record.append(("key", vk, f))
     )
     monkeypatch.setattr(
-        "pd2bot.panelinput.time",
+        "pd2bot.input.panel.time",
         SimpleNamespace(sleep=lambda s: record.append(("sleep", s))),
     )
     monkeypatch.setattr(
-        "pd2bot.panelinput.user32",
+        "pd2bot.input.panel.user32",
         SimpleNamespace(SetCursorPos=lambda x, y: record.append(("cursor", x, y))),
     )
     return record
@@ -89,7 +89,7 @@ def test_shift_settles_a_frame_clear_of_the_click_on_both_sides(sent):
     resolve as an UNMODIFIED click — which used a Tome of Identify instead
     of stashing it. Shift must be provably down a frame before the press
     and provably still down a frame after the release."""
-    from pd2bot.input import _MODIFIER_SETTLE_S, VK_SHIFT
+    from pd2bot.input.gated import _MODIFIER_SETTLE_S, VK_SHIFT
 
     session = make_session(open_panels=(offsets.UI_STASH,))
     panel(session).click(offsets.UI_STASH, 400, 300, button="right", shift=True)
@@ -112,7 +112,7 @@ def test_key_allowed_when_the_named_panel_is_open(sent):
     """R104: NPC dialogs are keyboard-navigable, and neither other gate may
     send those keys — GatedInput refuses with a blocking panel open, and
     MenuInput refuses in a game without the ESC menu."""
-    from pd2bot.input import VK_RETURN
+    from pd2bot.input.gated import VK_RETURN
 
     session = make_session(open_panels=(offsets.UI_NPCMENU,))
     panel(session).press_key(offsets.UI_NPCMENU, VK_RETURN)
@@ -123,7 +123,7 @@ def test_key_allowed_when_the_named_panel_is_open(sent):
 def test_key_refused_when_the_named_panel_is_not_open(sent):
     """The key this exists to send is Enter, and an Enter that misses its
     panel is exactly the R89 defect — it chooses something elsewhere."""
-    from pd2bot.input import VK_RETURN
+    from pd2bot.input.gated import VK_RETURN
 
     session = make_session(open_panels=(offsets.UI_INVENTORY,))
     with pytest.raises(InputRefused, match="npc_menu panel is not open"):
@@ -132,7 +132,7 @@ def test_key_refused_when_the_named_panel_is_not_open(sent):
 
 
 def test_key_refused_without_foreground(sent):
-    from pd2bot.input import VK_DOWN
+    from pd2bot.input.gated import VK_DOWN
 
     session = make_session(open_panels=(offsets.UI_NPCMENU,))
     with pytest.raises(InputRefused, match="foreground"):
@@ -195,7 +195,7 @@ def test_shift_is_released_even_when_the_click_fails(sent, monkeypatch):
         sent.append(("mouse", flag))
         raise OSError("SendInput failed")
 
-    monkeypatch.setattr("pd2bot.panelinput._send_mouse_flag", explode)
+    monkeypatch.setattr("pd2bot.input.panel._send_mouse_flag", explode)
     with pytest.raises(OSError):
         panel(session).click(offsets.UI_STASH, 400, 300, shift=True)
     assert ("key", 0x10, 0x0002) in sent  # shift up happened anyway

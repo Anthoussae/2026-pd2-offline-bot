@@ -627,7 +627,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
                         help="read and print vitals; arm nothing, send nothing")
     args = parser.parse_args(argv)
 
-    from pd2bot.menuinput import MenuInput
+    from pd2bot.input.menu import MenuInput
 
     session = GameSession()
     threshold = args.threshold if args.threshold is not None else default_threshold()

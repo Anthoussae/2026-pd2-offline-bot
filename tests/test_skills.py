@@ -8,9 +8,9 @@ request; only the read-back is truth.
 import pytest
 
 from pd2bot import offsets
-from pd2bot.input import VK_1, VK_4, VK_F5
+from pd2bot.input.gated import VK_1, VK_4, VK_F5
+from pd2bot.input.skills import SkillSwitchFailed, belt_drink, ensure_right_skill
 from pd2bot.perception.player import ActiveSkills, Player
-from pd2bot.skills import SkillSwitchFailed, belt_drink, ensure_right_skill
 
 
 class FakeGated:
@@ -43,7 +43,7 @@ def script_reads(monkeypatch, responses):
         state["i"] += 1
         return responses[index]
 
-    monkeypatch.setattr("pd2bot.skills.read_active_skills", fake_read)
+    monkeypatch.setattr("pd2bot.input.skills.read_active_skills", fake_read)
 
 
 def right(skill_id):
