@@ -55,9 +55,9 @@ sys.path.insert(0, str(REPO))
 from pd2bot import survey  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
 from pd2bot.mapstore import MapStore  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
 from pd2bot.navigate import _record_visible_rooms  # noqa: E402
-from pd2bot.world import read_area, read_map_seed  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.world import read_area, read_map_seed  # noqa: E402
 
 DIFFICULTY = 2  # Hell — the only difficulty this character runs
 POLL_S = 1.0

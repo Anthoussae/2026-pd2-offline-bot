@@ -7,10 +7,10 @@ lifecycle.
 """
 
 from pd2bot import offsets
-from pd2bot.player import Player
+from pd2bot.perception.player import Player
+from pd2bot.perception.world import Area
 from pd2bot.runlog import RunLog, load
 from pd2bot.safety import ChickenExit, DeathHalt, SafetyConfig, SafetyMonitor
-from pd2bot.world import Area
 
 
 class Clock:

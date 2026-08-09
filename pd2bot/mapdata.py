@@ -258,8 +258,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     from pd2bot.collision import read_local_collision
-    from pd2bot.memory import GameNotRunning, GameSession, NeedsAdministrator
-    from pd2bot.world import read_area, read_map_seed
+    from pd2bot.perception.memory import GameNotRunning, GameSession, NeedsAdministrator
+    from pd2bot.perception.world import read_area, read_map_seed
 
     try:
         session = GameSession()

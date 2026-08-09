@@ -29,13 +29,13 @@ sys.path.insert(0, str(REPO))
 from pd2bot import mapframe, offsets  # noqa: E402
 from pd2bot.cycle import GameCycle  # noqa: E402
 from pd2bot.mapstore import MapStore  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
 from pd2bot.menuinput import MenuInput  # noqa: E402
 from pd2bot.navigate import live_navigator  # noqa: E402
-from pd2bot.player import read_player  # noqa: E402
-from pd2bot.snapshot import Perception  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.player import read_player  # noqa: E402
+from pd2bot.perception.snapshot import Perception  # noqa: E402
+from pd2bot.perception.world import read_area  # noqa: E402
 from pd2bot.town import TownConfig  # noqa: E402
-from pd2bot.world import read_area  # noqa: E402
 
 MAX_LEGS = 15
 
@@ -47,7 +47,7 @@ def _dist(a, b) -> int:
 def _report_panels(session, ui_array) -> None:
     """What is open right now. The 2026-08-08 stall was an NPC dialog and
     the probe could not see it — the operator had to say so by eye."""
-    from pd2bot import uistate
+    from pd2bot.perception import uistate
 
     state = uistate.read_ui_state(session, ui_array)
     names = ", ".join(state.names) if state.names else "none"

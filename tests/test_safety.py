@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import pytest
 
-from pd2bot import offsets, oog, uistate
+from pd2bot import offsets
 from pd2bot.cycle import CycleConfig, GameCycle
-from pd2bot.player import Player
+from pd2bot.perception import oog, uistate
+from pd2bot.perception.player import Player
+from pd2bot.perception.world import Area
 from pd2bot.safety import (
     ChickenExit,
     DeathHalt,
@@ -20,7 +22,6 @@ from pd2bot.safety import (
     SafetyInterrupt,
     SafetyMonitor,
 )
-from pd2bot.world import Area
 from tests.test_cycle import FakeClock, ScriptedClient
 
 TOWN = Area(level_no=1, position=(1000, 1000), size=(20, 20))
@@ -172,7 +173,7 @@ def rig(monkeypatch):
                 frozenset({offsets.UI_ESCMENU_MAIN}) if client.esc_menu else frozenset()
             ),
         )
-        from pd2bot import world
+        from pd2bot.perception import world
 
         monkeypatch.setattr(
             world, "read_area", lambda s: WILDS if client.is_in_game() else None

@@ -33,7 +33,7 @@ from collections import deque
 from collections.abc import Callable
 
 from pd2bot import offsets
-from pd2bot.memory import GameSession
+from pd2bot.perception.memory import GameSession
 
 # Every message the bot says carries this (drill.py stamps it). A listener
 # that does not skip its own voice hears itself ask the question.

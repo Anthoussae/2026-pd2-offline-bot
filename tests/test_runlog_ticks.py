@@ -11,11 +11,11 @@ from pd2bot.behavior.actions import MoveTo
 from pd2bot.behavior.engine import BehaviorEngine, EngineConfig, StepOutcome
 from pd2bot.behavior.execute import RecordingExecutor
 from pd2bot.mapframe import MapFrame
-from pd2bot.player import Player
+from pd2bot.perception.player import Player
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.perception.units import GroundItem, Monster
+from pd2bot.perception.world import Area
 from pd2bot.runlog import RunLog, load, render
-from pd2bot.snapshot import GameSnapshot
-from pd2bot.units import GroundItem, Monster
-from pd2bot.world import Area
 
 TOWER = Area(level_no=20, position=(2000, 1600), size=(8, 8))
 ARRIVAL = (10006, 8002)

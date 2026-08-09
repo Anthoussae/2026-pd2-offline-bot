@@ -33,9 +33,10 @@ from __future__ import annotations
 
 import time
 
-from pd2bot import offsets, uistate
+from pd2bot import offsets
 from pd2bot.input import InputRefused, _send_char, _send_key
-from pd2bot.memory import GameSession
+from pd2bot.perception import uistate
+from pd2bot.perception.memory import GameSession
 from pd2bot.window import GameWindow
 
 VK_RETURN = 0x0D
@@ -171,7 +172,7 @@ def _split(text: str) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    from pd2bot.memory import GameNotRunning, NeedsAdministrator
+    from pd2bot.perception.memory import GameNotRunning, NeedsAdministrator
 
     parser = argparse.ArgumentParser(description="Post a message to the in-game chat.")
     parser.add_argument("message", help="text to say in game")

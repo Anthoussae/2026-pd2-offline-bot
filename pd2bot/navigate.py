@@ -877,7 +877,7 @@ def pick_reachable_target(
 def _record_visible_rooms(session, store, difficulty: int, stats: dict | None = None) -> int:
     """Merge whatever rooms are loaded right now into the atlas."""
     from pd2bot.collision import read_local_collision
-    from pd2bot.world import read_area, read_map_seed
+    from pd2bot.perception.world import read_area, read_map_seed
 
     area = read_area(session)
     seed = read_map_seed(session)
@@ -908,8 +908,8 @@ def live_navigator(
     from pd2bot import offsets
     from pd2bot.collision import read_local_collision
     from pd2bot.pathing import OverlayGrid
-    from pd2bot.units import player_unit, unit_position
-    from pd2bot.world import read_area, read_map_seed
+    from pd2bot.perception.units import player_unit, unit_position
+    from pd2bot.perception.world import read_area, read_map_seed
 
     polls_between_records = max(1, round(1.0 / POLL_SECONDS))
     poll_count = 0
@@ -959,7 +959,7 @@ def live_navigator(
         need this revisited; none exists on the Cold Plains route. Worth a
         look when M6 adds areas.)
         """
-        from pd2bot.snapshot import Perception
+        from pd2bot.perception.snapshot import Perception
 
         try:
             snap = Perception(session).snapshot()
@@ -1078,7 +1078,7 @@ def main(argv: list[str] | None = None) -> int:
     import sys
 
     from pd2bot.mapstore import DEFAULT_ROOT, MapStore
-    from pd2bot.memory import GameNotRunning, GameSession, NeedsAdministrator
+    from pd2bot.perception.memory import GameNotRunning, GameSession, NeedsAdministrator
     from pd2bot.window import WindowNotFound
 
     parser = argparse.ArgumentParser(description=__doc__)

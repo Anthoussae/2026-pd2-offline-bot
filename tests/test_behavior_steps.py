@@ -11,14 +11,14 @@ from pd2bot.behavior.execute import RecordingExecutor
 from pd2bot.behavior.necro import CombatConfig, NecroCombat
 from pd2bot.behavior.run import RunError, build_states, load_run
 from pd2bot.behavior.steps import RunServices, _chebyshev, build_registry
-from pd2bot.items import CarriedItems
 from pd2bot.navigate import NavigationError
+from pd2bot.perception.items import CarriedItems
+from pd2bot.perception.player import Player
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.perception.uistate import UIState
+from pd2bot.perception.units import GameObject, GroundItem, Monster
+from pd2bot.perception.world import Area
 from pd2bot.pickit import Pickit, Rule
-from pd2bot.player import Player
-from pd2bot.snapshot import GameSnapshot
-from pd2bot.uistate import UIState
-from pd2bot.units import GameObject, GroundItem, Monster
-from pd2bot.world import Area
 
 REPO = Path(__file__).resolve().parent.parent
 FIELD = 3
@@ -1515,7 +1515,7 @@ def test_the_shipped_run_builds_end_to_end():
 
 
 def belt_potion(uid, kind, slot):
-    from pd2bot.items import CarriedItem
+    from pd2bot.perception.items import CarriedItem
     return CarriedItem(
         unit_id=uid, kind=kind, quality=2, mode=offsets.ITEM_MODE_IN_BELT,
         game_location=0, node_page=0, position=(slot, 0), item_level=1,
@@ -1714,7 +1714,7 @@ def test_no_ring_is_cached_until_an_area_was_available_to_filter():
 
 
 def _exit_scan(area, exits, rooms=()):
-    from pd2bot.exits import ExitScan, LevelExit
+    from pd2bot.perception.exits import ExitScan, LevelExit
 
     return ExitScan(
         exits=tuple(LevelExit(position=p, dest_area=d) for p, d in exits),

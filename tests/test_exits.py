@@ -10,7 +10,7 @@ the defensive rules exist for.
 from __future__ import annotations
 
 from pd2bot import offsets
-from pd2bot.exits import LevelExit, read_level_exits
+from pd2bot.perception.exits import LevelExit, read_level_exits
 from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, u32
 
 PLAYER = 0x0C000000
@@ -204,7 +204,7 @@ def test_none_when_not_in_a_game():
 
 
 def test_exit_memory_round_trips_and_survives_reload(tmp_path):
-    from pd2bot.exits import ExitMemory
+    from pd2bot.perception.exits import ExitMemory
 
     path = tmp_path / "exits.json"
     memory = ExitMemory(path)
@@ -218,7 +218,7 @@ def test_exit_memory_round_trips_and_survives_reload(tmp_path):
 
 
 def test_exit_memory_loads_corrupt_files_as_empty(tmp_path):
-    from pd2bot.exits import ExitMemory
+    from pd2bot.perception.exits import ExitMemory
 
     path = tmp_path / "exits.json"
     path.write_text("{not json", encoding="utf-8")

@@ -61,10 +61,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from pd2bot import offsets, uistate
-from pd2bot.memory import GameSession
-from pd2bot.player import Player, read_player
-from pd2bot.world import Area, read_area
+from pd2bot import offsets
+from pd2bot.perception import uistate
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.player import Player, read_player
+from pd2bot.perception.world import Area, read_area
 
 BRIDGE_DIR = Path(os.environ.get("LOCALAPPDATA", ".")) / "pd2bot-bridge"
 HEARTBEAT_FILE = BRIDGE_DIR / "watchdog-heartbeat"

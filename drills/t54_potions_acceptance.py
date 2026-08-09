@@ -77,8 +77,8 @@ from pd2bot.drill import (  # noqa: E402
     run_drill,
 )
 from pd2bot.input import InputRefused  # noqa: E402
-from pd2bot.items import read_carried_items  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
+from pd2bot.perception.items import read_carried_items  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
 from pd2bot.skills import SkillSwitchFailed  # noqa: E402
 from pd2bot.wiring import BotPaths, build_bot, describe  # noqa: E402
 

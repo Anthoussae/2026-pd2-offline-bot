@@ -86,9 +86,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import screen  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.snapshot import Perception  # noqa: E402
-from pd2bot.units import PERCEPTION_RADIUS, scan_units  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.snapshot import Perception  # noqa: E402
+from pd2bot.perception.units import PERCEPTION_RADIUS, scan_units  # noqa: E402
 from pd2bot.window import GameWindow  # noqa: E402
 
 T50 = Drill(

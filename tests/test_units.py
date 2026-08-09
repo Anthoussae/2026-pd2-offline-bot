@@ -1,7 +1,7 @@
 """Tests for room traversal and unit decoding."""
 
 from pd2bot import offsets
-from pd2bot.units import (
+from pd2bot.perception.units import (
     MAX_UNITS_PER_ROOM,
     iter_units,
     iter_units_of_type,

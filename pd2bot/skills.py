@@ -37,8 +37,8 @@ from pd2bot.input import (
     VK_F6,
     GatedInput,
 )
-from pd2bot.memory import GameSession
-from pd2bot.player import read_active_skills
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.player import read_active_skills
 
 # The necro's right-skill hotkeys, as bound in the live client (R47.1, ids
 # captured R52 drill A). Callers with their own config pass their own table.
@@ -132,7 +132,7 @@ def _failure_context(session: GameSession, waited: float) -> str:
     """
     parts = [f"waited {waited:.2f}s"]
     try:
-        from pd2bot.player import read_player
+        from pd2bot.perception.player import read_player
 
         player = read_player(session)
         parts.append(
@@ -143,7 +143,7 @@ def _failure_context(session: GameSession, waited: float) -> str:
     except Exception as exc:  # noqa: BLE001 - diagnosis must not raise
         parts.append(f"player read raised {type(exc).__name__}")
     try:
-        from pd2bot import uistate
+        from pd2bot.perception import uistate
 
         state = uistate.read_ui_state(session)
         parts.append(

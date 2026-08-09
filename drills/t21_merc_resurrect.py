@@ -29,12 +29,12 @@ from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
 from pd2bot.input import GatedInput  # noqa: E402
 from pd2bot.mapstore import MapStore  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
 from pd2bot.menuinput import MenuInput  # noqa: E402
 from pd2bot.navigate import live_navigator  # noqa: E402
 from pd2bot.panelinput import PanelInput  # noqa: E402
-from pd2bot.player import read_player  # noqa: E402
-from pd2bot.snapshot import Perception  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.player import read_player  # noqa: E402
+from pd2bot.perception.snapshot import Perception  # noqa: E402
 from pd2bot.town import PreambleReport, TownConfig, TownLayer  # noqa: E402
 
 

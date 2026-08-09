@@ -12,13 +12,13 @@ from types import SimpleNamespace
 import pytest
 
 from pd2bot import offsets
+from pd2bot.perception.uistate import UIState
+from pd2bot.perception.units import GameObject
+from pd2bot.perception.world import Area
 from pd2bot.town import TownConfig, TownError, TownLayer
 from pd2bot.uipoints import default_points
-from pd2bot.uistate import UIState
-from pd2bot.units import GameObject
 from pd2bot.waypoint import WaypointConfig, WaypointError, WaypointTravel
 from pd2bot.window import ClientRect
-from pd2bot.world import Area
 
 RECT = ClientRect(left=100, top=50, width=1536, height=864)
 WP_POS = (5884, 5709)

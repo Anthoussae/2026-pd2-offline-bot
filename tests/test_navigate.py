@@ -349,9 +349,9 @@ def test_the_real_monitor_interrupts_a_real_walk_within_its_interval():
     worth knowing. Everything here is real except the world: a real
     SafetyMonitor, its real rate limiter, the real walk loop.
     """
-    from pd2bot.player import Player
+    from pd2bot.perception.player import Player
+    from pd2bot.perception.world import Area
     from pd2bot.safety import SafetyConfig, SafetyMonitor
-    from pd2bot.world import Area
 
     world = World(wall_x=5)
     sim = Sim(world)
@@ -592,7 +592,7 @@ def _hazards_for(monkeypatch, *, objects, allies, in_town, ground_items=None):
         ground_items=ground_items or [],
     )
     monkeypatch.setattr(
-        "pd2bot.snapshot.Perception",
+        "pd2bot.perception.snapshot.Perception",
         lambda session: SimpleNamespace(snapshot=lambda: snap),
     )
     monkeypatch.setattr("pd2bot.navigate.GatedInput", lambda session: object())

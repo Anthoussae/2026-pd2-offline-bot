@@ -50,8 +50,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.player import read_player  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.player import read_player  # noqa: E402
 
 # Lowercase letters and digits only: no shift, no punctuation, nothing a
 # keyboard layout could turn into a different character than the one we

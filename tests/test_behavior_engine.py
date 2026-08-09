@@ -21,12 +21,12 @@ from pd2bot.behavior.engine import (
 )
 from pd2bot.behavior.reflex import ReflexDecision
 from pd2bot.input import InputRefused
-from pd2bot.player import Player
+from pd2bot.perception.player import Player
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.perception.uistate import UIState
+from pd2bot.perception.units import Monster
+from pd2bot.perception.world import Area
 from pd2bot.safety import ChickenExit, DeathHalt, SafetyInterrupt, Verdict
-from pd2bot.snapshot import GameSnapshot
-from pd2bot.uistate import UIState
-from pd2bot.units import Monster
-from pd2bot.world import Area
 
 TOWN, FIELD = 1, 3
 

@@ -29,9 +29,9 @@ from drills.t25_ui_points import (  # noqa: E402
     area_note,
     measure,
 )
-from pd2bot import uistate  # noqa: E402
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
+from pd2bot.perception import uistate  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
 
 BATTERIES: dict[str, tuple[str, tuple[Target, ...]]] = {
     "black_marsh": (

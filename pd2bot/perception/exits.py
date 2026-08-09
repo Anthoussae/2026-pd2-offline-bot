@@ -43,9 +43,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pd2bot import offsets
-from pd2bot.memory import GameSession
-from pd2bot.units import player_unit
-from pd2bot.world import SUBTILES_PER_TILE
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.units import player_unit
+from pd2bot.perception.world import SUBTILES_PER_TILE
 
 # A level's static room chain is at most a few hundred rooms (the largest
 # surveyed area, Cold Plains, has ~114); the caps exist so a torn pointer

@@ -6,7 +6,8 @@ import struct
 
 from conftest import WIN_BASE, FakeMemory, FakeSession, u32, wchars
 
-from pd2bot import offsets, oog
+from pd2bot import offsets
+from pd2bot.perception import oog
 
 _FIRST_CONTROL_PTR = WIN_BASE + offsets.D2WIN_FIRST_CONTROL
 _CONTROL_SIZE = 0x64 + offsets.CONTROL_BUTTON_TEXT_CHARS * 2

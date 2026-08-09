@@ -22,9 +22,9 @@ import time
 
 from pd2bot import offsets, screen
 from pd2bot.input import GatedInput, InputRefused
-from pd2bot.memory import GameNotRunning, GameSession, NeedsAdministrator
+from pd2bot.perception.memory import GameNotRunning, GameSession, NeedsAdministrator
+from pd2bot.perception.units import player_unit, unit_position
 from pd2bot.screen import projection_for
-from pd2bot.units import player_unit, unit_position
 from pd2bot.window import WindowNotFound
 
 # A hop big enough to measure, small enough to stay on screen and (usually)

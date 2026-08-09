@@ -11,10 +11,10 @@ import pytest
 from pd2bot import offsets
 from pd2bot.behavior.actions import AttackUnit, CastAtPoint, MoveTo
 from pd2bot.behavior.necro import CombatConfig, NecroCombat, _chebyshev
-from pd2bot.player import Player
-from pd2bot.snapshot import GameSnapshot
-from pd2bot.units import GameObject, Monster
-from pd2bot.world import Area
+from pd2bot.perception.player import Player
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.perception.units import GameObject, Monster
+from pd2bot.perception.world import Area
 
 TOWN, FIELD = 1, 3
 HOME = (1000, 1000)

@@ -24,7 +24,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from pd2bot import offsets
-from pd2bot.memory import GameSession
+from pd2bot.perception.memory import GameSession
 
 # Defensive bounds. A live linked list can be torn mid-read; these stop a bad
 # pointer from becoming an infinite loop.

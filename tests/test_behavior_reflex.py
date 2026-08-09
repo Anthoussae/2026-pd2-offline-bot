@@ -21,11 +21,11 @@ from pd2bot.behavior.reflex import (
     ReflexLadder,
     retreat_point,
 )
-from pd2bot.items import CarriedItem, CarriedItems
-from pd2bot.player import Player
-from pd2bot.snapshot import GameSnapshot
-from pd2bot.units import Monster
-from pd2bot.world import Area
+from pd2bot.perception.items import CarriedItem, CarriedItems
+from pd2bot.perception.player import Player
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.perception.units import Monster
+from pd2bot.perception.world import Area
 
 TOWN, FIELD = 1, 3  # Rogue Encampment, Cold Plains
 POS = (1000, 1000)

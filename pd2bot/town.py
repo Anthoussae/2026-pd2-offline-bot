@@ -53,22 +53,23 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from pd2bot import offsets, uistate
+from pd2bot import offsets
 from pd2bot.input import VK_DOWN, VK_I, VK_RETURN, GatedInput
-from pd2bot.items import (
+from pd2bot.menuinput import MenuInput
+from pd2bot.navigate import NavigationError
+from pd2bot.panelinput import PanelInput
+from pd2bot.perception import uistate
+from pd2bot.perception.items import (
     CarriedItem,
     CarriedItems,
     read_carried_items,
     read_equipped_durability,
 )
-from pd2bot.memory import GameSession
-from pd2bot.menuinput import MenuInput
-from pd2bot.navigate import NavigationError
-from pd2bot.panelinput import PanelInput
-from pd2bot.player import Player, read_player
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.player import Player, read_player
+from pd2bot.perception.snapshot import GameSnapshot
 from pd2bot.runlog import NullRunLog
 from pd2bot.screen import projection_for
-from pd2bot.snapshot import GameSnapshot
 from pd2bot.uipoints import UIPoint, default_points
 
 

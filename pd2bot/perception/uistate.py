@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pd2bot import offsets
-from pd2bot.memory import GameSession
+from pd2bot.perception.memory import GameSession
 
 # `mov eax, [reg*4 + disp32]` — the ModRM/SIB pair differs only by index
 # register, and we accept either since the encoding is what matters.

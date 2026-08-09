@@ -52,7 +52,7 @@ from drills.t80_safety_interrupt import (  # noqa: E402
     CAP_SLACK_S,
     PROMPT_S,
 )
-from pd2bot import offsets, uistate, watchdog, world  # noqa: E402
+from pd2bot import offsets, watchdog  # noqa: E402
 from pd2bot.behavior.engine import (  # noqa: E402
     BehaviorEngine,
     EngineConfig,
@@ -61,20 +61,21 @@ from pd2bot.behavior.engine import (  # noqa: E402
 from pd2bot.cycle import GameCycle  # noqa: E402
 from pd2bot.input import GatedInput, InputRefused  # noqa: E402
 from pd2bot.mapstore import MapStore  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
 from pd2bot.menuinput import MenuInput  # noqa: E402
 from pd2bot.navigate import (  # noqa: E402
     WALK_BUDGET_SECONDS,
     live_navigator,
     pick_reachable_target,
 )
-from pd2bot.player import read_player  # noqa: E402
+from pd2bot.perception import uistate, world  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.player import read_player  # noqa: E402
+from pd2bot.perception.snapshot import Perception  # noqa: E402
 from pd2bot.safety import (  # noqa: E402
     SafetyConfig,
     SafetyInterrupt,
     SafetyMonitor,
 )
-from pd2bot.snapshot import Perception  # noqa: E402
 
 WATCHDOG_FIRE_TIMEOUT_S = 20.0
 UNPAUSE_TIMEOUT_S = 10.0

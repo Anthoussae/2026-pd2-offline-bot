@@ -33,10 +33,11 @@ from pathlib import Path
 # the latch cache must not be the reason input becomes untestable.
 from time import monotonic as _monotonic
 
-from pd2bot import offsets, uistate, watchdog
-from pd2bot.memory import GameSession
+from pd2bot import offsets, watchdog
+from pd2bot.perception import uistate
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.units import player_unit, unit_position
 from pd2bot.screen import clickable, projection_for
-from pd2bot.units import player_unit, unit_position
 from pd2bot.window import GameWindow
 
 user32 = ctypes.windll.user32

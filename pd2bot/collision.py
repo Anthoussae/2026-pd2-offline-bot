@@ -23,9 +23,9 @@ import struct
 from dataclasses import dataclass
 
 from pd2bot import offsets
-from pd2bot.memory import GameSession
-from pd2bot.units import nearby_rooms
-from pd2bot.world import SUBTILES_PER_TILE
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.units import nearby_rooms
+from pd2bot.perception.world import SUBTILES_PER_TILE
 
 # A room's grid is normally tens of subtiles per side. A size beyond this is
 # a torn read (dangling Coll pointer mid-transition), not a big room.
@@ -268,8 +268,8 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
     import sys
 
-    from pd2bot.memory import GameNotRunning, NeedsAdministrator
-    from pd2bot.units import player_unit, unit_position
+    from pd2bot.perception.memory import GameNotRunning, NeedsAdministrator
+    from pd2bot.perception.units import player_unit, unit_position
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--size", type=int, default=30, help="half-width in subtiles")

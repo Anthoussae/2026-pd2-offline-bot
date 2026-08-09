@@ -11,11 +11,11 @@ import time
 from dataclasses import dataclass
 
 from pd2bot import offsets
-from pd2bot.memory import GameSession
-from pd2bot.player import ActiveSkills, Player, read_active_skills, read_player
-from pd2bot.uistate import UIState, find_ui_array, is_in_game, read_ui_state
-from pd2bot.units import GameObject, GroundItem, Monster, scan_units
-from pd2bot.world import Area, read_area, read_map_seed
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.player import ActiveSkills, Player, read_active_skills, read_player
+from pd2bot.perception.uistate import UIState, find_ui_array, is_in_game, read_ui_state
+from pd2bot.perception.units import GameObject, GroundItem, Monster, scan_units
+from pd2bot.perception.world import Area, read_area, read_map_seed
 
 
 @dataclass(frozen=True)

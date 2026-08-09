@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 from conftest import CLIENT_BASE, FakeMemory, FakeSession, u32
 
-from pd2bot import offsets, world
+from pd2bot import offsets
+from pd2bot.perception import world
 
 _FN = CLIENT_BASE + offsets.GET_DIFFICULTY_FN
 _VAR = CLIENT_BASE + 0xF1234  # anywhere inside the module image

@@ -47,9 +47,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
 from pd2bot.input import GatedInput, InputRefused, _send_mouse_move_relative  # noqa: E402
-from pd2bot.items import read_carried_items  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.units import (  # noqa: E402
+from pd2bot.perception.items import read_carried_items  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.units import (  # noqa: E402
     _read_ground_item,
     hovered_item_id,
     iter_units_of_type,

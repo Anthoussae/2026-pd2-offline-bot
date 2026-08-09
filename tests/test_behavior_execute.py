@@ -25,7 +25,7 @@ from pd2bot.behavior.execute import (
     RecordingExecutor,
 )
 from pd2bot.input import VK_1, VK_3, VK_F1, VK_F5, InputRefused
-from pd2bot.player import ActiveSkills, Player
+from pd2bot.perception.player import ActiveSkills, Player
 
 HOME = (1000, 1000)
 

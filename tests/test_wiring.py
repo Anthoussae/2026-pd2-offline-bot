@@ -16,7 +16,7 @@ import pytest
 
 from pd2bot import offsets
 from pd2bot.behavior.combat import load_class_config
-from pd2bot.items import CarriedItem, CarriedItems
+from pd2bot.perception.items import CarriedItem, CarriedItems
 from pd2bot.pickit import cleanse_keep, load_item_table, load_pickit
 from pd2bot.safety import SafetyInterrupt, Verdict
 from pd2bot.wiring import (

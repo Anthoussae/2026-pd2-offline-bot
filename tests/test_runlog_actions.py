@@ -13,9 +13,9 @@ from pd2bot.behavior.actions import (
 )
 from pd2bot.behavior.execute import RecordingExecutor
 from pd2bot.mapframe import MapFrame
+from pd2bot.perception.world import Area
 from pd2bot.pickit import ItemTable
 from pd2bot.runlog import NullRunLog, RunLog, load
-from pd2bot.world import Area
 
 TOWER = Area(level_no=20, position=(2000, 1600), size=(8, 8))
 ARRIVAL = (10006, 8002)

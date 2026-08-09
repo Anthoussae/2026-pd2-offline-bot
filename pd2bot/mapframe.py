@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pd2bot import offsets
-from pd2bot.world import SUBTILES_PER_TILE
+from pd2bot.perception.world import SUBTILES_PER_TILE
 
 # Screen compass, 45-degree sectors clockwise from up.
 _COMPASS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")

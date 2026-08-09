@@ -38,10 +38,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from pd2bot import offsets
-from pd2bot.memory import GameSession
-from pd2bot.player import Player, read_player
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.player import Player, read_player
+from pd2bot.perception.world import Area, read_area
 from pd2bot.runlog import NullRunLog
-from pd2bot.world import Area, read_area
 
 
 class DeathHalt(RuntimeError):

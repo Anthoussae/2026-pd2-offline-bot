@@ -40,8 +40,8 @@ from dataclasses import dataclass, field
 from pd2bot import offsets
 from pd2bot.behavior.actions import Action, AttackUnit, CastAtPoint, MoveTo
 from pd2bot.behavior.reflex import retreat_point
-from pd2bot.snapshot import GameSnapshot
-from pd2bot.units import Monster
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.perception.units import Monster
 
 
 @dataclass(frozen=True)

@@ -8,7 +8,7 @@ from pd2bot.mapframe import (
     describe,
     screen_north,
 )
-from pd2bot.world import Area
+from pd2bot.perception.world import Area
 
 # The real Forgotten Tower numbers — the case this module exists for.
 TOWER = Area(level_no=20, position=(2000, 1600), size=(8, 8))  # x5 -> 10000,8000

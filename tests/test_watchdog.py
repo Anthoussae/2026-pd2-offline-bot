@@ -14,7 +14,8 @@ import json
 import pytest
 
 from pd2bot import offsets
-from pd2bot.player import Player
+from pd2bot.perception.player import Player
+from pd2bot.perception.world import Area
 from pd2bot.watchdog import (
     DEATH_CONFIRMATIONS,
     HEARTBEAT_STALE_AFTER_S,
@@ -30,7 +31,6 @@ from pd2bot.watchdog import (
     write_heartbeat,
     write_latch,
 )
-from pd2bot.world import Area
 
 WILDS = Area(level_no=3, position=(0, 0), size=(100, 100))
 TOWN = Area(level_no=1, position=(0, 0), size=(20, 20))

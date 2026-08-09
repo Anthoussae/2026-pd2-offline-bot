@@ -8,8 +8,8 @@ import struct
 
 import pytest
 
-import pd2bot.memory
-from pd2bot.memory import GameSession, Module, Region
+import pd2bot.perception.memory
+from pd2bot.perception.memory import GameSession, Module, Region
 
 
 class FakePymem:
@@ -109,7 +109,7 @@ class ScanSession(GameSession):
 
 @pytest.fixture
 def small_chunks(monkeypatch):
-    monkeypatch.setattr(pd2bot.memory, "_CHUNK", 64)
+    monkeypatch.setattr(pd2bot.perception.memory, "_CHUNK", 64)
 
 
 def test_search_finds_a_match_inside_one_chunk(small_chunks):

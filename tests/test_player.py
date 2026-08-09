@@ -3,8 +3,8 @@
 import pytest
 
 from pd2bot import offsets
-from pd2bot.player import read_active_skills, read_player
-from pd2bot.world import Area, read_area, read_map_seed
+from pd2bot.perception.player import read_active_skills, read_player
+from pd2bot.perception.world import Area, read_area, read_map_seed
 from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, stat_array, u16, u32
 
 UNIT = 0x0AF00000

@@ -12,7 +12,7 @@ from pd2bot.behavior.combat import (
     load_class_config,
 )
 from pd2bot.input import VK_F1, VK_F2, VK_F5
-from pd2bot.snapshot import GameSnapshot
+from pd2bot.perception.snapshot import GameSnapshot
 
 REPO = Path(__file__).resolve().parent.parent
 NECRO = REPO / "config" / "necro.toml"

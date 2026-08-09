@@ -44,12 +44,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pd2bot import offsets, uistate  # noqa: E402
+from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
 from pd2bot.input import VK_RETURN  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
 from pd2bot.panelinput import PanelInput  # noqa: E402
-from pd2bot.player import read_player  # noqa: E402
+from pd2bot.perception import uistate  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.player import read_player  # noqa: E402
 
 SETTLE_S = 1.2
 SAMPLE_S = 0.15

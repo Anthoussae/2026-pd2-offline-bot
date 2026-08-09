@@ -10,8 +10,8 @@ import struct
 import pytest
 
 from pd2bot import offsets
-from pd2bot.memory import GameSession
-from pd2bot.uistate import (
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.uistate import (
     UIArrayNotFound,
     UIState,
     can_act,

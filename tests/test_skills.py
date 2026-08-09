@@ -9,7 +9,7 @@ import pytest
 
 from pd2bot import offsets
 from pd2bot.input import VK_1, VK_4, VK_F5
-from pd2bot.player import ActiveSkills, Player
+from pd2bot.perception.player import ActiveSkills, Player
 from pd2bot.skills import SkillSwitchFailed, belt_drink, ensure_right_skill
 
 
@@ -109,7 +109,7 @@ def test_the_failure_carries_the_state_that_would_explain_it(monkeypatch):
     clock = FakeClock()
     script_reads(monkeypatch, [right(offsets.SKILL_BONE_ARMOR)])
     monkeypatch.setattr(
-        "pd2bot.player.read_player",
+        "pd2bot.perception.player.read_player",
         lambda session: Player(
             name="N", level=91, act=1, position=(1, 1), mode=10,
             hp=900, max_hp=1000, mana=300, max_mana=400,
@@ -137,7 +137,7 @@ def test_a_broken_diagnosis_never_replaces_the_failure(monkeypatch):
     def explode(session):
         raise RuntimeError("memory read failed mid-diagnosis")
 
-    monkeypatch.setattr("pd2bot.player.read_player", explode)
+    monkeypatch.setattr("pd2bot.perception.player.read_player", explode)
     with pytest.raises(SkillSwitchFailed, match="no cast will be sent"):
         ensure_right_skill(
             None, FakeGated(), offsets.SKILL_DESECRATE, clock=clock, sleep=clock.sleep

@@ -48,14 +48,14 @@ sys.path.insert(0, str(REPO))
 
 from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.units import (  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.units import (  # noqa: E402
     iter_units_of_type,
     player_unit,
     read_stats,
     unit_position,
 )
-from pd2bot.world import read_area  # noqa: E402
+from pd2bot.perception.world import read_area  # noqa: E402
 
 MONSTER_TXT_PTR = 0x00  # MonsterData -> pMonstatsTxt (D2Structs.h)
 RECORD_BYTES = 96  # generous: MonStats records are large; we diff, not parse

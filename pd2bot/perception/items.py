@@ -25,8 +25,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass, replace
 
 from pd2bot import offsets
-from pd2bot.memory import GameSession
-from pd2bot.units import player_unit, read_socket_count
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.units import player_unit, read_socket_count
 
 # A character can own at most ~200 items (40 inventory + 16 belt + equips +
 # stash); the bound only exists so a torn chain cannot loop forever.
@@ -257,7 +257,7 @@ def read_equipped_durability(session: GameSession) -> tuple[Durability, ...]:
     amulets, charms) are omitted — absence of the stat means indestructible
     or not applicable, never broken.
     """
-    from pd2bot.units import read_stats  # local: units imports nothing here
+    from pd2bot.perception.units import read_stats  # local: units imports nothing here
 
     worn: list[Durability] = []
     for unit in _iter_carried_units(session):

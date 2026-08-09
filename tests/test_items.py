@@ -8,7 +8,7 @@ the live client pairs them.
 """
 
 from pd2bot import offsets
-from pd2bot.items import MAX_CARRIED_ITEMS, read_carried_items
+from pd2bot.perception.items import MAX_CARRIED_ITEMS, read_carried_items
 from tests.conftest import (
     CLIENT_BASE,
     FakeMemory,

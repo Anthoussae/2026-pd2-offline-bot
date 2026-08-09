@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pd2bot import offsets
-from pd2bot.memory import GameSession
-from pd2bot.units import player_unit, read_stats, unit_position
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.units import player_unit, read_stats, unit_position
 
 
 @dataclass(frozen=True)

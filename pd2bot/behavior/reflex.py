@@ -80,10 +80,10 @@ from pd2bot.behavior.actions import (
     GiveMercPotion,
     MoveTo,
 )
-from pd2bot.items import CarriedItem, CarriedItems
-from pd2bot.memory import GameSession
-from pd2bot.snapshot import GameSnapshot
-from pd2bot.units import player_unit, read_stats
+from pd2bot.perception.items import CarriedItem, CarriedItems
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.perception.units import player_unit, read_stats
 
 
 @dataclass(frozen=True)

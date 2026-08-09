@@ -37,9 +37,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
-from pd2bot.items import _iter_carried_units, read_carried_items  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.units import read_stats, scan_units  # noqa: E402
+from pd2bot.perception.items import _iter_carried_units, read_carried_items  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.units import read_stats, scan_units  # noqa: E402
 
 DROP_TIMEOUT_S = 300.0
 

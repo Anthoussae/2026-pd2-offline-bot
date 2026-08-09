@@ -8,9 +8,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from pd2bot import offsets, oog
+from pd2bot import offsets
 from pd2bot.input import InputRefused
 from pd2bot.menuinput import MenuInput, menu_to_screen
+from pd2bot.perception import oog
 from pd2bot.window import ClientRect
 from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, u32
 

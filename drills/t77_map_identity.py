@@ -42,14 +42,14 @@ sys.path.insert(0, str(REPO))
 
 from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.pickit import load_item_codes  # noqa: E402
-from pd2bot.units import (  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.units import (  # noqa: E402
     _read_ground_item,
     iter_units_of_type,
     player_unit,
     unit_position,
 )
+from pd2bot.pickit import load_item_codes  # noqa: E402
 
 GO_WORDS = frozenset({"go", "go!"})
 # Generous on purpose: the operator drops ten things and will shuffle

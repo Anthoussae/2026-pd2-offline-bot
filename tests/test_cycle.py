@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from pd2bot import offsets, oog, uistate
+from pd2bot import offsets
 from pd2bot.cycle import (
     CycleConfig,
     CycleError,
@@ -19,6 +19,7 @@ from pd2bot.cycle import (
 )
 from pd2bot.input import InputRefused
 from pd2bot.navigate import NavigationError
+from pd2bot.perception import oog, uistate
 from pd2bot.window import ClientRect
 
 RECT = ClientRect(left=0, top=0, width=1536, height=864)
@@ -173,7 +174,7 @@ def rig(monkeypatch):
                 frozenset({offsets.UI_ESCMENU_MAIN}) if client.esc_menu else frozenset()
             ),
         )
-        from pd2bot import world
+        from pd2bot.perception import world
 
         monkeypatch.setattr(world, "read_area", lambda s: object() if client.is_in_game() else None)
         cycle = GameCycle(

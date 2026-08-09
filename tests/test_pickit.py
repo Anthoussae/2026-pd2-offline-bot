@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 
 from pd2bot import offsets
-from pd2bot.items import CarriedItem, CarriedItems
+from pd2bot.perception.items import CarriedItem, CarriedItems
+from pd2bot.perception.units import GroundItem
 from pd2bot.pickit import (
     ItemTable,
     PickitError,
@@ -19,7 +20,6 @@ from pd2bot.pickit import (
     load_item_table,
     load_pickit,
 )
-from pd2bot.units import GroundItem
 
 REPO = Path(__file__).resolve().parent.parent
 SHIPPED = REPO / "config" / "pickit.toml"

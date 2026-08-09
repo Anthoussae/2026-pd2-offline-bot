@@ -46,25 +46,25 @@ from pd2bot.behavior.runner import BehaviorRunner
 from pd2bot.behavior.steps import RunServices, build_registry
 from pd2bot.chat import Chat
 from pd2bot.cycle import GameCycle
-from pd2bot.exits import ExitMemory, read_level_exits
 from pd2bot.input import GatedInput
-from pd2bot.items import read_carried_items
 from pd2bot.mapstore import MapStore
-from pd2bot.memory import GameSession
 from pd2bot.menuinput import MenuInput
 from pd2bot.narrate import Narrator
 from pd2bot.navigate import live_navigator
 from pd2bot.panelinput import PanelInput
 from pd2bot.pathing import astar, nearest_walkable, simplify
+from pd2bot.perception.exits import ExitMemory, read_level_exits
+from pd2bot.perception.items import read_carried_items
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.player import read_player
+from pd2bot.perception.snapshot import Perception
+from pd2bot.perception.uistate import find_ui_array
+from pd2bot.perception.world import read_area, read_map_seed
 from pd2bot.pickit import Pickit, cleanse_keep, load_item_table, load_pickit
-from pd2bot.player import read_player
 from pd2bot.runlog import RunLog
 from pd2bot.safety import SafetyConfig, SafetyInterrupt, SafetyMonitor, Verdict
-from pd2bot.snapshot import Perception
 from pd2bot.town import PreambleReport, TownConfig, TownLayer
-from pd2bot.uistate import find_ui_array
 from pd2bot.waypoint import WaypointTravel
-from pd2bot.world import read_area, read_map_seed
 
 REPO = Path(__file__).resolve().parent.parent
 CONFIG = REPO / "config"
@@ -825,7 +825,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
     import sys
 
     from pd2bot.behavior.run import RunError
-    from pd2bot.memory import GameNotRunning, NeedsAdministrator
+    from pd2bot.perception.memory import GameNotRunning, NeedsAdministrator
     from pd2bot.window import WindowNotFound
 
     parser = argparse.ArgumentParser(

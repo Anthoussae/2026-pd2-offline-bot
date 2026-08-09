@@ -40,11 +40,12 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from pd2bot import offsets, uistate
+from pd2bot import offsets
 from pd2bot.input import InputRefused
-from pd2bot.memory import GameSession
+from pd2bot.perception import uistate
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.world import read_area
 from pd2bot.town import TownLayer
-from pd2bot.world import read_area
 
 
 class WaypointError(RuntimeError):

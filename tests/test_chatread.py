@@ -1,7 +1,7 @@
 """Chat read-back: what the bot hears, and what it refuses to hear."""
 
 from pd2bot import offsets
-from pd2bot.chatread import ChatListener, last_line
+from pd2bot.perception.chatread import ChatListener, last_line
 from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession
 
 BUFFER = CLIENT_BASE + offsets.CHAT_LAST_LINE

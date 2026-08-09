@@ -10,8 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pd2bot import offsets
-from pd2bot.memory import GameSession
-from pd2bot.units import player_unit
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.units import player_unit
 
 # D2 measures levels in tiles but units in subtiles, five to a tile. Mixing them
 # silently produces coordinates that look plausible and are wrong by 5x — the

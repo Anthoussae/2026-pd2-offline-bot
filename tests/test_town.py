@@ -11,10 +11,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from pd2bot import offsets, uistate
-from pd2bot.items import CarriedItem, CarriedItems
-from pd2bot.player import Player
-from pd2bot.snapshot import GameSnapshot
+from pd2bot import offsets
+from pd2bot.perception import uistate
+from pd2bot.perception.items import CarriedItem, CarriedItems
+from pd2bot.perception.player import Player
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.perception.uistate import UIState
+from pd2bot.perception.units import GameObject, Monster
+from pd2bot.perception.world import Area
 from pd2bot.town import (
     BeltBelowMinimum,
     PreambleReport,
@@ -25,10 +29,7 @@ from pd2bot.town import (
     Uncalibrated,
 )
 from pd2bot.uipoints import default_points
-from pd2bot.uistate import UIState
-from pd2bot.units import GameObject, Monster
 from pd2bot.window import ClientRect
-from pd2bot.world import Area
 
 RECT = ClientRect(left=0, top=0, width=1536, height=864)
 
@@ -1607,7 +1608,7 @@ def test_closing_panels_covers_every_blocking_panel(town):
 
 
 def worn(uid, current, maximum):
-    from pd2bot.items import Durability
+    from pd2bot.perception.items import Durability
 
     return Durability(unit_id=uid, kind=30, current=current, maximum=maximum)
 

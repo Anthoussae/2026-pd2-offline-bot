@@ -42,10 +42,10 @@ from pd2bot.behavior.actions import ActionExecutor
 from pd2bot.behavior.reflex import ReflexLadder
 from pd2bot.input import InputRefused
 from pd2bot.narrate import noop as narrate_noop
+from pd2bot.perception.snapshot import GameSnapshot
 from pd2bot.runlog import NullRunLog
 from pd2bot.safety import ChickenExit, DeathHalt, SafetyInterrupt
 from pd2bot.skills import SkillSwitchFailed
-from pd2bot.snapshot import GameSnapshot
 
 # Two different ways a send can fail to land, treated identically on
 # purpose. `InputRefused` is the guard saying "not now"; `SkillSwitchFailed`

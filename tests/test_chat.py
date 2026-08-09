@@ -4,9 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from pd2bot import offsets, uistate
+from pd2bot import offsets
 from pd2bot.chat import Chat, ChatError, _split
 from pd2bot.input import InputRefused
+from pd2bot.perception import uistate
 from tests.conftest import CLIENT_BASE, FakeMemory, FakeSession, u32
 
 UI_ARRAY = 0x0F000000

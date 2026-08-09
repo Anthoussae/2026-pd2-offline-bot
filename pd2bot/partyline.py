@@ -48,8 +48,8 @@ import time
 from pathlib import Path
 
 from pd2bot.chat import Chat
-from pd2bot.chatread import BOT_PREFIX, ChatListener
-from pd2bot.memory import GameSession
+from pd2bot.perception.chatread import BOT_PREFIX, ChatListener
+from pd2bot.perception.memory import GameSession
 
 # The one flag. Lives beside the bridge queue because both are
 # machine-local workflow state, not project state — a git clone on
