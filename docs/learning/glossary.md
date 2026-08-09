@@ -335,6 +335,12 @@ is enough to read another program's live data. Offsets are true for one
 build of a program and can shift when it is patched. First seen in
 [reading a program from the outside](2026-07-28-reading-a-program-from-outside.md).
 
+**mixin** — a class holding a slice of methods, never used on its own,
+composed with others by inheritance into one working class. The
+practical use here: splitting a sixty-method class (`TownLayer`) across
+one-concern files without redesigning it — the class the rest of the
+code sees is unchanged. *(First seen: 2026-08-09, package restructure.)*
+
 **merge** — folding one branch's commits into another, usually a work
 branch into `main`. After the merge both lines are identical; nothing
 is deleted and all history survives. Accepting a pull request is a
@@ -450,6 +456,13 @@ The discipline: read the log, and if it can't answer, add the
 instrument, not a story. *(First seen: 2026-08-06, instrumenting for
 questions you can't predict.)*
 
+**refactoring** — restructuring code without changing what it does, so
+future work is easier and bugs have fewer hiding places. The discipline
+is proving the "without changing" half: checks green at every step, no
+behavior edits mixed in, and ideally one real end-to-end run at the end.
+The reckless opposite — everything at once, no checkpoints — is a "big
+bang" refactor. *(First seen: 2026-08-09, package restructure.)*
+
 **registry (pattern)** — a lookup table mapping names to
 implementations, populated at startup: our step registry maps a run
 file's step names to the code that executes them. It is what lets data
@@ -472,6 +485,13 @@ Our agent-toolkit repo is the SSOT for agent workflow: the installed
 skills under `~/.claude/skills/` are copies made by the installer, never
 edited directly. Most sync bugs in any system are two "sources of truth"
 disagreeing.
+
+**shim** — a thin forwarding layer kept at an old address so existing
+callers keep working after the real thing moves: our root `navigate.py`
+is five lines that hand off to `nav/navigate.py`, keeping
+`python -m pd2bot.navigate` and every script that types it unchanged.
+A shim that grows logic of its own is a smell. *(First seen:
+2026-08-09, package restructure.)*
 
 **short-circuit** — evaluating an ordered list of options and stopping at
 the first that applies, so nothing below it runs at all. The survival
