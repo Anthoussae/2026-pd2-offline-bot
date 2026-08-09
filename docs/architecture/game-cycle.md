@@ -137,7 +137,7 @@ carry unchanged — the behavior layer's own exits (`IdleBail`,
 had to change. M5's acceptance re-ran the same pattern with a real run
 inside: 3/3 clean unattended Cold Plains clearances (see behavior.md).
 
-## The safety monitor (`safety.py`)
+## The safety monitor (`safety/monitor.py`)
 
 A watchdog over the player's vitals, two reflexes, death always
 evaluated first. It runs at the top of every tick **and from inside any
@@ -160,7 +160,7 @@ after N consecutive chickens (default 2) — user-spotted during the live
 drill, whose "odd" instant trip was exactly this carried-vitals effect.
 The durable fix landed in M5 and closed R45's loop: every run opens
 with the town preamble (heal at the healer, repair, restock the belt
-from inventory, merc check — `town.py`), so a game entered with
+from inventory, merc check — `behavior/town/`), so a game entered with
 carried-down vitals heals before the field. The consecutive-chicken
 backstop stays as defense in depth, and non-vitals exits (`IdleBail`,
 `StopRequested`, `is_vitals = False`) no longer count against it —
@@ -205,10 +205,10 @@ converts it back to `ChickenExit`/`DeathHalt` at one boundary, so
 everything here is reached by the types it was always written against.
 `walk_to` polls from every loop it waits in and is capped at 2 s per
 call. **The standing rule: any new blocking call must take the poll** —
-`navigate.py`'s `_wait` is the pattern, sleeping in poll-sized pieces
+`nav/navigate.py`'s `_wait` is the pattern, sleeping in poll-sized pieces
 rather than flat.
 
-**Out-of-process.** `pd2bot/watchdog.py` is a separate elevated process
+**Out-of-process.** `pd2bot/safety/watchdog.py` is a separate elevated process
 polling vitals at 0.2 s that presses ESC — and only ESC — when they
 cross, verifying the pause rather than assuming it, and sending
 **nothing at all** when the character reads dead. `cycle.leave_game`

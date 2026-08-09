@@ -163,3 +163,6 @@ intended behaviour, and this one makes it enforceable rather than
 aspirational. It changes nothing about the actuation architecture
 (`SendInput` and read-only memory, no injection, no memory writes), and
 nothing about the death latch.
+
+*(2026-08-09: module paths above predate the package restructure; see
+docs/adr/2026-08-09-package-layout.md for the current layout.)*

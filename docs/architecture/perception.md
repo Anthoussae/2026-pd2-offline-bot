@@ -15,16 +15,16 @@ Game.exe (PD2 client, 32-bit, elevated)
    |
    |  ReadProcessMemory
    v
-GameSession          pd2bot/memory.py     attach, resolve module base, typed reads
+GameSession          pd2bot/perception/memory.py     attach, resolve module base, typed reads
    |
    +-- offsets       pd2bot/offsets.py    every constant, each citing its source
-   +-- units         pd2bot/units.py      unit primitives + hash-table sweep
-   +-- player        pd2bot/player.py     the character's own state
-   +-- world         pd2bot/world.py      current area, map seed
-   +-- uistate       pd2bot/uistate.py    which panels are open, may we act
+   +-- units         pd2bot/perception/units.py      unit primitives + hash-table sweep
+   +-- player        pd2bot/perception/player.py     the character's own state
+   +-- world         pd2bot/perception/world.py      current area, map seed
+   +-- uistate       pd2bot/perception/uistate.py    which panels are open, may we act
    |
    v
-Perception.snapshot() pd2bot/snapshot.py  one coherent view per tick
+Perception.snapshot() pd2bot/perception/snapshot.py  one coherent view per tick
 ```
 
 Everything above perception consumes `GameSnapshot`. Nothing else in the

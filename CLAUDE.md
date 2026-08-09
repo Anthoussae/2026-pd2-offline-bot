@@ -65,10 +65,10 @@ Forgotten Tower were all wrong; the log answered it on the first run.
 ADR: `docs/adr/2026-08-05-run-event-log.md` (accepted).
 Input goes through guarded send paths with **no bypass**: world input
 via `pd2bot.input.GatedInput` (guard: `can_act()` AND foreground),
-menu input via `pd2bot.menuinput.MenuInput` (guard: the complement —
-not in a game, or the ESC menu open), chat via `pd2bot.chat.Chat`
+menu input via `pd2bot.input.menu.MenuInput` (guard: the complement —
+not in a game, or the ESC menu open), chat via `pd2bot.input.chat.Chat`
 (types only while the chat console is verified open), and in-game
-panel clicks via `pd2bot.panelinput.PanelInput` (clicks only while the
+panel clicks via `pd2bot.input.panel.PanelInput` (clicks only while the
 panel the caller names is verified open — the waypoint list, stash,
 NPC dialogs; M5's addition, Chat's construction generalized). M4 and
 M5 both kept the M1 contract: `GatedInput`'s guard was not touched. Safety invariant: after
@@ -79,7 +79,7 @@ without an explicit user decision (see
 2026-08-07 after a chicken-starvation death: nothing may starve the
 monitor.** A blocking call must poll safety (`SafetyMonitor.poll`,
 raising `SafetyInterrupt` — a `BaseException`, so no `except Exception`
-can swallow it) and must be bounded; `navigate.py`'s `_wait` is the
+can swallow it) and must be bounded; `nav/navigate.py`'s `_wait` is the
 pattern — sleep in poll-sized pieces, never flat. A separate elevated
 process (`pd2bot.watchdog`) presses ESC independently, and the launcher
 refuses to start a real run without it. ADR:

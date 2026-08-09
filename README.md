@@ -67,7 +67,7 @@ python -m pd2bot.chat "hello"         # post a message to the in-game chat
 
 `pd2bot.cycle` takes `--dwell`, `--life-chicken`, `--mana-chicken`, and
 `--chicken-in-town` (the last is a live-test aid). Menu clicking relies on
-two calibrations recorded in `pd2bot/cycle.py` and `pd2bot/menuinput.py`
+two calibrations recorded in `pd2bot/cycle.py` and `pd2bot/input/menu.py`
 (the pillarboxed menu scale is derived from the window; the Save-and-Exit
 position was hover-measured) — re-check them after changing window size or
 resolution.
@@ -120,7 +120,7 @@ they accumulate under `maps/` (gitignored save-data, regenerable by
 walking). Walk each new area once with `--survey` (you steer, the bot
 records); from then on the bot plans routes across the whole area. A
 dormant offline map generator exists for maps never walked
-(`pd2bot/mapdata.py`; blocked on this machine by PD2's modified DLLs) —
+(`pd2bot/nav/mapdata.py`; blocked on this machine by PD2's modified DLLs) —
 see `docs/adr/2026-07-28-hybrid-map-knowledge.md`.
 
 ## Development setup

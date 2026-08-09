@@ -207,3 +207,6 @@ each one corrects an assumption the P4/P5 design was written under:
   was resolved by `is_vitals = False` (R115): the cycle's vitals
   backstop no longer counts non-vitals exits, so the mixed-sequence
   mislabel cannot recur.
+
+*(2026-08-09: module paths above predate the package restructure; see
+docs/adr/2026-08-09-package-layout.md for the current layout.)*

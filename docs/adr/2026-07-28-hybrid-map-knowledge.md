@@ -103,3 +103,6 @@ check that `mapdata.py --fidelity` already implements.
   and M4's door handling will revisit.
 - Route planning for M5/M6 can assume full-area knowledge only after the
   survey walk of those areas is done — a one-time, one-minute cost each.
+
+*(2026-08-09: module paths above predate the package restructure; see
+docs/adr/2026-08-09-package-layout.md for the current layout.)*
