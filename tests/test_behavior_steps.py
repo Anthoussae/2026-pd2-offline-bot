@@ -2463,3 +2463,39 @@ def test_countess_sweep_budget_spent_unproven_is_a_loud_stop():
                 entered_sweep = True
             clock.advance(4.0 if entered_sweep else 0.5)
     assert any("COUNTESS UNRESOLVED" in a for a in alerts)
+
+
+def test_a_traverse_runs_a_queued_cleanse():
+    """The descent's blind spot, found live 2026-08-08.
+
+    `collect` queues a cleanse when a non-potion will not come up, and
+    `_mark_inventory_full` then suppresses every non-potion pickup for
+    the REST OF THE GAME. A descent run is `town_preamble, waypoint,
+    traverse x6` — and `TraverseStep` was the one collecting step that
+    never called `maybe_cleanse`. So the queue was set on the first
+    cellar floor and served on none of them, and the Countess's drops
+    were skipped by a flag raised twenty minutes before she was reached.
+    """
+    clock = Clock()
+    step, world, remembered, executor, ctx, tick = traversing(clock)
+    cleansed = []
+    step.services.cleanse = lambda: cleansed.append(True) or 1
+    step.services.cleanse_queued = True
+    step.services.inventory_full = True
+
+    step.step(snap(pos=world["pos"], area=20), ctx)
+
+    assert cleansed, "the traverse never ran the queued cleanse"
+
+
+def test_a_traverse_does_not_cleanse_with_nothing_queued():
+    """It must stay a traversal, not become a step that stops to tidy."""
+    clock = Clock()
+    step, world, remembered, executor, ctx, tick = traversing(clock)
+    cleansed = []
+    step.services.cleanse = lambda: cleansed.append(True) or 1
+    step.services.cleanse_queued = False
+
+    step.step(snap(pos=world["pos"], area=20), ctx)
+
+    assert not cleansed

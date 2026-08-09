@@ -75,7 +75,15 @@ M5 both kept the M1 contract: `GatedInput`'s guard was not touched. Safety invar
 a detected death the bot sends no input of any kind, permanently
 (`pd2bot.safety`, the death latch) — do not add recovery behavior
 without an explicit user decision (see
-`docs/architecture/game-cycle.md`). Live checks against the
+`docs/architecture/game-cycle.md`). **Second safety invariant, added
+2026-08-07 after a chicken-starvation death: nothing may starve the
+monitor.** A blocking call must poll safety (`SafetyMonitor.poll`,
+raising `SafetyInterrupt` — a `BaseException`, so no `except Exception`
+can swallow it) and must be bounded; `navigate.py`'s `_wait` is the
+pattern — sleep in poll-sized pieces, never flat. A separate elevated
+process (`pd2bot.watchdog`) presses ESC independently, and the launcher
+refuses to start a real run without it. ADR:
+`docs/adr/2026-08-07-unstarvable-safety.md`. Live checks against the
 game need **Administrator rights** (the client runs elevated; UIPI also
 blocks synthetic input from normal processes). The agent runs elevated
 commands itself via the **bridge**: the user starts

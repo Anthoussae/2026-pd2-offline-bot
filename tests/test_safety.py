@@ -13,7 +13,13 @@ import pytest
 from pd2bot import offsets, oog, uistate
 from pd2bot.cycle import CycleConfig, GameCycle
 from pd2bot.player import Player
-from pd2bot.safety import ChickenExit, DeathHalt, SafetyConfig, SafetyMonitor
+from pd2bot.safety import (
+    ChickenExit,
+    DeathHalt,
+    SafetyConfig,
+    SafetyInterrupt,
+    SafetyMonitor,
+)
 from pd2bot.world import Area
 from tests.test_cycle import FakeClock, ScriptedClient
 
@@ -40,17 +46,23 @@ class Vitals:
         self.player = player if player is not None else make_player()
         self.area = area
         self.alerts = 0
+        self.reads = 0
 
-    def monitor(self, config: SafetyConfig) -> SafetyMonitor:
+    def monitor(self, config: SafetyConfig, clock=None) -> SafetyMonitor:
         def alert() -> None:
             self.alerts += 1
+
+        def read_player(_session):
+            self.reads += 1
+            return self.player
 
         return SafetyMonitor(
             session=None,
             config=config,
-            read_player_fn=lambda s: self.player,
+            read_player_fn=read_player,
             read_area_fn=lambda s: self.area,
             alert=alert,
+            **({} if clock is None else {"clock": clock}),
         )
 
 
@@ -302,3 +314,111 @@ def test_death_halts_loop_with_no_further_input(rig):
     # the input log is exactly what it was when the callback started.
     assert client.log == input_log_before
     assert client.is_in_game()  # the game was left untouched
+
+
+# -- poll(): the same judgement, offered mid-block -----------------------------
+#
+# 2026-08-07: a `walk_to` blocked for 24 s and the monitor, which ran
+# only between ticks, never looked. `poll()` is what blocking callers
+# call; it must agree with `tick()` about everything except which
+# exception it raises.
+
+
+class VirtualClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_poll_and_tick_agree_on_a_chicken():
+    config = SafetyConfig(life_chicken_pct=50.0)
+    ticked = Vitals(make_player(hp=300))
+    polled = Vitals(make_player(hp=300))
+
+    with pytest.raises(ChickenExit) as by_tick:
+        ticked.monitor(config).tick()
+    with pytest.raises(SafetyInterrupt) as by_poll:
+        polled.monitor(config).poll()
+
+    assert by_poll.value.verdict.kind == "life"
+    assert str(by_poll.value) == str(by_tick.value)
+
+
+def test_poll_and_tick_agree_on_silence():
+    config = SafetyConfig(life_chicken_pct=50.0)
+    healthy = Vitals(make_player(hp=900))
+    healthy.monitor(config).tick()
+    healthy.monitor(config).poll()  # neither raises
+
+
+def test_poll_sets_the_death_latch_like_tick_does():
+    vitals = Vitals(make_player(mode=offsets.PLAYER_MODE_DEAD))
+    monitor = vitals.monitor(SafetyConfig())
+    with pytest.raises(SafetyInterrupt) as raised:
+        monitor.poll()
+    assert raised.value.verdict.is_death
+    assert monitor.halted
+    assert vitals.alerts == 1
+    # And the latch outranks everything afterwards, on either path.
+    with pytest.raises(DeathHalt):
+        monitor.tick()
+
+
+def test_a_latched_monitor_interrupts_immediately_without_reading():
+    vitals = Vitals(make_player(mode=offsets.PLAYER_MODE_DEAD))
+    monitor = vitals.monitor(SafetyConfig())
+    with pytest.raises(SafetyInterrupt):
+        monitor.poll()
+    reads = vitals.reads
+    for _ in range(5):
+        with pytest.raises(SafetyInterrupt):
+            monitor.poll()
+    assert vitals.reads == reads  # the latch answers without touching memory
+
+
+def test_poll_is_rate_limited():
+    """It is called from a 10 Hz walk loop; it must not read memory at
+    10 Hz to answer. The cost of the interval is chicken latency, which
+    is why it is small and configurable rather than absent."""
+    clock = VirtualClock()
+    vitals = Vitals(make_player(hp=900))
+    monitor = vitals.monitor(
+        SafetyConfig(life_chicken_pct=50.0, poll_interval_s=0.2), clock=clock
+    )
+    for _ in range(10):
+        monitor.poll()
+        clock.now += 0.05  # 10 polls across 0.5 virtual seconds
+    assert 1 <= vitals.reads <= 4, vitals.reads
+
+
+def test_rate_limiting_delays_a_chicken_by_no_more_than_the_interval():
+    clock = VirtualClock()
+    vitals = Vitals(make_player(hp=900))
+    monitor = vitals.monitor(
+        SafetyConfig(life_chicken_pct=50.0, poll_interval_s=0.2), clock=clock
+    )
+    monitor.poll()  # primes the limiter
+    vitals.player = make_player(hp=100)  # the crossing happens now
+    elapsed = 0.0
+    while True:
+        clock.now += 0.05
+        elapsed += 0.05
+        try:
+            monitor.poll()
+        except SafetyInterrupt:
+            break
+        assert elapsed < 1.0, "never noticed"
+    assert elapsed <= 0.2 + 1e-9
+
+
+def test_poll_respects_the_town_exemption():
+    vitals = Vitals(make_player(hp=100), area=TOWN)
+    vitals.monitor(SafetyConfig(life_chicken_pct=50.0)).poll()  # no raise
+
+
+def test_poll_says_nothing_when_there_is_no_player():
+    vitals = Vitals()
+    vitals.player = None
+    vitals.monitor(SafetyConfig(life_chicken_pct=50.0)).poll()

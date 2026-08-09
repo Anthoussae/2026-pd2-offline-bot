@@ -445,3 +445,62 @@ def test_interact_object_clicks_plain_left_no_shift(monkeypatch):
     assert gated.world_clicks == [((5300, 5700), "left", False)], (
         "a staircase click must be a bare left click — SHIFT would attack"
     )
+
+
+# -- nav.capped: a walk that returned on its wall clock ------------------------
+#
+# The executor is the only place a WalkResult exists -- it has always
+# thrown it away -- and a capped leg is otherwise invisible: the step
+# just sees a short walk and asks again. That is by design, but "the bot
+# spent the whole run being capped" must not look like "the bot walked".
+
+
+class CapturingLog:
+    enabled = True
+
+    def __init__(self) -> None:
+        self.events = []
+
+    # `kind` positional-only, like the real RunLog: the envelope owns
+    # that key and a field of the same name would overwrite it.
+    def event(self, kind, /, **fields):
+        self.events.append((kind, fields))
+
+
+def test_a_capped_walk_is_recorded(monkeypatch):
+    from pd2bot.navigate import WalkResult
+
+    result = WalkResult(
+        target=(150, 100), arrived_at=(120, 100), duration_seconds=2.0,
+        waypoints=3, clicks=4, replans=1, capped=True,
+    )
+    executor, _, _, _ = make(monkeypatch, walk=lambda target: result)
+    executor.runlog = CapturingLog()
+    executor.execute(MoveTo((150, 100)))
+
+    capped = [f for k, f in executor.runlog.events if k == "nav.capped"]
+    assert len(capped) == 1
+    assert capped[0]["seconds"] == 2.0
+    assert capped[0]["short_by"] == 30.0
+    assert capped[0]["arrived_at"] == (120, 100)
+
+
+def test_an_ordinary_walk_records_no_cap(monkeypatch):
+    from pd2bot.navigate import WalkResult
+
+    result = WalkResult(
+        target=(150, 100), arrived_at=(150, 100), duration_seconds=1.0,
+        waypoints=2,
+    )
+    executor, _, _, _ = make(monkeypatch, walk=lambda target: result)
+    executor.runlog = CapturingLog()
+    executor.execute(MoveTo((150, 100)))
+    assert not [k for k, _ in executor.runlog.events if k == "nav.capped"]
+
+
+def test_a_walker_that_returns_nothing_is_not_an_error(monkeypatch):
+    """Drills and sims hand the executor a bare callable."""
+    executor, _, walked, _ = make(monkeypatch)
+    executor.runlog = CapturingLog()
+    executor.execute(MoveTo((150, 100)))
+    assert walked == [(150, 100)]

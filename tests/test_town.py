@@ -2432,3 +2432,91 @@ def test_a_retry_clears_the_cursor_before_re_clicking(town):
     assert town.world_clicks.count(STASH_POS) > 1, (
         "the panel was never reopened, so no retry ever cleared the cursor"
     )
+
+
+# -- the walk cap: a capped return is not an arrival ---------------------------
+#
+# 2026-08-07 gave `walk_to` a 2 s wall-clock cap so a blocking walk can no
+# longer starve the chicken. Field steps were already built for short
+# legs; the TOWN layer crossed town in one call and trusted it to block
+# until arrival. Live on 2026-08-08 that was `heal: FAILED after 2.1s` -
+# one walk budget - and the bot correctly reported an NPC it had not
+# actually walked to yet.
+
+
+def _capped(target, arrived_at):
+    from pd2bot.navigate import WalkResult
+
+    return WalkResult(
+        target=target, arrived_at=arrived_at, duration_seconds=2.0,
+        waypoints=2, capped=True,
+    )
+
+
+def _arrived(target):
+    from pd2bot.navigate import WalkResult
+
+    return WalkResult(
+        target=target, arrived_at=target, duration_seconds=1.0, waypoints=2,
+    )
+
+
+def test_town_walks_are_re_issued_until_they_actually_arrive(town):
+    """The regression test for the live failure: three capped legs then
+    an arrival must be four calls, not one."""
+    target = (5922, 5714)
+    calls = []
+
+    def walk(pos):
+        calls.append(pos)
+        if len(calls) < 4:
+            return _capped(pos, (5900 + len(calls), 5700))
+        return _arrived(pos)
+
+    town_layer = layer(town)
+    town_layer.walk_to = walk
+    town_layer._walk_all_the_way(target)
+    assert len(calls) == 4, f"stopped after {len(calls)} capped leg(s)"
+
+
+def test_an_uncapped_walk_is_a_single_call(town):
+    """The old contract still holds when the walk finishes in one go -
+    this must not turn every town walk into a polling loop."""
+    calls = []
+
+    def walk(pos):
+        calls.append(pos)
+        return _arrived(pos)
+
+    town_layer = layer(town)
+    town_layer.walk_to = walk
+    town_layer._walk_all_the_way((5922, 5714))
+    assert len(calls) == 1
+
+
+def test_a_walker_that_returns_nothing_still_works(town):
+    """Drills and older fakes hand back None; `capped` is read defensively
+    so a walker with no WalkResult is treated as having arrived."""
+    calls = []
+    town_layer = layer(town)
+    town_layer.walk_to = lambda pos: calls.append(pos)
+    town_layer._walk_all_the_way((5922, 5714))
+    assert len(calls) == 1
+
+
+def test_endless_capped_legs_give_up_rather_than_spin(town):
+    """The second bound: something that crawls forever without ever quite
+    failing must not hold the run open."""
+    from pd2bot.town import TownError
+
+    clock = {"now": 0.0}
+
+    def walk(pos):
+        clock["now"] += 2.0
+        return _capped(pos, (5000, 5000))
+
+    town_layer = layer(town)
+    town_layer.walk_to = walk
+    town_layer._clock = lambda: clock["now"]
+    with pytest.raises(TownError, match="capped legs"):
+        town_layer._walk_all_the_way((5922, 5714))

@@ -27,6 +27,7 @@ run does something surprising, the trace says which decision produced it.
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -313,6 +314,35 @@ class GameActionExecutor(ActionLogging):
         self.trace.append(TraceEntry(self.clock(), action, detail))
         self._log_action(action, detail)
 
+    def _note_capped(self, action: Action, result: object) -> None:
+        """Record a walk that returned on its wall-clock budget.
+
+        This is the only place the `WalkResult` exists — the executor has
+        always thrown it away — and a capped leg is invisible otherwise:
+        the step simply sees a walk that ended short and asks again. That
+        is by design, but "the bot spent its whole run being capped" and
+        "the bot walked normally" must not look the same in the log.
+        """
+        if not getattr(result, "capped", False):
+            return
+        log = getattr(self, "runlog", None)
+        if log is None or not getattr(log, "enabled", False):
+            return
+        try:
+            log.event(
+                "nav.capped",
+                target=getattr(action, "target", None),
+                arrived_at=result.arrived_at,
+                seconds=round(result.duration_seconds, 2),
+                short_by=round(
+                    math.dist(result.arrived_at, result.target), 1
+                ),
+                clicks=result.clicks,
+                replans=result.replans,
+            )
+        except Exception:  # noqa: BLE001 - instrumentation is never fatal
+            return
+
     def _read_position(self) -> tuple[int, int] | None:
         """Best effort and deliberately quiet: a failed read costs a log
         field, never the action."""
@@ -496,7 +526,8 @@ class GameActionExecutor(ActionLogging):
             return
 
         if isinstance(action, MoveTo):
-            self.walk_to(action.target)
+            result = self.walk_to(action.target)
+            self._note_capped(action, result)
             self._record(action, f"to {action.target}")
             return
 

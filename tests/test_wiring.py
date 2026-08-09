@@ -18,6 +18,7 @@ from pd2bot import offsets
 from pd2bot.behavior.combat import load_class_config
 from pd2bot.items import CarriedItem, CarriedItems
 from pd2bot.pickit import cleanse_keep, load_item_table, load_pickit
+from pd2bot.safety import SafetyInterrupt, Verdict
 from pd2bot.wiring import (
     BELT_ROWS,
     BotPaths,
@@ -25,6 +26,7 @@ from pd2bot.wiring import (
     WiringError,
     belt_capacity,
     route_service,
+    safety_poll_for,
     town_config_for,
     walkability,
 )
@@ -281,3 +283,72 @@ def test_the_grid_is_re_fetched_every_call():
     is_walkable((1, 1))
     is_walkable((2, 2))
     assert len(calls) == 2
+
+
+# -- the safety poll: what a blocking walk asks before it keeps blocking ------
+#
+# 2026-08-07: a walk blocked for 24 s, and for those 24 s neither the
+# chicken nor the operator's abort could be heard. These pin the wiring
+# that fixes it -- including the part that is easy to get wrong, which
+# is not the mechanism but whether anything actually calls it.
+
+
+class PollingMonitor:
+    def __init__(self, raises=None) -> None:
+        self.raises = raises
+        self.polls = 0
+
+    def poll(self) -> None:
+        self.polls += 1
+        if self.raises is not None:
+            raise self.raises
+
+
+def test_the_safety_poll_asks_the_monitor():
+    monitor = PollingMonitor()
+    safety_poll_for(monitor, None)()
+    assert monitor.polls == 1
+
+
+def test_the_safety_poll_raises_an_abort_as_an_interrupt():
+    """Not as a bare StopRequested: that is a RuntimeError, and the broad
+    handlers between a walk and the tick loop would swallow it."""
+    monitor = PollingMonitor()
+    with pytest.raises(SafetyInterrupt) as raised:
+        safety_poll_for(monitor, lambda: True)()
+    assert raised.value.verdict.kind == "stop"
+
+
+def test_the_safety_poll_asks_the_monitor_before_the_stop():
+    """Review 2026-08-02 issue 001, restated here: a stop rides
+    ChickenExit into the leave-game path, which SENDS INPUT. It must
+    never preempt a death."""
+    death = SafetyInterrupt(Verdict("death", "dead"))
+    monitor = PollingMonitor(raises=death)
+    with pytest.raises(SafetyInterrupt) as raised:
+        safety_poll_for(monitor, lambda: True)()
+    assert raised.value.verdict.is_death  # not the stop
+
+
+def test_the_safety_poll_is_quiet_when_all_is_well():
+    safety_poll_for(PollingMonitor(), lambda: False)()
+
+
+def test_live_navigator_hands_the_poll_to_the_navigator(monkeypatch):
+    """The test that catches "the fix exists but nothing calls it"."""
+    from pd2bot import navigate
+
+    monkeypatch.setattr(navigate, "GatedInput", lambda session: SimpleNamespace())
+    sentinel = safety_poll_for(PollingMonitor(), None)
+    nav = navigate.live_navigator(None, None, 2, safety_poll=sentinel)
+    assert nav._safety_poll is sentinel
+
+
+def test_a_navigator_built_without_a_monitor_still_walks(monkeypatch):
+    """The CLI, the survey tool and the drills have no monitor at all."""
+    from pd2bot import navigate
+
+    monkeypatch.setattr(navigate, "GatedInput", lambda session: SimpleNamespace())
+    nav = navigate.live_navigator(None, None, 2)
+    assert nav._safety_poll is None
+    nav._safety()  # the no-op path, exercised rather than assumed

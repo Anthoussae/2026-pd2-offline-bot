@@ -35,7 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from pd2bot import mapframe, offsets, survey
+from pd2bot import mapframe, offsets, survey, watchdog
 from pd2bot.behavior.combat import ClassConfig, load_class_config
 from pd2bot.behavior.engine import BehaviorEngine, EngineConfig
 from pd2bot.behavior.execute import GameActionExecutor
@@ -59,7 +59,7 @@ from pd2bot.pathing import astar, nearest_walkable, simplify
 from pd2bot.pickit import Pickit, cleanse_keep, load_item_table, load_pickit
 from pd2bot.player import read_player
 from pd2bot.runlog import RunLog
-from pd2bot.safety import SafetyConfig, SafetyMonitor
+from pd2bot.safety import SafetyConfig, SafetyInterrupt, SafetyMonitor, Verdict
 from pd2bot.snapshot import Perception
 from pd2bot.town import PreambleReport, TownConfig, TownLayer
 from pd2bot.uistate import find_ui_array
@@ -573,6 +573,12 @@ class LiveBot:
             # The Enter/ESC kill switch (R189): the operator's own keys
             # stop the run, correlated against the stamp above.
             bot_escape_at=lambda: escape_stamp["at"],
+            # The out-of-process chicken watchdog: its dead-man switch
+            # (only enforced when the run requires it) and its latch,
+            # which is the other thing besides a human that can open the
+            # ESC menu — so the kill switch can name the right actor.
+            watchdog_alive=watchdog.watchdog_is_alive,
+            watchdog_latch=watchdog.active_latch,
             runlog=runlog,
             frame=frame,
         )
@@ -602,6 +608,38 @@ class LiveBot:
 
     def cycle(self) -> GameCycle:
         return GameCycle(self.session, MenuInput(self.session))
+
+
+def safety_poll_for(
+    monitor: SafetyMonitor, should_stop: Callable[[], bool] | None
+) -> Callable[[], None]:
+    """What a blocking call must ask before it goes on blocking.
+
+    Two duties in one call, because the same 24 seconds starved both
+    (2026-08-07): the vitals, and the operator's abort order — which the
+    engine otherwise hears only between ticks, so during that walk there
+    was no way to stop the bot either.
+
+    **Death first, always.** The ordering rule from review 2026-08-02
+    issue 001: a stop rides `ChickenExit` into the cycle's leave-game
+    path, which SENDS INPUT, so it must never be able to preempt a
+    death. Asking the monitor first gets that for free, exactly as the
+    engine's own tick order does.
+
+    The abort travels as a `SafetyInterrupt` too, and has to: a plain
+    `StopRequested` is a `RuntimeError`, and the broad `except Exception`
+    handlers between a walk and the tick loop would eat it. The engine
+    converts both back at its boundary.
+    """
+
+    def poll() -> None:
+        monitor.poll()
+        if should_stop is not None and should_stop():
+            raise SafetyInterrupt(
+                Verdict("stop", "stopped by outside request (abort)")
+            )
+
+    return poll
 
 
 def build_bot(
@@ -638,7 +676,29 @@ def build_bot(
     # closures) because the survey service reads coverage from it — one
     # store, or the survey would report on an atlas nobody is writing to.
     store = MapStore()
-    navigator = live_navigator(session, store, difficulty)
+
+    # The monitor is built BEFORE the navigator, and that order is the
+    # whole point: the navigator polls it from inside every waiting loop
+    # it has, so a blocking walk cannot starve the chicken (the
+    # 2026-08-07 death — docs/reviews/2026-08-07-chicken-starvation-death).
+    # A plain re-order rather than the `narrate_ref` holder trick below,
+    # because safety has no genuine cycle to break and should not borrow
+    # that indirection.
+    monitor = SafetyMonitor(
+        session,
+        SafetyConfig(
+            life_chicken_pct=(
+                class_config.chicken_life_pct
+                if chicken_life_pct is None
+                else chicken_life_pct
+            )
+        ),
+    )
+
+    navigator = live_navigator(
+        session, store, difficulty,
+        safety_poll=safety_poll_for(monitor, should_stop),
+    )
     perception = Perception(session)
     baseline = SessionBaseline(session)
 
@@ -675,16 +735,6 @@ def build_bot(
         protected_ids=baseline,
         should_stop=should_stop,
         narrate=town_narrate,
-    )
-    monitor = SafetyMonitor(
-        session,
-        SafetyConfig(
-            life_chicken_pct=(
-                class_config.chicken_life_pct
-                if chicken_life_pct is None
-                else chicken_life_pct
-            )
-        ),
     )
     return LiveBot(
         session=session,
@@ -797,6 +847,11 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
         "--dry-run", action="store_true",
         help="assemble and print the wiring, then exit without sending anything",
     )
+    parser.add_argument(
+        "--require-watchdog", action="store_true",
+        help="refuse to run unless the chicken watchdog is alive "
+             "(tools/live-run.ps1 sets this; drills and sims do not)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -805,6 +860,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
             paths=paths,
             chicken_life_pct=args.chicken,
             radius_override=args.radius,
+            engine_config=EngineConfig(require_watchdog=args.require_watchdog),
         )
     except (GameNotRunning, NeedsAdministrator, WindowNotFound) as exc:
         print(exc, file=sys.stderr)
@@ -823,6 +879,17 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
         print(line)
     if args.dry_run:
         return 0
+    if args.require_watchdog and not watchdog.watchdog_is_alive():
+        # Pre-flight, before a game is created. The engine enforces this
+        # per tick too, but catching it HERE is what stops a create/leave
+        # spin: a run that can never take a step should never take a game.
+        print(
+            "\nREFUSING TO RUN: the chicken watchdog is not answering.\n"
+            "  Start it (elevated) with:  python -m pd2bot.watchdog\n"
+            "  Then launch again. Nothing has been sent to the game.",
+            file=sys.stderr,
+        )
+        return 1
     if not bot.cleanse_enabled:
         print(
             "\nnote: the inventory cleanse is OFF because the pickit still "

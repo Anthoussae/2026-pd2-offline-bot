@@ -76,6 +76,38 @@ GOAL_EXEMPT_RADIUS = 1
 # spot found. Bounded because a ring of hazards has no clear point at
 # all, and an unbounded search there would spin instead of walking.
 MAX_NUDGES = 8
+# --- the sprite box (T83, 2026-08-08) ----------------------------------------
+#
+# `AVOID_RADIUS` is a world-space Chebyshev radius, and the client's hit
+# test is against a SPRITE, in screen space. Those are not the same shape,
+# and the difference is not academic — it is the whole NPC misclick.
+#
+# T83 recorded three travel clicks, all already nudged, all at world gap 6
+# from an ally, i.e. beyond the radius:
+#
+#   (5869, 5733)  merc  at (5863, 5733)  120 px right /  60 px below  ok
+#   (5872, 5733)  Kashya at (5878, 5733) 120 px left  /  60 px above  ok
+#   (5872, 5727)  Kashya at (5878, 5733)   0 px       / 120 px ABOVE  DIALOG
+#
+# Same world distance, opposite outcomes, decided entirely by direction on
+# screen. `screen.py`'s measured projection is why: screen-x moves 20 px per
+# (dx - dy) and screen-y 10 px per (dx + dy), so a world delta of (-6, -6)
+# is 0 px sideways and 120 px straight up — her body — while (-6, +6), the
+# same Chebyshev 6, is 240 px away across the floor.
+#
+# Bounds the measurement gives: the sprite is >= 120 px tall above the feet
+# (the hit) and < 120 px in half-width (both misses were 120 px sideways).
+# These carry a margin above, where the danger is measured, and none out to
+# the side, where safety is measured — 80 stays inside both misses rather
+# than sitting on them.
+#
+# Display geometry, like the constants they are built on: re-measure after
+# any resolution, window-size or renderer change (the drill re-runs in ~40 s
+# and prints both spaces).
+SPRITE_HALF_WIDTH_PX = 80
+SPRITE_ABOVE_FEET_PX = 150
+SPRITE_BELOW_FEET_PX = 40
+SPRITE_MARGIN_PX = 20  # how far past the wall an escaping click lands
 # How near a ground item a travel click has to land before the audit
 # records it. Three times AVOID_RADIUS on purpose: the question the audit
 # exists to answer is whether 4 is big enough, and a log that only recorded
@@ -83,6 +115,24 @@ MAX_NUDGES = 8
 # being done. Recording the near misses is the measurement.
 CLICK_AUDIT_RADIUS = 12
 MAX_FAILURES = 5  # consecutive no-progress plan cycles before giving up
+# How long ONE `walk_to` call may block before returning to its caller,
+# whatever it has or has not achieved.
+#
+# The per-waypoint cap (WAYPOINT_TIMEOUT) and the plan-cycle budget
+# (MAX_FAILURES) already existed; nothing capped the CALL, so they
+# multiplied. On 2026-08-07 that reached 24 seconds with the character
+# stuck 3 subtiles from the Cellar 4 exit inside a 29-hostile pack, and
+# the run died: the safety monitor only runs between ticks, so a blocked
+# engine cannot chicken (docs/reviews/2026-08-07-chicken-starvation-death).
+#
+# This number is NOT what bounds chicken latency — `safety_poll` is, and
+# it interrupts within its own interval. What the cap buys is the tick
+# loop itself: the reflex ladder (potions, bone armor), the abort
+# channel, and the never-idle checks all live between ticks too, and in
+# a pack those seconds are the ones that matter. 2 s because a leg worth
+# having makes visible progress inside it, and returning short is
+# already the normal outcome here — every caller re-checks distance.
+WALK_BUDGET_SECONDS = 2.0
 PROGRESS_RESET = 3.0  # subtiles closer to the goal that make a cycle "progress"
 # Shake loose before re-planning from a spot that did not work.
 #
@@ -119,11 +169,87 @@ class WalkResult:
     clicks: int = 0
     reclicks: int = 0
     replans: int = 0
+    # True when the walk returned on its wall-clock budget rather than by
+    # arriving or giving up. Not a failure: `arrived_at` is still the
+    # truth, and the caller is expected to re-check distance and call
+    # again if it still wants the target.
+    capped: bool = False
     log: list[str] = field(default_factory=list)
 
 
 def _distance(a: Point, b: Point) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def _screen_offset(origin: Point, point: Point) -> tuple[float, float]:
+    """Where `point` is DRAWN relative to `origin`, in window pixels.
+
+    `screen.py`'s projection, minus the camera — which cancels out of a
+    difference, so this needs no window and no live client. Imported
+    rather than re-typed: they are display-geometry constants that a
+    resolution change invalidates, and a second copy would drift out of
+    step with the calibration that sets them.
+
+    Screen y grows DOWNWARD, so a negative `sy` means drawn ABOVE.
+    """
+    from pd2bot.screen import PX_PER_SUBTILE_X, PX_PER_SUBTILE_Y
+
+    dx, dy = point[0] - origin[0], point[1] - origin[1]
+    return ((dx - dy) * PX_PER_SUBTILE_X, (dx + dy) * PX_PER_SUBTILE_Y)
+
+
+def _inside_sprite(hazard: Point, point: Point) -> bool:
+    """Would a click at `point` land on the unit standing at `hazard`?
+
+    The box is tall and narrow because a standing character is: see the
+    constants for the three measured clicks that fixed its dimensions.
+    """
+    sx, sy = _screen_offset(hazard, point)
+    return (
+        abs(sx) <= SPRITE_HALF_WIDTH_PX
+        and -SPRITE_ABOVE_FEET_PX <= sy <= SPRITE_BELOW_FEET_PX
+    )
+
+
+def _sprite_escapes(hazard: Point) -> tuple[Point, ...]:
+    """Click points just outside a sprite, nearest wall first.
+
+    Left, right, and DOWN-screen. Up is deliberately not offered: it is
+    the far wall of a box that is 150 px tall and 80 wide, it puts the
+    click behind the unit rather than past them, and it is precisely
+    what the old world-space push produced — the click that opened
+    Kashya's dialog was 120 px straight up her sprite, and the nudge had
+    put it there.
+
+    Built from whole subtiles rather than by inverting the projection and
+    rounding. Two reasons, both found by the tests: rounding lands on the
+    box WALL as often as outside it (a half-subtile is 10 px, and the
+    wall is inclusive), and an escape must clear `AVOID_RADIUS` as well —
+    a sprite hazard is a world hazard too, so a screen-space escape that
+    ignored the radius would be rejected by the very next check and the
+    nudge would spin.
+
+    The two clean axes: a world step of (k, -k) moves the click PURELY
+    sideways on screen (2k * 20 px, no vertical), and (k, k) moves it
+    purely down-screen (2k * 10 px). So one integer `k` per axis, big
+    enough to clear both rules.
+    """
+    from pd2bot.screen import PX_PER_SUBTILE_X, PX_PER_SUBTILE_Y
+
+    def steps(needed_px: float, px_per_step: int) -> int:
+        return max(
+            math.ceil(needed_px / (2 * px_per_step)),
+            AVOID_RADIUS,  # the world rule still applies to the same unit
+        )
+
+    side = steps(SPRITE_HALF_WIDTH_PX + SPRITE_MARGIN_PX, PX_PER_SUBTILE_X)
+    down = steps(SPRITE_BELOW_FEET_PX + SPRITE_MARGIN_PX, PX_PER_SUBTILE_Y)
+    hx, hy = hazard
+    return (
+        (hx - side, hy + side),  # left across the floor
+        (hx + side, hy - side),  # right across the floor
+        (hx + down, hy + down),  # toward the camera, in front of them
+    )
 
 
 class Navigator:
@@ -143,16 +269,39 @@ class Navigator:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         avoid_provider: Callable[[], tuple[Point, ...]] | None = None,
+        sprite_provider: Callable[[], tuple[Point, ...]] | None = None,
         audit: Callable[[Point, Point | None, int], None] | None = None,
+        safety_poll: Callable[[], None] | None = None,
+        walk_budget_s: float | None = WALK_BUDGET_SECONDS,
     ) -> None:
         self._position = position_reader
         self._input = gated_input
         self._grid_provider = grid_provider
         self._clock = clock
         self._sleep = sleep
+        # Called from inside every waiting loop in this class. It raises
+        # (SafetyInterrupt) when the character must stop what it is
+        # doing right now; it is not asked for an opinion and returns
+        # nothing. None = nothing is watching, which is correct for the
+        # CLI, the survey tool and the drills — they have no monitor.
+        #
+        # The contract that matters: this is called from OUTSIDE every
+        # `except Exception` guard below, and its exception is a
+        # BaseException, so neither this class's unstick guard nor the
+        # click audit can swallow a chicken. Both halves are deliberate;
+        # keep both if you move a call site.
+        self._safety_poll = safety_poll
+        self._walk_budget_s = walk_budget_s
         # Where the clickable hazards are RIGHT NOW (NPCs pace), or None for
         # environments with nothing interactive to hit (tests, open field).
         self._avoid = avoid_provider
+        # The subset of those hazards that is a STANDING UNIT, whose hit
+        # box is a tall sprite rather than a patch of floor (T83). Optional
+        # and defaulting to None so every existing caller keeps the plain
+        # world-space rule: the box is checked IN ADDITION to
+        # `AVOID_RADIUS`, never instead of it, so nothing the radius
+        # already caught is given back.
+        self._sprites = sprite_provider
         # Called with (final click point, goal, nudges applied) for every
         # travel click actually sent. PURE MEASUREMENT — it changes no
         # decision, and it exists because the user asked to measure before
@@ -170,6 +319,24 @@ class Navigator:
         # can tell a hazard we are deliberately approaching from one we
         # merely happen to pass. Set per walk_to, cleared after.
         self._goal: Point | None = None
+        # When the walk in flight must return by. Set per walk_to.
+        self._deadline: float | None = None
+        # Give-up state that has to OUTLIVE a single call.
+        #
+        # The wall-clock cap returns before the no-progress ladder can
+        # finish, so without this a hopeless target would be retried for
+        # ever: every call capped, no call ever raising. Callers that
+        # keep their own per-target budgets (the patrol's `_attempts`,
+        # pickup's `collect_stalls`) would still cope, but the ones that
+        # rely on `NavigationError` to mean "this cannot be walked" —
+        # traverse, and it was traverse that died — would not.
+        #
+        # So the ladder is unchanged in what it counts; it just counts
+        # across calls now. Same give-up, and the tick loop gets to
+        # breathe between the rungs.
+        self._stall_goal: Point | None = None
+        self._stall_count = 0
+        self._stall_best: float | None = None
 
     # -- pieces ---------------------------------------------------------------
 
@@ -189,20 +356,78 @@ class Navigator:
             raise NavigationError("player position unreadable — left the game?")
         return position
 
+    def _safety(self) -> None:
+        """Ask the watcher whether the character must stop right now.
+
+        Raises `SafetyInterrupt` (a BaseException) when it must; returns
+        nothing when it need not. Called from every loop in this class
+        that waits, because every one of them is time the safety monitor
+        would otherwise not be running.
+        """
+        if self._safety_poll is not None:
+            self._safety_poll()
+
+    def _wait(self, seconds: float) -> None:
+        """Sleep, but in poll-sized pieces with a safety check between.
+
+        Any flat sleep is a window in which the character can die
+        unwatched. This class had one — the shake-loose settle — and
+        1.5 s is a long time in a pack.
+        """
+        remaining = seconds
+        while remaining > 0:
+            step = min(POLL_SECONDS, remaining)
+            self._sleep(step)
+            remaining -= step
+            self._safety()
+            if self._out_of_budget():
+                return
+
     def _click(self, waypoint: Point, result: WalkResult) -> None:
         """One gated click, waiting out a briefly-blocking UI panel."""
         deadline = self._clock() + UI_WAIT_TIMEOUT
+        # Kept outside the `except`, which unbinds its own name on exit.
+        blocked_by: InputRefused | None = None
         while True:
             try:
                 self._input.click_world(*waypoint)
                 result.clicks += 1
                 return
             except InputRefused as refused:
+                blocked_by = refused
                 if self._clock() >= deadline:
                     raise NavigationError(
                         f"input stayed refused for {UI_WAIT_TIMEOUT}s: {refused}"
                     ) from refused
                 self._sleep(POLL_SECONDS)
+            # Outside the `except` on purpose: a safety interrupt raised
+            # in here would otherwise be chained onto the InputRefused,
+            # which reads as though the refusal caused it.
+            self._safety()
+            # The budget applies here too, or a blocking panel could hold
+            # the tick loop for the full UI_WAIT_TIMEOUT — five times the
+            # cap. But it must RAISE rather than return quietly, and the
+            # difference is not cosmetic:
+            #
+            # A travel click that lands on an NPC opens their dialog, and
+            # that dialog refuses every click after it. The recovery for
+            # that (R66/R68, live in T12 and T27) lives in the town
+            # layer's `_walk_guarded`, and it keys on **NavigationError**
+            # — it closes the panel, sidesteps, and re-walks. The first
+            # cut of this budget check returned quietly instead, so the
+            # walk came back merely "capped", no recovery ever ran, the
+            # dialog stayed open, and the bot stood at the same subtile
+            # until it gave up. Observed live 2026-08-08: stuck at
+            # (5877, 5734), 45 subtiles short of Akara, zero movement
+            # across four legs.
+            #
+            # Only reachable after a refusal, so the cause is always
+            # attached.
+            if self._out_of_budget():
+                raise NavigationError(
+                    f"input stayed refused until the walk budget expired: "
+                    f"{blocked_by}"
+                ) from blocked_by
 
     def _safe_click_point(self, waypoint: Point, result: WalkResult) -> Point:
         """The click we will actually send, plus the audit of where it landed."""
@@ -251,7 +476,17 @@ class Navigator:
                 if max(abs(h[0] - self._goal[0]), abs(h[1] - self._goal[1]))
                 > GOAL_EXEMPT_RADIUS
             )
-        if not hazards:
+        # The hazards that are standing UNITS, whose hit box is a sprite.
+        # Same goal exemption: the thing we are deliberately walking to is
+        # not something to dodge, whatever shape it is.
+        sprites = self._sprites() if self._sprites is not None else ()
+        if self._goal is not None:
+            sprites = tuple(
+                h for h in sprites
+                if max(abs(h[0] - self._goal[0]), abs(h[1] - self._goal[1]))
+                > GOAL_EXEMPT_RADIUS
+            )
+        if not hazards and not sprites:
             return waypoint, 0
 
         def clearance(point: Point) -> int:
@@ -259,6 +494,18 @@ class Navigator:
             return min(
                 (max(abs(point[0] - ax), abs(point[1] - ay)) for ax, ay in hazards),
                 default=AVOID_RADIUS,
+            )
+
+        def roominess(point: Point) -> tuple[int, int]:
+            """How good a fallback this click is, worst thing first.
+
+            Landing on a sprite outranks every world-space consideration:
+            it is the difference between a click that walks and a click
+            that opens a dialog and ends the walk.
+            """
+            return (
+                -sum(1 for s in sprites if _inside_sprite(s, point)),
+                clearance(point),
             )
 
         # Nudge, then LOOK AGAIN. The old version applied every hazard in one
@@ -271,6 +518,13 @@ class Navigator:
         current = waypoint
         nudges = 0
         for _ in range(MAX_NUDGES):
+            # The sprite box is tested FIRST, because only the screen-space
+            # escape can resolve it. A world push aimed "away" from a unit
+            # is free to choose straight up her sprite — which is not a
+            # hypothesis about this code, it is what T83 caught it doing.
+            sprite_offender = next(
+                (s for s in sprites if _inside_sprite(s, current)), None
+            )
             offender = next(
                 (
                     (ax, ay)
@@ -279,10 +533,30 @@ class Navigator:
                 ),
                 None,
             )
-            if offender is None:
+            if sprite_offender is None and offender is None:
                 return current, nudges  # clear of everything
-            if clearance(current) > clearance(best):
+            if roominess(current) > roominess(best):
                 best = current
+            if sprite_offender is not None:
+                candidates = _sprite_escapes(sprite_offender)
+                clear = [
+                    c for c in candidates
+                    if not any(_inside_sprite(s, c) for s in sprites)
+                    and clearance(c) >= AVOID_RADIUS
+                ]
+                # Closest to what we MEANT to click: the click is only a
+                # direction to walk, so the least deviation that clears the
+                # sprite is the best one available.
+                current = min(
+                    clear or list(candidates),
+                    key=lambda c: _distance(c, waypoint),
+                )
+                nudges += 1
+                result.log.append(
+                    f"click stepped out of the sprite at {sprite_offender}: "
+                    f"{waypoint} -> {current}"
+                )
+                continue
             ax, ay = offender
             dx, dy = current[0] - ax, current[1] - ay
             span = max(abs(dx), abs(dy))
@@ -298,7 +572,7 @@ class Navigator:
         # Boxed in. Send the roomiest candidate rather than giving up: one
         # click that might interact is recoverable (the loop re-plans, panels
         # get closed), whereas refusing to click is a walk that cannot finish.
-        best = max((best, current), key=clearance)
+        best = max((best, current), key=roominess)
         result.log.append(f"no clear click near {waypoint}; using {best}")
         return best, nudges
 
@@ -355,8 +629,19 @@ class Navigator:
 
         while True:
             self._sleep(POLL_SECONDS)
+            # First thing after the sleep, before any of the arrival and
+            # stuck arithmetic: this is the loop the character spends its
+            # walking life in, so this call is what makes the monitor
+            # effectively continuous rather than per-tick.
+            self._safety()
             position = self.position()
             now = self._clock()
+            if self._out_of_budget():
+                result.log.append(
+                    f"walk budget spent at {position} toward {waypoint}"
+                )
+                result.capped = True
+                return False
 
             if _distance(position, waypoint) <= ARRIVAL_RADIUS:
                 return True
@@ -389,10 +674,22 @@ class Navigator:
 
     def walk_to(self, target: Point) -> WalkResult:
         self._goal = target
+        if target != self._stall_goal:
+            # A new destination is a fresh attempt, whatever the last one did.
+            self._stall_goal, self._stall_count, self._stall_best = target, 0, None
+        self._deadline = (
+            None if self._walk_budget_s is None
+            else self._clock() + self._walk_budget_s
+        )
         try:
             return self._walk_to(target)
         finally:
             self._goal = None
+            self._deadline = None
+
+    def _out_of_budget(self) -> bool:
+        """Has this walk_to call used up its wall clock?"""
+        return self._deadline is not None and self._clock() >= self._deadline
 
     def _walk_to(self, target: Point) -> WalkResult:
         started = self._clock()
@@ -437,6 +734,41 @@ class Navigator:
             if arrived and _distance(position, goal) <= ARRIVAL_RADIUS:
                 result.arrived_at = position
                 result.duration_seconds = self._clock() - started
+                self._stall_goal, self._stall_count, self._stall_best = None, 0, None
+                return result
+
+            # Out of wall clock. Return what we achieved rather than
+            # starting another plan cycle — the caller wants its tick
+            # loop back, and re-planning from here is what turned five
+            # budgets into 24 seconds. Deliberately NOT a NavigationError
+            # in itself: nothing has failed yet, we were merely
+            # interrupted, and a caller that still wants this target will
+            # ask again. The give-up ladder is carried across those calls
+            # instead (see `_stall_*`), so "this cannot be walked" is
+            # still eventually said — just not by burning a whole tick.
+            if result.capped or self._out_of_budget():
+                result.capped = True
+                result.arrived_at = position
+                result.duration_seconds = self._clock() - started
+                remaining = _distance(position, goal)
+                if self._stall_best is None or self._stall_best - remaining >= (
+                    PROGRESS_RESET
+                ):
+                    self._stall_best = remaining
+                    self._stall_count = 0
+                else:
+                    self._stall_count += 1
+                result.log.append(
+                    f"returning on the {self._walk_budget_s:.1f}s walk budget "
+                    f"at {position}, {remaining:.0f} short of {goal} "
+                    f"({self._stall_count} capped attempts without progress)"
+                )
+                if self._stall_count >= MAX_FAILURES:
+                    raise NavigationError(
+                        f"gave up after {self._stall_count} capped attempts "
+                        f"without progress; last position {position}, "
+                        f"target {goal}; log: {'; '.join(result.log[-5:])}"
+                    )
                 return result
 
             # Walked every waypoint, still short of the goal, and the reason
@@ -508,7 +840,7 @@ class Navigator:
                 continue
             result.log.append(f"shaking loose to {spot}")
             self._click(self._safe_click_point(spot, result), result)
-            self._sleep(STUCK_SECONDS)
+            self._wait(STUCK_SECONDS)
             return True
         result.log.append(f"nowhere to shake loose to from {position}")
         return False
@@ -558,7 +890,12 @@ def _record_visible_rooms(session, store, difficulty: int, stats: dict | None = 
     return store.open(seed, difficulty, area.level_no).record(local, per_area)
 
 
-def live_navigator(session, store, difficulty: int = 2) -> Navigator:
+def live_navigator(
+    session,
+    store,
+    difficulty: int = 2,
+    safety_poll: Callable[[], None] | None = None,
+) -> Navigator:
     """Wire the navigator to the live game: positions from memory, clicks
     through the gate, and on every (re-)plan the explored-map atlas under
     the live room grids (live is ground truth where loaded). The position
@@ -627,7 +964,11 @@ def live_navigator(session, store, difficulty: int = 2) -> Navigator:
         try:
             snap = Perception(session).snapshot()
         except Exception:
-            return ()  # unreadable mid-load: no avoidance beats no walk
+            # Unreadable mid-load: no avoidance beats no walk. The sprite
+            # list is cleared with it — keeping the last one would dodge
+            # NPCs at positions from a town we may have already left.
+            last_sprites[0] = ()
+            return ()
         points = [
             o.position
             for o in snap.objects
@@ -643,8 +984,34 @@ def live_navigator(session, store, difficulty: int = 2) -> Navigator:
         points += [i.position for i in snap.ground_items]
         last_items[0] = tuple(i.position for i in snap.ground_items)
         if snap.in_town:
-            points += [a.position for a in snap.allies if a.is_alive]
+            # `not is_corpse` rather than `is_alive`, deliberately. Allies
+            # cannot contain corpses at all (the corpse branch of
+            # `scan_units` runs first), so the two agree on everything that
+            # carries an HP stat — and disagree on anything that does not,
+            # where `is_alive` reads hp 0 as dead and drops it. Whether a
+            # town NPC's stat list carries HP is not something this repo
+            # has measured, and this rule must not depend on an unmeasured
+            # fact: the whole hazard set going quiet is precisely the
+            # failure of 2026-08-06 (see `units.scan_units`), and it was
+            # invisible until two live runs stalled on it.
+            points += [a.position for a in snap.allies if not a.is_corpse]
+            last_sprites[0] = tuple(
+                a.position for a in snap.allies if not a.is_corpse
+            )
+        else:
+            last_sprites[0] = ()
         return tuple(points)
+
+    # The standing units from the most recent hazard read (T83). Kept from
+    # that read rather than taken fresh: the two are consulted about the
+    # SAME click, and a second snapshot would be a different moment as well
+    # as ~19 ms of it. Town only, for the same reason the ally rule is —
+    # outside town every ally is the merc or a summon, and clicking one
+    # opens nothing.
+    last_sprites: list[tuple[Point, ...]] = [()]
+
+    def sprite_hazards() -> tuple[Point, ...]:
+        return last_sprites[0]
 
     # The ground items seen by the most recent hazard read, kept so the
     # audit can measure against them without paying for a second snapshot
@@ -696,7 +1063,13 @@ def live_navigator(session, store, difficulty: int = 2) -> Navigator:
         gated_input=GatedInput(session),
         grid_provider=grid,
         avoid_provider=clickable_hazards,
+        sprite_provider=sprite_hazards,
         audit=audit_click,
+        # None for the CLI, the survey tool and the drills — they have no
+        # monitor to consult and must keep working. The behaviour engine
+        # passes the real one (see `wiring.build_bot`), and a walk with
+        # nothing watching is still capped.
+        safety_poll=safety_poll,
     )
 
 

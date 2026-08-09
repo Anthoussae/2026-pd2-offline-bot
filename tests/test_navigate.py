@@ -10,11 +10,14 @@ import pytest
 
 from pd2bot.input import InputRefused
 from pd2bot.navigate import (
+    AVOID_RADIUS,
     MAX_FAILURES,
     NavigationError,
     Navigator,
+    WalkResult,
     pick_reachable_target,
 )
+from pd2bot.safety import SafetyInterrupt, Verdict
 
 
 class OpenGrid:
@@ -84,7 +87,34 @@ class FakeInput:
         return (0, 0)
 
 
-def navigator(world, sim, fake_input, grid_provider=None, avoid=None, audit=None):
+class DyingMonitor:
+    """A monitor stand-in whose character crosses the chicken line at a
+    known moment of virtual time — the shape of the 2026-08-07 death,
+    where HP fell to zero entirely inside one blocking walk."""
+
+    def __init__(self, sim: "Sim", crosses_at: float) -> None:
+        self.sim = sim
+        self.crosses_at = crosses_at
+        self.polls = 0
+
+    def poll(self) -> None:
+        self.polls += 1
+        if self.sim.now >= self.crosses_at:
+            raise SafetyInterrupt(
+                Verdict("life", "life 300/1000 (30%) <= 35% threshold",
+                        hp=300, max_hp=1000, pct=30.0)
+            )
+
+
+def navigator(
+    world, sim, fake_input, grid_provider=None, avoid=None, audit=None,
+    safety_poll=None, walk_budget_s=None,
+):
+    # `walk_budget_s=None` (no cap) is the default HERE, not in
+    # production: most of these tests predate the cap and exercise the
+    # give-up ladder within a single call, which is still exactly what
+    # `walk_to` does once its budget is removed. The cap has its own
+    # tests below.
     return Navigator(
         position_reader=world.position,
         gated_input=fake_input,
@@ -93,6 +123,8 @@ def navigator(world, sim, fake_input, grid_provider=None, avoid=None, audit=None
         sleep=sim.sleep,
         avoid_provider=avoid,
         audit=audit,
+        safety_poll=safety_poll,
+        walk_budget_s=walk_budget_s,
     )
 
 
@@ -226,6 +258,208 @@ def test_waits_out_a_brief_panel():
     fake = FakeInput(world, refuse_first=3)  # ~0.3 virtual seconds of ESC menu
     result = navigator(world, sim, fake).walk_to((10, 0))
     assert abs(result.arrived_at[0] - 10) <= 3
+
+
+# -- safety: a blocking walk may not starve the monitor -----------------------
+#
+# 2026-08-07: the engine blocked inside one `walk_to` for 24 s while a
+# 29-hostile pack killed the character. The monitor only ran between
+# ticks, so it never looked. These tests pin both halves of the fix —
+# the walk interrupts itself, and it comes back on a clock either way.
+
+
+def test_a_blocked_walk_reaches_the_full_giveup_ladder():
+    """The shape of the death, and the reason the next test is a real test.
+
+    With no safety poll and no cap — the pre-fix navigator exactly — a
+    walk that cannot progress spends the entire ladder before saying so.
+    The assertion is on the CLOCK: this is the window in which nothing
+    was watching the character's HP.
+    """
+    world = World(wall_x=5)
+    sim = Sim(world)
+    with pytest.raises(NavigationError, match="gave up"):
+        navigator(world, sim, FakeInput(world)).walk_to((60, 0))
+    assert sim.now > 10.0, "expected a long blind window; got a short one"
+
+
+def test_a_blocked_walk_is_interrupted_when_vitals_cross():
+    """The fix: the same hopeless walk, now with something watching."""
+    world = World(wall_x=5)
+    sim = Sim(world)
+    monitor = DyingMonitor(sim, crosses_at=1.0)
+    nav = navigator(world, sim, FakeInput(world), safety_poll=monitor.poll)
+    with pytest.raises(SafetyInterrupt) as raised:
+        nav.walk_to((60, 0))
+    assert raised.value.verdict.kind == "life"
+    # Interrupted promptly after the crossing, not at the end of the ladder.
+    assert sim.now < 1.5, f"took {sim.now:.1f}s to notice"
+
+
+def test_the_interrupt_survives_the_navigators_broad_guards():
+    """`navigate.py` wraps its click audit and its unstick grid read in
+    `except Exception` — each correct about its own concern, each able to
+    swallow a chicken. Two properties are pinned here at once: an
+    ordinary exception from the audit IS absorbed (the guard works), and
+    a SafetyInterrupt raised from the poll is NOT (it is a
+    BaseException, and the poll is called outside those guards)."""
+    world = World(wall_x=5)
+    sim = Sim(world)
+
+    def exploding_audit(point, goal, nudges):
+        raise RuntimeError("the audit is broken")
+
+    monitor = DyingMonitor(sim, crosses_at=0.5)
+    nav = navigator(
+        world, sim, FakeInput(world),
+        audit=exploding_audit, safety_poll=monitor.poll,
+    )
+    with pytest.raises(SafetyInterrupt):
+        nav.walk_to((60, 0))
+
+
+def test_the_interrupt_escapes_the_ui_wait_loop():
+    """A walk can also block waiting out a panel — up to 10 s of it."""
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world, refuse_first=1000)  # a panel that never closes
+    monitor = DyingMonitor(sim, crosses_at=0.3)
+    nav = navigator(world, sim, fake, safety_poll=monitor.poll)
+    with pytest.raises(SafetyInterrupt):
+        nav.walk_to((20, 0))
+    assert sim.now < 1.0
+
+
+def test_a_stuck_walk_returns_on_its_budget_with_nothing_watching():
+    """The second, independent half: even with no monitor at all, one
+    `walk_to` call gives the tick loop back on a wall clock — which is
+    what the reflex ladder and the abort channel need."""
+    world = World(wall_x=5)
+    sim = Sim(world)
+    nav = navigator(world, sim, FakeInput(world), walk_budget_s=2.0)
+    result = nav.walk_to((60, 0))
+    assert result.capped is True
+    assert sim.now < 4.0, f"budget overshot: {sim.now:.1f}s"
+    assert result.arrived_at == world.position()  # honest about where it got
+
+
+def test_the_real_monitor_interrupts_a_real_walk_within_its_interval():
+    """The end-to-end latency, MEASURED rather than derived — the number
+    the P2 review gate reports and the one the 2026-08-07 death makes
+    worth knowing. Everything here is real except the world: a real
+    SafetyMonitor, its real rate limiter, the real walk loop.
+    """
+    from pd2bot.player import Player
+    from pd2bot.safety import SafetyConfig, SafetyMonitor
+    from pd2bot.world import Area
+
+    world = World(wall_x=5)
+    sim = Sim(world)
+    vitals = {"hp": 1000}
+
+    def read_player(_session):
+        return Player(
+            name="MaqiuDoubing", level=90, act=1, position=world.position(),
+            mode=1, hp=vitals["hp"], max_hp=1000, mana=400, max_mana=500,
+            stamina=300, max_stamina=300, experience=0, gold=0, gold_stash=0,
+            strength=100, dexterity=100, vitality=300, energy=100,
+        )
+
+    monitor = SafetyMonitor(
+        session=None,
+        config=SafetyConfig(life_chicken_pct=35.0),
+        read_player_fn=read_player,
+        read_area_fn=lambda s: Area(level_no=3, position=(0, 0), size=(100, 100)),
+        alert=lambda: None,
+        clock=sim.clock,
+    )
+
+    crossed_at = {"t": None}
+
+    def falling_health() -> None:
+        # The pack does its work while the walk is blocked — the shape of
+        # the death exactly: HP reaching the line with no tick in sight.
+        if sim.now >= 1.0 and crossed_at["t"] is None:
+            vitals["hp"] = 300  # 30% — below the 35% line
+            crossed_at["t"] = sim.now
+        monitor.poll()
+
+    nav = navigator(world, sim, FakeInput(world), safety_poll=falling_health)
+    with pytest.raises(SafetyInterrupt) as raised:
+        nav.walk_to((60, 0))
+
+    assert raised.value.verdict.kind == "life"
+    latency = sim.now - crossed_at["t"]
+    # The bound: one poll interval (the monitor's rate limit) plus one
+    # walk-loop poll. Anything larger means a blocking site was missed.
+    assert latency <= SafetyConfig().poll_interval_s + 0.1 + 1e-9, (
+        f"took {latency:.2f}s to notice"
+    )
+
+
+def test_the_budget_also_bounds_a_walk_stuck_behind_a_panel():
+    """`_click` waits out a blocking panel for up to UI_WAIT_TIMEOUT —
+    five times the cap. An operator pressing ESC opens exactly such a
+    panel, and the engine cannot notice they took the controls while the
+    walk is in there.
+
+    It must come back QUICKLY *and* LOUDLY. The first cut returned a
+    quiet capped result, which cost the NPC-misclick recovery — see
+    `test_a_refused_click_raises_even_when_the_budget_expires_first`.
+    """
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world, refuse_first=1000)  # a panel that never closes
+    with pytest.raises(NavigationError, match="refused"):
+        navigator(world, sim, fake, walk_budget_s=2.0).walk_to((20, 0))
+    assert sim.now < 4.0, f"held for {sim.now:.1f}s behind the panel"
+
+
+def test_a_normal_walk_is_never_capped():
+    world = World()
+    sim = Sim(world)
+    result = navigator(world, sim, FakeInput(world), walk_budget_s=2.0).walk_to((20, 0))
+    assert result.capped is False
+    assert abs(result.arrived_at[0] - 20) <= 3
+
+
+def test_the_giveup_ladder_survives_the_cap_across_calls():
+    """The cap must not turn "this cannot be walked" into silence.
+
+    Without carried state a capped call never raises, so a caller that
+    relies on `NavigationError` — traverse, and it was traverse that
+    died — would retry a hopeless target for ever. The ladder therefore
+    counts across calls instead of within one.
+    """
+    world = World(wall_x=5)
+    sim = Sim(world)
+    nav = navigator(world, sim, FakeInput(world), walk_budget_s=2.0)
+    with pytest.raises(NavigationError, match="gave up"):
+        for _ in range(MAX_FAILURES + 2):
+            assert nav.walk_to((60, 0)).capped
+
+
+def test_progress_resets_the_carried_ladder():
+    """A walk that is merely slow must never add up to a walk that failed
+    — the rule the original in-call ladder already had."""
+    world = World(wall_x=5)
+    sim = Sim(world)
+    nav = navigator(world, sim, FakeInput(world), walk_budget_s=2.0)
+    for _ in range(MAX_FAILURES + 2):
+        nav.walk_to((60, 0))
+        world.wall_x += 10  # the obstacle keeps yielding: real progress
+    # No give-up: every attempt got meaningfully closer.
+
+
+def test_a_new_destination_forgets_the_old_ladder():
+    world = World(wall_x=5)
+    sim = Sim(world)
+    nav = navigator(world, sim, FakeInput(world), walk_budget_s=2.0)
+    for _ in range(MAX_FAILURES):  # one short of giving up
+        nav.walk_to((60, 0))
+    world.wall_x = None
+    result = nav.walk_to((20, 0))  # a different target, a clean slate
+    assert abs(result.arrived_at[0] - 20) <= 3
 
 
 def test_target_picker_finds_reachable_ground():
@@ -372,10 +606,12 @@ def _obj(kind, position):
     return SimpleNamespace(kind=kind, position=position)
 
 
-def _ally(position):
+def _ally(position, *, is_alive=True, is_corpse=False):
     from types import SimpleNamespace
 
-    return SimpleNamespace(position=position, is_alive=True)
+    return SimpleNamespace(
+        position=position, is_alive=is_alive, is_corpse=is_corpse
+    )
 
 
 def test_decorative_scenery_is_not_a_hazard(monkeypatch):
@@ -420,6 +656,163 @@ def test_allies_are_hazards_in_town_only(monkeypatch):
     )
     assert in_town == {(5, 5)}
     assert in_field == set()
+
+
+# -- the sprite box (T83, 2026-08-08) ---------------------------------------------
+#
+# The fixture is the live measurement itself: Kashya at (5878, 5733), the
+# merc at (5863, 5733), and the three travel clicks the drill recorded — all
+# at world gap 6, all beyond AVOID_RADIUS, and only one of them fatal.
+
+KASHYA = (5878, 5733)
+MERC = (5863, 5733)
+CLICK_BESIDE_MERC = (5869, 5733)      # 120 px right / 60 px below — harmless
+CLICK_BESIDE_KASHYA = (5872, 5733)    # 120 px left  / 60 px above — harmless
+CLICK_UP_KASHYAS_SPRITE = (5872, 5727)  # 0 px / 120 px ABOVE — opened npc_menu
+
+
+def test_the_sprite_box_matches_what_the_game_actually_did():
+    """The three measured clicks, classified. This is the whole fix in one
+    assertion: identical world distance, opposite outcomes, and the box has
+    to agree with the client rather than with Chebyshev."""
+    from pd2bot.navigate import _inside_sprite
+
+    assert _inside_sprite(KASHYA, CLICK_UP_KASHYAS_SPRITE), (
+        "the click that opened her dialog is not being avoided"
+    )
+    assert not _inside_sprite(KASHYA, CLICK_BESIDE_KASHYA), (
+        "a click 120 px to her side was harmless and must stay allowed"
+    )
+    assert not _inside_sprite(MERC, CLICK_BESIDE_MERC)
+
+
+def test_world_distance_alone_cannot_tell_those_clicks_apart():
+    """Why the radius could never have worked, stated as a test: the fatal
+    click and a harmless one are the SAME Chebyshev distance away."""
+    def cheb(a, b):
+        return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+
+    assert cheb(KASHYA, CLICK_UP_KASHYAS_SPRITE) == 6
+    assert cheb(KASHYA, CLICK_BESIDE_KASHYA) == 6
+    assert 6 > AVOID_RADIUS  # both were already outside the old rule
+
+
+def test_an_escape_never_goes_up_screen():
+    """Up-screen is behind the unit and is the far wall of a box 150 px tall
+    — and it is what the old world-space push chose when it produced the
+    click that opened the dialog."""
+    from pd2bot.navigate import _screen_offset, _sprite_escapes
+
+    for escape in _sprite_escapes(KASHYA):
+        _, sy = _screen_offset(KASHYA, escape)
+        assert sy >= 0, f"escape {escape} is drawn above her feet"
+
+
+def test_every_escape_actually_leaves_the_sprite():
+    from pd2bot.navigate import _inside_sprite, _sprite_escapes
+
+    for escape in _sprite_escapes(KASHYA):
+        assert not _inside_sprite(KASHYA, escape)
+
+
+def test_an_escape_also_clears_the_world_radius():
+    """A sprite hazard is a world hazard too. An escape that cleared the
+    box but sat inside `AVOID_RADIUS` would be rejected by the very next
+    check, and the nudge would spin until it ran out of tries."""
+    from pd2bot.navigate import _sprite_escapes
+
+    for escape in _sprite_escapes(KASHYA):
+        span = max(abs(escape[0] - KASHYA[0]), abs(escape[1] - KASHYA[1]))
+        assert span >= AVOID_RADIUS, f"escape {escape} is inside the radius"
+
+
+def test_a_click_up_a_sprite_is_nudged_out_of_it():
+    """End to end through the nudge, with the measured geometry."""
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    nav = navigator(world, sim, fake, avoid=lambda: (KASHYA,))
+    nav._sprites = lambda: (KASHYA,)
+    result = WalkResult(target=KASHYA, arrived_at=(0, 0), duration_seconds=0.0,
+                        waypoints=0)
+
+    point, nudges = nav._nudged_click_point(CLICK_UP_KASHYAS_SPRITE, result)
+
+    from pd2bot.navigate import _inside_sprite
+
+    assert nudges >= 1
+    assert not _inside_sprite(KASHYA, point)
+
+
+def test_a_click_beside_a_sprite_is_left_alone():
+    """The other half of the trade. Over-avoiding costs mobility, and the
+    measurement says the sides were never the problem."""
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    nav = navigator(world, sim, fake, avoid=lambda: ())
+    nav._sprites = lambda: (KASHYA,)
+    result = WalkResult(target=(0, 0), arrived_at=(0, 0), duration_seconds=0.0,
+                        waypoints=0)
+
+    point, nudges = nav._nudged_click_point(CLICK_BESIDE_KASHYA, result)
+
+    assert point == CLICK_BESIDE_KASHYA
+    assert nudges == 0
+
+
+def test_sprites_are_not_consulted_when_no_provider_is_wired():
+    """Every existing caller — the CLI, the drills, the field — keeps the
+    plain world rule until something hands it a sprite provider."""
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    nav = navigator(world, sim, fake, avoid=lambda: ())
+    result = WalkResult(target=(0, 0), arrived_at=(0, 0), duration_seconds=0.0,
+                        waypoints=0)
+
+    assert nav._sprites is None
+    assert nav._nudged_click_point(CLICK_UP_KASHYAS_SPRITE, result) == (
+        CLICK_UP_KASHYAS_SPRITE, 0
+    )
+
+
+def test_the_goal_is_exempt_from_the_sprite_box_too():
+    """Walking TO an NPC must stay possible: the thing we are deliberately
+    approaching is not something to dodge, whatever shape it is."""
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    nav = navigator(world, sim, fake, avoid=lambda: ())
+    nav._sprites = lambda: (KASHYA,)
+    nav._goal = KASHYA
+    result = WalkResult(target=KASHYA, arrived_at=(0, 0), duration_seconds=0.0,
+                        waypoints=0)
+
+    point, nudges = nav._nudged_click_point(CLICK_UP_KASHYAS_SPRITE, result)
+
+    assert point == CLICK_UP_KASHYAS_SPRITE
+    assert nudges == 0
+
+
+def test_a_town_npc_is_a_hazard_whatever_its_hp_reads(monkeypatch):
+    """The hazard rule must not rest on an unmeasured fact.
+
+    A town NPC carries no combat stats (that is how she came to be
+    misfiled as scenery on 2026-08-06), and whether her stat list carries
+    HP at all is not something this repo has measured. `is_alive` reads a
+    missing HP stat as dead, which would drop her from the hazard set and
+    reproduce the misclick with everything else looking correct. Corpses
+    are excluded upstream — `scan_units` files them in `corpses`, never in
+    `allies` — so this rule asks the question it can actually answer.
+    """
+    hazards = _hazards_for(
+        monkeypatch,
+        objects=[],
+        allies=[_ally((5, 5), is_alive=False, is_corpse=False)],
+        in_town=True,
+    )
+    assert hazards == {(5, 5)}
 
 
 def test_ground_items_are_hazards(monkeypatch):
@@ -556,3 +949,37 @@ def test_a_hazard_short_of_the_destination_is_still_avoided():
     for click in fake.clicks:
         span = max(abs(click[0] - hazard[0]), abs(click[1] - hazard[1]))
         assert span >= AVOID_RADIUS
+
+
+def test_a_refused_click_raises_even_when_the_budget_expires_first():
+    """The NPC-misclick recovery keys on NavigationError.
+
+    A travel click that lands on an NPC opens their dialog, and the
+    dialog refuses every click after it. `town._walk_guarded` recovers
+    from exactly that — close the panel, sidestep, re-walk — but only
+    when it sees a `NavigationError`. The first cut of the walk budget
+    returned quietly instead, so the walk came back merely "capped", no
+    recovery ran, and the bot stood still until it gave up. Live
+    2026-08-08: stuck 45 subtiles short of Akara, zero movement.
+
+    A budget that silently swallows "I could not send anything" is worse
+    than no budget: the caller cannot tell "did not arrive" from
+    "cannot act at all".
+    """
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world, refuse_first=1000)  # a dialog that never closes
+    nav = navigator(world, sim, fake, walk_budget_s=2.0)
+    with pytest.raises(NavigationError, match="refused"):
+        nav.walk_to((20, 0))
+
+
+def test_the_refusal_reason_survives_into_the_error():
+    """The town layer reads the open panel from the game, but the trail
+    has to say WHY for anyone reading the log afterwards."""
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world, refuse_first=1000)
+    nav = navigator(world, sim, fake, walk_budget_s=2.0)
+    with pytest.raises(NavigationError, match="esc_menu"):
+        nav.walk_to((20, 0))

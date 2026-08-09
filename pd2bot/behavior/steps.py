@@ -2538,6 +2538,26 @@ class TraverseStep(_PickupMixin):
             # Claimed but still resolving (the retry pacing): hold the
             # walk rather than march away from a click in flight.
             return StepOutcome(done=False, waiting=True, note="pickup resolving")
+        # A queued cleanse, run here for the same reason the clearance and
+        # the sweep run one: this step COLLECTS, so it is a step that can
+        # fill the inventory — and until 2026-08-08 it was the only such
+        # step that could never empty it again.
+        #
+        # That gap cost the descent. `collect` queues a cleanse when a
+        # non-potion will not come up, and `_mark_inventory_full`
+        # suppresses every non-potion pickup for the REST OF THE GAME.
+        # A descent run is `town_preamble, waypoint, traverse x6` — not
+        # one of which called `maybe_cleanse` — so the queue was set on
+        # Cellar 1 and served on no floor at all, and the Countess's own
+        # drops were being skipped by a flag raised twenty minutes before
+        # she was reached. Observed by the operator, 2026-08-08.
+        #
+        # Placed AFTER the pickup attempt and BEFORE the walk: collecting
+        # is the better use of a tick, and `maybe_cleanse` declines by
+        # itself whenever a hostile is close enough to punish standing
+        # still.
+        if self.maybe_cleanse(snap, ctx):
+            return StepOutcome(done=False, acted=True, note="inventory cleansed")
         scan = self._locate_exit(here, origin)
         if self._exit is None:
             if scan is None:

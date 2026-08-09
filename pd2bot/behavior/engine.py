@@ -43,7 +43,7 @@ from pd2bot.behavior.reflex import ReflexLadder
 from pd2bot.input import InputRefused
 from pd2bot.narrate import noop as narrate_noop
 from pd2bot.runlog import NullRunLog
-from pd2bot.safety import ChickenExit
+from pd2bot.safety import ChickenExit, DeathHalt, SafetyInterrupt
 from pd2bot.skills import SkillSwitchFailed
 from pd2bot.snapshot import GameSnapshot
 
@@ -90,6 +90,24 @@ class IdleBail(ChickenExit):
     cycle's vitals backstop counted these too, so one real chicken
     followed by one idle bail halted with a message telling the operator
     to heal a character whose actual problem was a hang.
+    """
+
+    is_vitals = False
+
+
+class WatchdogDown(ChickenExit):
+    """The out-of-process chicken watchdog is not answering.
+
+    A `ChickenExit` subclass so the game is LEFT rather than abandoned —
+    the character ends up somewhere safe instead of standing in Hell
+    while nobody watches. `is_vitals` is False: nothing is wrong with the
+    character, so this must not feed the "heal it" backstop (R115).
+
+    Only raised when a run explicitly requires the watchdog, which the
+    real launcher turns on and drills and sims do not. A watchdog that
+    is silently not running is a safety layer that silently does not
+    exist, and after 2026-08-07 that is not a thing this project is
+    willing to discover afterwards.
     """
 
     is_vitals = False
@@ -228,6 +246,12 @@ class EngineConfig:
     # (the one real race — an ESC landing just after a panel closed opens
     # the menu instead); beyond it, the menu is the operator's.
     operator_escape_grace_s: float = 1.5
+    # Whether this run insists the out-of-process chicken watchdog is
+    # alive (`pd2bot.watchdog`). OPT-IN, and the default must stay False:
+    # sims and the many drills that build an engine bare have no watchdog
+    # and must keep working. `tools/live-run.ps1` — the real entry point,
+    # and the one that starts a watchdog — turns it on.
+    require_watchdog: bool = False
 
 
 @dataclass
@@ -263,6 +287,8 @@ class BehaviorEngine:
         narrate: Callable[[str], None] = narrate_noop,
         should_stop: Callable[[], bool] | None = None,
         bot_escape_at: Callable[[], float | None] | None = None,
+        watchdog_alive: Callable[[], bool] | None = None,
+        watchdog_latch: Callable[[], dict | None] | None = None,
         runlog: object | None = None,
         frame: Callable[[], object] | None = None,
     ) -> None:
@@ -289,6 +315,12 @@ class BehaviorEngine:
         # None = no kill switch in this environment (sims, drills that
         # build the engine bare).
         self._bot_escape_at = bot_escape_at
+        # The out-of-process safety layer (`pd2bot.watchdog`): is it
+        # alive, and has it fired? Both None in every environment that
+        # has no watchdog — sims, drills, the CLI — which is why the
+        # dead-man check is opt-in rather than default-on.
+        self._watchdog_alive = watchdog_alive
+        self._watchdog_latch = watchdog_latch
         # The narrative channel (R179): step transitions with durations —
         # the engine is the only thing that knows when a step began.
         self._narrate = narrate
@@ -390,6 +422,47 @@ class BehaviorEngine:
             ):
                 return False
         return True
+
+    def _check_watchdog_alive(self) -> None:
+        """Refuse to go on without the safety layer we were told to have.
+
+        Deliberately opt-IN (`EngineConfig.require_watchdog`, turned on
+        by the real launcher): sims and the many drills that build an
+        engine bare have no watchdog and must keep working. A default-on
+        check would either break them or be quietly switched off, and a
+        safety check that is routinely switched off is worse than none.
+        """
+        if not self.config.require_watchdog:
+            return
+        if self._watchdog_alive is not None and self._watchdog_alive():
+            return
+        self._narrate("the watchdog is not answering — standing down")
+        raise WatchdogDown(
+            "the chicken watchdog is not running (no fresh heartbeat) and "
+            "this run requires it — start it with "
+            "`python -m pd2bot.watchdog` and launch again"
+        )
+
+    def _watchdog_chickened(self) -> dict | None:
+        """The other thing that opens the ESC menu without a human.
+
+        Same shape of correlation as `_bot_escape_at` above and for the
+        same reason: an open ESC menu is evidence of *someone*, and the
+        kill switch is only useful if it names the right one. After a
+        watchdog fire, "the operator pressed ESC — standing down" is a
+        lie, and it would be the only account of the moment in the log.
+
+        Note what does NOT change: the stand-down itself. A watchdog
+        pause should end the run, and the clean Save-and-Exit that
+        follows is exactly the right thing to happen next. Only the
+        story changes.
+        """
+        if self._watchdog_latch is None:
+            return None
+        try:
+            return self._watchdog_latch()
+        except Exception:  # noqa: BLE001 - a failed read is not an accusation
+            return None
 
     def _check_idle(self, snap: GameSnapshot, now: float) -> None:
         if not snap.in_game or snap.in_town:
@@ -538,8 +611,48 @@ class BehaviorEngine:
         self._tick_snap = None
         try:
             return self._tick()
+        except SafetyInterrupt as interrupt:
+            raise self._converted(interrupt) from None
         finally:
             self._log_tick(started)
+
+    def _converted(self, interrupt: SafetyInterrupt) -> BaseException:
+        """Turn a mid-block safety interrupt back into the real thing.
+
+        `SafetyInterrupt` exists only to survive the journey out of a
+        blocking call — it is a `BaseException` precisely so that the
+        broad `except Exception` guards between here and the walk loop
+        cannot swallow a chicken (see `pd2bot.safety`). This is where
+        that journey ends and the normal vocabulary resumes.
+
+        It converts HERE, at the same boundary the monitor's own
+        `tick()` raises from, so that everything downstream — the
+        cycle's leave-and-continue handler, the death latch's
+        no-input-ever rule, `runner.py`'s counters — is reached by
+        exactly the types it was written and live-verified against. The
+        conversion exists so that none of that has to know about any of
+        this.
+        """
+        verdict = interrupt.verdict
+        try:
+            # `verdict`, not `kind`: the writer does `record.update(fields)`
+            # over an envelope whose own key is "kind", so a field by that
+            # name would silently overwrite the event's kind and make this
+            # event unfindable in the log it exists to appear in.
+            self._runlog.event(
+                "safety.interrupt", verdict=verdict.kind, reason=verdict.message,
+                hp=verdict.hp, max_hp=verdict.max_hp, pct=verdict.pct,
+                step=self._tick_step,
+            )
+        except Exception:  # noqa: BLE001 - guards the logging, not the verdict
+            pass
+        if verdict.is_death:
+            # The latch is already set (the monitor set it when it read
+            # the corpse); this only carries the news the rest of the way.
+            return DeathHalt(verdict.message)
+        if verdict.kind == "stop":
+            return StopRequested(verdict.message)
+        return ChickenExit(verdict.message)
 
     def _log_tick(self, started: float) -> None:
         """Emit the tick record. Never raises — instrumentation is not a
@@ -655,7 +768,21 @@ class BehaviorEngine:
         if self._should_stop is not None and self._should_stop():
             self._narrate("run aborted by request")
             raise StopRequested("stopped by outside request (abort)")
+        self._check_watchdog_alive()
         if self._operator_took_the_controls(snap):
+            latch = self._watchdog_chickened()
+            if latch is not None:
+                pct = latch.get("pct")
+                detail = f" (life {pct}%)" if pct is not None else ""
+                self._narrate(f"the WATCHDOG chickened{detail} — standing down")
+                self._runlog.event(
+                    "watchdog.fired", reason=latch.get("reason"),
+                    pct=pct, hp=latch.get("hp"), max_hp=latch.get("max_hp"),
+                )
+                raise StopRequested(
+                    f"the watchdog pressed ESC{detail} — the game is paused; "
+                    "standing down"
+                )
             self._narrate("operator input (ESC/Enter) — standing down")
             raise StopRequested(
                 "the operator pressed ESC or opened chat — standing down"

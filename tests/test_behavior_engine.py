@@ -22,7 +22,7 @@ from pd2bot.behavior.engine import (
 from pd2bot.behavior.reflex import ReflexDecision
 from pd2bot.input import InputRefused
 from pd2bot.player import Player
-from pd2bot.safety import ChickenExit, DeathHalt
+from pd2bot.safety import ChickenExit, DeathHalt, SafetyInterrupt, Verdict
 from pd2bot.snapshot import GameSnapshot
 from pd2bot.uistate import UIState
 from pd2bot.units import Monster
@@ -828,3 +828,207 @@ def test_a_dropped_hotkey_press_is_absorbed_like_a_refusal():
     eng.tick()
     assert ladder.committed == 1
     assert eng.report.refusals == 1
+
+
+# -- the safety-interrupt boundary --------------------------------------------
+#
+# A `SafetyInterrupt` is a BaseException raised from inside a blocking
+# call (a walk), so that the broad `except Exception` guards between the
+# walk loop and here cannot swallow a chicken. The engine is where it
+# stops being that and becomes the exception the cycle has always
+# handled. These tests pin the conversion in both directions plus the
+# ordering rule death has always had.
+
+
+class InterruptingStep:
+    """A step that blocks and is interrupted, the way a walk is."""
+
+    def __init__(self, verdict: Verdict) -> None:
+        self.name = "blocked_walk"
+        self.verdict = verdict
+
+    def step(self, snap, ctx):
+        raise SafetyInterrupt(self.verdict)
+
+
+def test_a_vitals_interrupt_arrives_as_a_chicken():
+    engine_, _ = engine(states=[InterruptingStep(
+        Verdict("life", "life 300/1000 (30%) <= 35% threshold",
+                hp=300, max_hp=1000, pct=30.0)
+    )])
+    with pytest.raises(ChickenExit, match="30%"):
+        engine_.tick()
+
+
+def test_a_death_interrupt_arrives_as_a_death_halt():
+    engine_, _ = engine(states=[InterruptingStep(
+        Verdict("death", "MaqiuDoubing is dead (mode 17, hp 0)")
+    )])
+    with pytest.raises(DeathHalt):
+        engine_.tick()
+
+
+def test_an_abort_interrupt_arrives_as_a_stop():
+    """The operator's abort travels the same uncatchable channel, because
+    it was starved by the same 24 seconds — and as a plain StopRequested
+    (a RuntimeError) the broad handlers would have eaten it."""
+    engine_, _ = engine(states=[InterruptingStep(
+        Verdict("stop", "stopped by outside request (abort)")
+    )])
+    with pytest.raises(StopRequested):
+        engine_.tick()
+
+
+def test_a_converted_interrupt_is_not_a_safety_interrupt_anymore():
+    """The conversion must be complete: nothing downstream should ever
+    have to know this type exists."""
+    engine_, _ = engine(states=[InterruptingStep(
+        Verdict("life", "life 1/1000 (0%) <= 35% threshold")
+    )])
+    try:
+        engine_.tick()
+    except SafetyInterrupt:  # pragma: no cover - the failure we are pinning
+        pytest.fail("SafetyInterrupt escaped the engine unconverted")
+    except ChickenExit:
+        pass
+
+
+def test_the_tick_is_still_logged_when_an_interrupt_ends_it():
+    """The `finally` that records every tick, including the ones that end
+    by raising — which are the ticks worth reading."""
+    events = []
+
+    class Log:
+        enabled = True
+
+        # `kind` positional-only, exactly like the real RunLog: the
+        # envelope owns that key, and an emitter passing kind= as a
+        # FIELD would overwrite the event's own kind.
+        def event(self, kind, /, **fields):
+            events.append((kind, fields))
+
+        def area(self, *args, **kwargs):
+            pass
+
+    engine_, _ = engine(states=[InterruptingStep(
+        Verdict("life", "life 300/1000 (30%) <= 35% threshold",
+                hp=300, max_hp=1000, pct=30.0)
+    )])
+    engine_._runlog = Log()
+    with pytest.raises(ChickenExit):
+        engine_.tick()
+    kinds = [kind for kind, _ in events]
+    assert "safety.interrupt" in kinds
+    assert "tick" in kinds
+    interrupt = next(f for k, f in events if k == "safety.interrupt")
+    assert interrupt["verdict"] == "life"
+    assert interrupt["hp"] == 300
+    # The field is NOT called "kind": the writer merges fields over an
+    # envelope that already has one, so this event would have renamed
+    # itself out of the log.
+    assert "kind" not in interrupt
+
+
+# -- the watchdog: the dead-man switch and honest narration --------------------
+
+
+def test_the_engine_refuses_to_tick_without_a_required_watchdog():
+    """A watchdog that is silently not running is a safety layer that
+    silently does not exist."""
+    from pd2bot.behavior.engine import WatchdogDown
+
+    engine_, _ = engine(config=EngineConfig(require_watchdog=True))
+    with pytest.raises(WatchdogDown, match="not running"):
+        engine_.tick()
+
+
+def test_a_required_watchdog_that_is_alive_is_no_obstacle():
+    eng = BehaviorEngine(
+        snapshot=lambda: snap(),
+        monitor=ScriptedMonitor(),
+        states=[FakeStep("s")],
+        executor=RecordingExecutor(),
+        config=EngineConfig(require_watchdog=True),
+        clock=Clock(),
+        sleep=lambda s: None,
+        watchdog_alive=lambda: True,
+    )
+    assert eng.tick() is True  # the one-tick step completed
+
+
+def test_drills_and_sims_are_untouched_by_the_dead_man_switch():
+    """Default OFF, and it must stay off: a safety check that is
+    routinely switched off is worse than none."""
+    assert EngineConfig().require_watchdog is False
+    engine_, _ = engine()  # no watchdog anywhere in sight
+    engine_.tick()
+
+
+def test_watchdog_down_leaves_the_game_rather_than_abandoning_it():
+    from pd2bot.behavior.engine import WatchdogDown
+
+    assert issubclass(WatchdogDown, ChickenExit)  # the cycle leaves cleanly
+    assert WatchdogDown.is_vitals is False  # but it is not a "heal it" problem
+
+
+def _esc_menu_snap():
+    return snap(ui=UIState(open_panels=frozenset({offsets.UI_ESCMENU_MAIN})))
+
+
+def test_an_esc_menu_after_a_watchdog_fire_is_named_as_the_watchdog():
+    """After a watchdog fire, "the operator pressed ESC" is a lie — and
+    it would be the only account of the moment in the log."""
+    lines = []
+    eng = BehaviorEngine(
+        snapshot=_esc_menu_snap,
+        monitor=ScriptedMonitor(),
+        states=[FakeStep("s")],
+        executor=RecordingExecutor(),
+        clock=Clock(),
+        sleep=lambda s: None,
+        narrate=lines.append,
+        watchdog_latch=lambda: {"reason": "life", "pct": 28.0, "hp": 280},
+    )
+    with pytest.raises(StopRequested, match="watchdog"):
+        eng.tick()
+    assert any("WATCHDOG" in line for line in lines)
+    assert not any("operator" in line for line in lines)
+
+
+def test_an_esc_menu_with_no_latch_is_still_the_operator():
+    """Both directions — a test that only checked one would pass against
+    a hardcoded string."""
+    lines = []
+    eng = BehaviorEngine(
+        snapshot=_esc_menu_snap,
+        monitor=ScriptedMonitor(),
+        states=[FakeStep("s")],
+        executor=RecordingExecutor(),
+        clock=Clock(),
+        sleep=lambda s: None,
+        narrate=lines.append,
+        watchdog_latch=lambda: None,
+    )
+    with pytest.raises(StopRequested, match="operator"):
+        eng.tick()
+    assert any("operator input" in line for line in lines)
+
+
+def test_an_unreadable_latch_does_not_accuse_the_watchdog():
+    lines = []
+
+    def explode():
+        raise OSError("the latch is unreadable")
+
+    eng = BehaviorEngine(
+        snapshot=_esc_menu_snap,
+        monitor=ScriptedMonitor(),
+        states=[FakeStep("s")],
+        executor=RecordingExecutor(),
+        clock=Clock(),
+        sleep=lambda s: None,
+        narrate=lines.append,
+        watchdog_latch=explode,
+    )
+    with pytest.raises(StopRequested, match="operator"):
+        eng.tick()

@@ -143,7 +143,43 @@ finished, so nothing else in that thread runs meanwhile. Harmless where
 nothing else needs to happen, dangerous where something does: the bot
 approaches monsters in short hops rather than one blocking walk, so the
 survival checks keep running between them. First seen in
-[simulating the game](2026-07-31-simulating-the-game.md).
+[simulating the game](2026-07-31-simulating-the-game.md). **The 24-second
+death of 2026-08-07 was this exact hazard realised**, and the two
+standard remedies both landed then: give the blocking call a *callback*
+so safety runs during the wait, and *cap* it so the caller's other
+duties resume regardless. *(See: 2026-08-07, starvation and defence in
+depth.)*
+
+**BaseException (and the exception hierarchy)** — exceptions are
+arranged in a family tree, and almost everything a program raises
+inherits from `Exception`. A few things sit deliberately *above* it,
+inheriting from `BaseException` directly — `KeyboardInterrupt`,
+`SystemExit` — so that a broad `except Exception` cannot swallow them.
+When you press Ctrl-C you mean it, and a stray error handler should not
+get a vote. Our safety signal was given the same treatment for the same
+reason. *(First seen: 2026-08-07, starvation and defence in depth.)*
+
+**callback** — a function you hand to another function so it can call
+you back at the right moment. Here: `walk_to` is given a safety check to
+call between its waits, so the monitor effectively runs *during* a
+blocking call rather than only after it. *(First seen: 2026-08-07,
+starvation and defence in depth.)*
+
+**dead-man's switch** — a control that acts when the operator *stops*
+signalling, rather than when they signal. A safety layer that is
+silently not running is worse than none, because everyone assumes it is
+on — so our watchdog process writes a timestamp every loop (a
+**heartbeat**) and the bot refuses to start when that timestamp is
+stale. *(First seen: 2026-08-07, starvation and defence in depth.)*
+
+**defence in depth** — independent safety layers arranged so that one
+failure does not defeat all of them. The layers are not copies: each
+covers what the others cannot. Our in-process safety poll is fast and
+precise but dies with the process it lives in; the separate watchdog
+process survives anything but knows less and can do only one crude
+thing. A related rule of thumb: **the backstop fires second** — give the
+outer layer a slacker threshold, so the graceful inner one wins whenever
+it can. *(First seen: 2026-08-07, starvation and defence in depth.)*
 
 **flaky test** — a test that sometimes passes and sometimes fails with no code change in between. Usually a symptom of a race condition, a timing assumption, or a fragile selector in the test itself; professionals treat flakiness as a bug in the test harness to be fixed, not ignored. *(First seen: 2026-07-31, when the tools lie.)*
 
@@ -486,8 +522,91 @@ same library without conflict. It is derived data: never commit it to git or
 put it in cloud-synced storage. First seen in
 [from script to package](2026-07-28-from-script-to-package.md).
 
+**starvation** — when a task that is ready to run, and permitted to run,
+simply never gets a turn, because something else will not yield. It is
+not a crash and produces no error, which is what makes it hard: the code
+is correct and merely never reached. Our chicken check ran at the top of
+every tick, and a walk that blocked for 24 seconds meant the top of the
+tick never came round again — the character died at full logged health.
+*(First seen: 2026-08-07, starvation and defence in depth.)*
+
+**thread vs process** — a *thread* is a parallel line of execution
+inside one program, sharing that program's memory and its fate: if the
+process hangs or dies, so does every thread in it. A *process* is a
+separate program with its own memory, scheduled independently by the
+operating system. This is why our chicken watchdog is a process and not
+a thread — it has to survive the very failures it exists to catch.
+*(First seen: 2026-08-07, starvation and defence in depth.)* See also
+*in-process vs out-of-process*.
+
+**mutation testing** — a technique that deliberately introduces small
+bugs ("mutations") into your code and checks that some test starts
+failing. Any mutation that no test notices marks a gap. It is the
+automated form of the manual habit that catches *vacuous tests*: break
+it on purpose and confirm you see red. *(First seen: 2026-08-07,
+starvation and defence in depth.)*
+
+**vacuous test (tautological test)** — a test whose assertions hold
+whether or not the code works, so it can never fail. Worse than no test,
+because a missing test is an honest gap while this one is false
+reassurance that stops anyone looking. Two appeared in a single cycle
+here: a threshold a healthy character could never cross, and a check
+that set its pass flag in *both* branches of a try/except. The defence
+is a habit, not a tool — **make the test fail on purpose at least
+once**. *(First seen: 2026-08-07, starvation and defence in depth.)*
+
 **watchdog** — a timer that fires when a system stops *making progress*,
 as opposed to visibly failing. It catches the unforeseen bug whose only
 symptom is standing still. Our never-idle rule is one: outside town,
 nothing sent and no progress for ten seconds means leave the game.
 First seen in [the behavior engine](2026-07-31-the-behavior-engine.md).
+The word also names the *separate process* added 2026-08-07 that watches
+the character's health and presses ESC — same idea (notice trouble that
+produces no error), different mechanism.
+
+**bisect (`git bisect`)** — finding which commit introduced a bug by
+checking out old versions and testing each one, halving the range each
+time. Cheap in theory, slow when a test means launching the real system —
+which is why good **instrumentation** often beats it: if every run
+already records the number that changed, the culprit falls out of a log
+query instead of an afternoon of rebuilds. *(First seen: 2026-08-08,
+classification and coordinate spaces.)*
+
+**classification (and test order)** — routing each thing into one of
+several categories with a chain of if/else tests. Because the first
+matching test wins, **the order of the tests is part of the logic**, and
+moving one test up the chain silently changes the answer for every case
+it now sees first. Ours filed town NPCs as decorative scenery after a
+"is it scenery?" check was hoisted above "is it friendly?", and
+everything that looks for an NPC looks in the ally category. *(First
+seen: 2026-08-08, classification and coordinate spaces.)*
+
+**coordinate space** — the frame of reference that gives coordinates
+meaning. A program that draws things usually has at least two: the
+world's own units, and pixels on screen. Distances do not survive the
+trip between them, so a rule written in one space cannot answer a
+question asked in the other — the source of a whole family of bugs in
+graphical software. *(First seen: 2026-08-08, classification and
+coordinate spaces.)*
+
+**isometric projection** — the fixed camera angle that draws a
+grid-based world as diamonds rather than squares, giving depth without
+real 3D. Diablo II's projection moves a point 20 pixels sideways and 10
+pixels down per subtile here (measured, not assumed), so screen distance
+depends on *direction*: two points equally far away in the world can be
+adjacent or a screen apart. *(First seen: 2026-08-08, classification and
+coordinate spaces.)*
+
+**regression (and regression test)** — a bug that breaks something which
+previously worked, most often introduced by a fix to something else. A
+regression test is written specifically to fail if that old bug returns;
+it is the standard way a fixed bug is prevented from coming back a third
+time. *(First seen: 2026-08-08, classification and coordinate spaces.)*
+
+**sprite / hit box** — a sprite is the flat image drawn for a character
+or object; the hit box is the region that counts as "you clicked it".
+The two need not match the thing's footprint in the world: a standing
+character occupies about one tile of ground but is drawn tall, so a
+click well clear of their feet in world terms can still land on their
+body on screen. *(First seen: 2026-08-08, classification and coordinate
+spaces.)*

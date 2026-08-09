@@ -328,6 +328,11 @@ class TownConfig:
     # being clicked. Bigger than `sidestep` because it is measured from
     # the obstacle rather than from us, and has to clear it properly.
     detour: int = 14
+    # How long ONE approach may spend on capped legs before giving up.
+    # `walk_to` returns every 2 s now whether or not it arrived, so a town
+    # crossing is many calls rather than one; measured crossings are ~26 s,
+    # so this is generous without being unbounded.
+    approach_timeout_s: float = 60.0
     # Objects need the same treatment as NPCs, and for a stronger reason:
     # perception is capped at 80 subtiles, but the client only keeps NEARBY
     # ROOMS loaded at all, so a distant stash is not merely out of range —
@@ -503,6 +508,41 @@ class TownLayer:
     def _any_panel_open(self) -> bool:
         return bool(self._blocking_panels_open())
 
+    def _walk_all_the_way(self, destination: tuple[int, int]) -> None:
+        """Keep walking until `walk_to` says it is done, not merely back.
+
+        Since 2026-08-07 `walk_to` returns on a 2 s wall clock whether or
+        not it arrived, so the tick loop keeps breathing during a long
+        leg (the chicken-starvation fix). Field steps were already built
+        for that — they re-check distance every tick and re-issue — but
+        the TOWN layer was not: it crossed town in ONE call and trusted
+        the call to block until arrival.
+
+        Live on 2026-08-08 that was a `heal: FAILED after 2.1s` — exactly
+        one walk budget. The bot walked 2 s toward Akara, was told the
+        walk had "finished", looked for her, and correctly reported she
+        was not there. Nothing was wrong with the town layer's logic; the
+        contract underneath it had changed.
+
+        A capped return is not arrival, so loop. The navigator carries
+        its own give-up ladder across calls, so a genuinely unreachable
+        destination still raises `NavigationError` here rather than
+        spinning; the wall clock is a second bound for the case where
+        something crawls forever without ever quite failing.
+        """
+        deadline = self._clock() + self.config.approach_timeout_s
+        while True:
+            self._check_stop()
+            result = self.walk_to(destination)
+            if not getattr(result, "capped", False):
+                return  # arrived, or stopped short for a reason of its own
+            if self._clock() >= deadline:
+                raise TownError(
+                    f"still short of {destination} after "
+                    f"{self.config.approach_timeout_s:.0f}s of capped legs — "
+                    "the route may be crawling or blocked"
+                )
+
     def _walk_guarded(self, destination: tuple[int, int]) -> None:
         """Walk, surviving travel clicks that land on a bystander.
 
@@ -524,7 +564,7 @@ class TownLayer:
         for attempt in range(1 + self.config.walk_retries):
             self._check_stop()
             try:
-                self.walk_to(destination)
+                self._walk_all_the_way(destination)
                 return
             except NavigationError:
                 blocking = self._blocking_panels_open()

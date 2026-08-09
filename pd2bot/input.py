@@ -26,8 +26,14 @@ from __future__ import annotations
 
 import ctypes
 import time
+from pathlib import Path
 
-from pd2bot import offsets, uistate
+# Bound directly rather than reached through `time`, because the tests
+# replace this module's `time` with a stub that has only `sleep` — and
+# the latch cache must not be the reason input becomes untestable.
+from time import monotonic as _monotonic
+
+from pd2bot import offsets, uistate, watchdog
 from pd2bot.memory import GameSession
 from pd2bot.screen import clickable, projection_for
 from pd2bot.units import player_unit, unit_position
@@ -40,6 +46,9 @@ _INPUT_KEYBOARD = 1
 _MOUSE_LEFTDOWN, _MOUSE_LEFTUP = 0x0002, 0x0004
 _MOUSE_RIGHTDOWN, _MOUSE_RIGHTUP = 0x0008, 0x0010
 _KEY_UP = 0x0002
+# How long a watchdog-latch read is reused before looking again. `check()`
+# runs on every send; a stat per click buys nothing at this timescale.
+_LATCH_RECHECK_S = 0.5
 
 # Virtual-key codes the bot uses (Win32 VK_*). Kept here because this module
 # owns the SendInput plumbing; the *meaning* of a key (which skill, which
@@ -228,6 +237,7 @@ class GatedInput:
         session: GameSession,
         window: GameWindow | None = None,
         ui_array: int | None = None,
+        latch_path: Path | None = None,
     ) -> None:
         self.session = session
         self.window = window if window is not None else GameWindow(session.process_id)
@@ -235,14 +245,48 @@ class GatedInput:
         self._ui_array = (
             ui_array if ui_array is not None else uistate.find_ui_array(session)
         )
+        # The watchdog's latch (see `pd2bot.watchdog`). Cached for a beat
+        # because `check()` runs on EVERY send and a stat per click is a
+        # syscall nobody asked for; half a second is far shorter than any
+        # window in which it matters.
+        self._latch_path = latch_path
+        self._latch_checked_at: float | None = None
+        self._latch_active = False
 
     # -- the gate ------------------------------------------------------------
+
+    def _watchdog_fired(self) -> bool:
+        """Has the watchdog process chickened for us?
+
+        Checked HERE, in the one send path, for the same reason
+        everything else is: there is no bypass, and a caller cannot
+        forget. Deliberately NOT checked in `MenuInput` — the latch must
+        stop *world* input while leaving the *menu* path open, so
+        `cycle.leave_game` can still complete the clean Save-and-Exit
+        that should follow a watchdog pause. That asymmetry is the
+        design, not an oversight.
+        """
+        now = _monotonic()
+        if (
+            self._latch_checked_at is not None
+            and now - self._latch_checked_at < _LATCH_RECHECK_S
+        ):
+            return self._latch_active
+        self._latch_checked_at = now
+        path = self._latch_path if self._latch_path is not None else watchdog.LATCH_FILE
+        self._latch_active = watchdog.active_latch(path) is not None
+        return self._latch_active
 
     def check(self) -> None:
         """Raise InputRefused unless input would mean what the caller intends.
 
         Public so callers (and the navdemo CLI) can *ask* without sending.
         """
+        if self._watchdog_fired():
+            raise InputRefused(
+                "the watchdog chickened — the game is paused and world "
+                "input is disarmed until a human clears the latch"
+            )
         if not uistate.is_in_game(self.session):
             raise InputRefused("not in a game — the client is in the menus")
         state = uistate.read_ui_state(self.session, self._ui_array)

@@ -199,3 +199,81 @@ def test_shift_released_when_the_key_send_fails(sent, monkeypatch):
     with pytest.raises(OSError):
         gated(make_session()).press_key_with_shift(0x33)
     assert ("key", 0x10, 0x0002) in sent
+
+
+# -- the watchdog latch: world input stops, the exit stays open ----------------
+#
+# The chicken watchdog (pd2bot/watchdog.py) is a separate process that
+# presses ESC when vitals cross. Once it has, the bot must stop clicking
+# at the world -- but it must STILL be able to complete the clean
+# Save-and-Exit, which goes through MenuInput, not here. That asymmetry
+# is the design.
+
+
+def test_a_fresh_watchdog_latch_refuses_world_input(tmp_path):
+    from pd2bot.watchdog import write_latch
+
+    latch = tmp_path / "watchdog-latch"
+    write_latch("life", latch, pct=28.0)
+    guarded = GatedInput(
+        make_session(), window=FakeWindow(), ui_array=UI_ARRAY, latch_path=latch
+    )
+    with pytest.raises(InputRefused, match="watchdog"):
+        guarded.check()
+
+
+def test_a_stale_latch_does_not_disarm_the_bot_for_ever(tmp_path):
+    """A sticky file that nobody clears is an outage of its own -- the
+    lesson the drill cancel file already taught this project."""
+    import time as _time
+
+    from pd2bot.watchdog import LATCH_STALE_AFTER_S, write_latch
+
+    latch = tmp_path / "watchdog-latch"
+    write_latch("life", latch, now=_time.time() - LATCH_STALE_AFTER_S - 60)
+    guarded = GatedInput(
+        make_session(), window=FakeWindow(), ui_array=UI_ARRAY, latch_path=latch
+    )
+    guarded.check()  # no raise
+
+
+def test_no_latch_is_business_as_usual(tmp_path):
+    guarded = GatedInput(
+        make_session(), window=FakeWindow(), ui_array=UI_ARRAY,
+        latch_path=tmp_path / "nothing-here",
+    )
+    guarded.check()
+
+
+def test_the_latch_check_is_cached_rather_than_stat_per_click(tmp_path):
+    """`check()` runs on every send; a syscall per click buys nothing at
+    this timescale."""
+    latch = tmp_path / "watchdog-latch"
+    guarded = GatedInput(
+        make_session(), window=FakeWindow(), ui_array=UI_ARRAY, latch_path=latch
+    )
+    guarded.check()  # primes the cache: no latch
+
+    from pd2bot.watchdog import write_latch
+
+    write_latch("life", latch)
+    guarded.check()  # still cached, so still allowed -- documented behaviour
+    guarded._latch_checked_at = None  # expire it by hand
+    with pytest.raises(InputRefused, match="watchdog"):
+        guarded.check()
+
+
+def test_menu_input_ignores_the_latch(tmp_path):
+    """The asymmetry, pinned: the latch must not block `leave_game`, or
+    a watchdog pause would leave the bot unable to finish the exit that
+    should follow it."""
+    from pd2bot.menuinput import MenuInput
+    from pd2bot.watchdog import write_latch
+
+    write_latch("life", tmp_path / "watchdog-latch")
+    menu = MenuInput(
+        make_session(in_game=True, open_panels=(offsets.UI_ESCMENU_MAIN,)),
+        window=FakeWindow(),
+        ui_array=UI_ARRAY,
+    )
+    menu.check()  # no raise: the exit stays available

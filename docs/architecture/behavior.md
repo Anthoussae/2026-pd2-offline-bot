@@ -104,6 +104,19 @@ the ladder gets a look between every decision. Field movement happens
 in short capped legs (`_hop`) along the atlas's route answer (R181),
 never one blocking walk.
 
+**That contract was aspiration until 2026-08-07.** `_hop` capped the
+legs a *step* asked for, but `walk_to` itself had no cap on the call —
+its per-waypoint (20 s) and plan-cycle (5) budgets multiplied — and a
+single blocked walk held the tick loop for 24 s while a pack killed the
+character. It is now enforced at the walk layer: `walk_to` takes a
+safety poll it calls from every loop it waits in, and returns on a 2 s
+wall clock whatever it has achieved. A capped return is not a failure —
+`WalkResult.capped` says so, every caller already re-checks distance,
+and the give-up ladder counts across calls so "this cannot be walked"
+is still eventually said. See `docs/adr/2026-08-07-unstarvable-safety.md`
+and the safety section of `game-cycle.md`; the events to read afterwards
+are `nav.capped` and `safety.interrupt`.
+
 **Class modules** (`behavior/combat.py`, `behavior/necro.py`) implement
 the `CombatModule` protocol: `engage` (one decision of the fight) and
 `upkeep` (keep the revive wall standing), both returning declarative

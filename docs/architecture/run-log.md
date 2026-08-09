@@ -211,6 +211,51 @@ T71 run 4's endgame spent **four ticks of 25–35 s each** in exactly this
 path, visible only as tick durations with nothing inside them. The
 absorb behaviour is unchanged; the silence is not.
 
+### `nav.capped`
+
+One `walk_to` that returned on its **wall-clock budget** rather than by
+arriving or by giving up: `target`, `arrived_at`, `seconds`, `short_by`,
+`clicks`, `replans`. Emitted by the executor, which is the only place a
+`WalkResult` exists.
+
+A capped leg is not a failure and by itself not even a problem — the
+step re-checks distance and asks again, which is what "capped legs" has
+always meant here. But it is otherwise **invisible**: a short walk and a
+normal walk look identical from outside. This event is what keeps "the
+bot walked" and "the bot spent the whole run being capped" different
+facts. Watch the rate, not the individual event.
+
+### `safety.interrupt`
+
+A safety condition detected **inside a blocking call** rather than at a
+tick boundary: `verdict` (`life` / `mana` / `death` / `stop`), `reason`,
+`hp`, `max_hp`, `pct`, `step`.
+
+This event is the whole point of the 2026-08-07 fix, and it is the one
+to look for when asking "would the bot have chickened in time?". Before
+it existed, a chicken could only ever be raised between ticks — so a
+walk that blocked for 24 seconds was 24 seconds in which the monitor was
+not consulted, and the character died with the log still showing 100 %
+HP from the snapshot taken before the block. See
+`docs/reviews/2026-08-07-chicken-starvation-death/`.
+
+The field is `verdict`, **not** `kind`: the writer merges fields over an
+envelope that already owns `kind`, so a field by that name would rename
+the event out of the log it exists to appear in. The positional-only
+`kind` parameter stops the collision being silent at the call; it does
+not stop this one.
+
+### `watchdog.fired`
+
+The out-of-process chicken watchdog (`pd2bot.watchdog`) pressed ESC:
+`reason`, `pct`, `hp`, `max_hp`. Emitted by the BOT when it first sees
+the watchdog's latch — so one artifact holds both processes' account of
+the moment.
+
+Its companion is the narration: an open ESC menu out of town used to
+mean "the operator took the controls", and after a watchdog fire that
+would be the only, and false, record of what happened.
+
 ## Reading a run
 
 Beyond the timeline, `--pickup` prints the pickup census — wanted

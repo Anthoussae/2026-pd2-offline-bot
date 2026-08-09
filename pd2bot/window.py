@@ -18,8 +18,26 @@ from ctypes import wintypes
 from dataclasses import dataclass
 
 user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
 
 _SW_RESTORE = 9  # ShowWindow: un-minimize without changing a normal window
+_VK_MENU = 0x12  # ALT: inert alone, which is why it is the keystroke used
+_KEYEVENTF_KEYUP = 0x0002
+
+
+def _send_inert_keystroke() -> None:
+    """One ALT down/up, to qualify this process for a focus request.
+
+    Deliberately NOT routed through `input.py`'s gate: that gate exists to
+    stop input reaching the GAME by accident, and this keystroke is aimed
+    at whatever currently has focus precisely so that it does not. Sending
+    it through the gate would be a category error — and would deadlock the
+    bootstrap, since the gate requires the foreground we are trying to get.
+    """
+    user32.keybd_event(_VK_MENU, 0, 0, 0)
+    time.sleep(0.02)
+    user32.keybd_event(_VK_MENU, 0, _KEYEVENTF_KEYUP, 0)
+    time.sleep(0.02)
 
 
 class WindowNotFound(RuntimeError):
@@ -92,8 +110,59 @@ class GameWindow:
         Windows is allowed to refuse focus stealing, so the result is
         verified with GetForegroundWindow rather than assumed — callers must
         treat False as "do not send input".
+
+        Two attempts, because the polite one has a documented blind spot:
+        `SetForegroundWindow` only obeys a process that already owns the
+        foreground or the most recent input. That is every interactive run
+        (the operator is clicking around, and the click that starts the bot
+        is itself the qualifying input) and NO unattended one — a run
+        launched through the elevated bridge is a background child that has
+        never been foreground and never received input, so its request is
+        silently dropped. Found 2026-08-07, when the unattended safety
+        canary could not take the window at all.
         """
         user32.ShowWindow(self.hwnd, _SW_RESTORE)
         user32.SetForegroundWindow(self.hwnd)
+        time.sleep(settle_seconds)
+        if self.is_foreground():
+            return True
+        return self.force_foreground(settle_seconds)
+
+    def force_foreground(self, settle_seconds: float = 0.3) -> bool:
+        """The escalation: qualify for focus, then ask again.
+
+        Two standard manoeuvres, both needed on different Windows builds:
+
+        1. **Send a synthetic ALT.** The foreground rules grant the request
+           of a process that received the last input event, so producing one
+           qualifies us. ALT is chosen because it is inert on its own — it
+           opens no menu without a following key, and it lands on whatever
+           is focused now (a terminal), never on the game.
+        2. **Attach to the foreground thread's input queue.** While two
+           threads share an input queue, either may set the foreground
+           window. Attaching is reversed in a `finally`: leaving threads
+           attached couples this process's input state to another
+           application's for the rest of its life.
+
+        Still verified rather than assumed, and still allowed to fail — a
+        locked workstation or a full-screen exclusive app on top will refuse
+        both, and "do not send input" remains the correct answer.
+        """
+        _send_inert_keystroke()
+        foreground = user32.GetForegroundWindow()
+        target_thread = user32.GetWindowThreadProcessId(foreground, None)
+        our_thread = kernel32.GetCurrentThreadId()
+        attached = False
+        try:
+            if target_thread and target_thread != our_thread:
+                attached = bool(
+                    user32.AttachThreadInput(our_thread, target_thread, True)
+                )
+            user32.ShowWindow(self.hwnd, _SW_RESTORE)
+            user32.BringWindowToTop(self.hwnd)
+            user32.SetForegroundWindow(self.hwnd)
+        finally:
+            if attached:
+                user32.AttachThreadInput(our_thread, target_thread, False)
         time.sleep(settle_seconds)
         return self.is_foreground()
