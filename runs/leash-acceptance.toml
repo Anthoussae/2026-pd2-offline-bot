@@ -1,0 +1,16 @@
+# The R241 P2 live acceptance: traverse Cold Plains to the Cave (the
+# area's one warp exit) with the operator's recorded line required.
+# deleted after the batch.
+name = "leash-acceptance"
+
+[[step]]
+name = "town_preamble"
+
+[[step]]
+name = "waypoint"
+dest = 3
+
+[[step]]
+name = "traverse"
+dest = 9
+line = true

@@ -161,6 +161,7 @@ def default_registry() -> StepRegistry:
             params=(
                 ParamSpec("dest", int),
                 ParamSpec("posture", str, required=False, default=None),
+                ParamSpec("line", bool, required=False, default=False),
             ),
         )
     )
