@@ -121,3 +121,19 @@ against and the user dropped it: *"I'm convinced it's unwise."*
 - BH label-geometry emulation for pile pickup — future option if the
   mandatory-pickup loop's measured results still disappoint.
 - Gold pickup rule; vendor SELLING (buy only, this plan).
+
+## Implementation notes (offline halves, 2026-08-09 session)
+
+- P1 complete `0236efe`; P2 offline `634be1c`; P3 offline `bf33d3f`;
+  P4 offline `51abbff`; P5 offline `2fd2e92`. 1221 tests, CI green.
+- Deviations of note: ClearRadiusStep did NOT get the leash (its anchor
+  + radius already bound it; recorded here rather than coupling two
+  route concepts); `require_line` is checked at first in-area tick, not
+  build time (the seed is unknowable earlier); mandatory orders skip
+  potions by design (item 5 owns potions); the walk-away cleanse
+  reuses maybe_cleanse's existing repel hygiene rather than a new
+  random-cardinal walk (it already walks away from wanted items).
+- LIVE BATCH still owed (standing mandate, R241 Q8): T84 Cold Plains
+  line + leash run; supervised berserk run (Q6); T85 + the buy chore +
+  pickit potion removal (Q5, same commit); the order-book pilot run +
+  census review. Merge to m6-countess only after the batch.

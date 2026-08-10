@@ -337,3 +337,17 @@ A new decision path emits, or it is a path nobody can debug. Call
 `runlog.event("namespace.thing", **fields)`, put spatial values through
 `mapframe.describe`, name items through the pickit's `ItemTable` with an
 honest `kind <n>` fallback, and add the kind to the table above.
+
+## Event kinds added by the combat & logistics bundle (2026-08-09, R241)
+
+- `route.stray` — the leash: distance/nearest/progress when the
+  character is beyond `[route] stray_subtiles` from the area's recorded
+  line; emitted on the crossing and ~5 s heartbeats while out, with
+  `returning` saying whether the posture policy allowed walking back.
+- `pickup.order_open` / `pickup.order_collected` / `pickup.order_gone`
+  / `pickup.order_abandoned` — the mandatory-pickup lifecycle (pilot
+  flag `mandatory_pickup` in a run file): every wanted non-potion drop
+  is booked, and every order ends in exactly one of the three closes,
+  with its accumulated ACTIVE pursuit seconds. The census reads these.
+- `town.restock` — (arrives with the live-gated Akara chore) potions
+  bought per type, with gold before/after.
