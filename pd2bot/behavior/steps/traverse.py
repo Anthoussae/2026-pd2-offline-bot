@@ -417,14 +417,16 @@ class TraverseStep(_PickupMixin):
         self._strayed = outside
         if not outside:
             return None
-        # The goal-off-line guard: when the EXIT itself lies at least as
-        # far off the line as we do, "return first" would walk AWAY from
-        # the goal and re-stray on the next leg, forever — the line ends
-        # somewhere and the staircase is beyond it. The leash exists to
-        # undo combat drift, not to forbid finishing the route.
+        # The goal-off-line guard: returning is only sane when the line's
+        # nearest point is no farther from the EXIT than we already are —
+        # perpendicular combat drift passes that test; standing past the
+        # line's end on the way to a staircase fails it, and yanking back
+        # there would oscillate forever. The leash undoes drift; it never
+        # forbids finishing the route.
         if self._exit is not None:
-            exit_stray = line.stray_from(self._exit)
-            if exit_stray.distance >= stray.distance - threshold:
+            to_exit_from_here = _chebyshev(origin, self._exit)
+            to_exit_from_line = _chebyshev(stray.nearest, self._exit)
+            if to_exit_from_line > to_exit_from_here + threshold:
                 return None
         if not self._return_allowed(snap):
             return None
