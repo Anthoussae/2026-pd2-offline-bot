@@ -129,3 +129,17 @@ def test_require_line_with_none_recorded_stops_loudly():
         assert "t84_record_line" in str(exc)
     else:
         raise AssertionError("a required, missing line did not stop the run")
+
+
+def test_a_goal_off_the_line_is_not_leashed_away_from():
+    # The oscillation guard: the exit at (1060, 1000)... with a line that
+    # ends far from it, walking to the exit necessarily strays — the
+    # leash must yield to the goal instead of yanking back forever.
+    clock = Clock()
+    offline_goal = RouteLine(0xBEEF, 1, 20, [(900, 1200), (940, 1200)])
+    step, world, executor, log, tick, _ = leashed(clock, line=offline_goal)
+    world["pos"] = (1000, 1050)  # 150 off the line; the exit is further
+    tick()
+    moves = [a for a in executor.actions if isinstance(a, MoveTo)]
+    # The leg heads EXITWARD (east/up), not to the line (west/south).
+    assert moves and moves[-1].target[0] > 1000
