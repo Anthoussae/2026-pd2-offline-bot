@@ -39,6 +39,9 @@ class RunServices:
     # None. None for the whole field = no leash anywhere (sims, tests,
     # pre-leash wiring) — every consumer must tolerate that.
     route_line_for: Callable[[int], object | None] | None = None
+    # Mandatory pickup orders (R241 item 7): an OrderBook, or None when
+    # the pilot flag is off (the default — Cold Plains pilots it first).
+    order_book: object | None = None
     # Leash numbers, threaded from ClassConfig.route at wiring time.
     route_stray_subtiles: float = 12.0
     route_return_hostile_radius: int = 12

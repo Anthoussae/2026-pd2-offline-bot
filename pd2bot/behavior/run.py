@@ -64,6 +64,9 @@ class RunStep:
 class RunDefinition:
     name: str
     steps: tuple[RunStep, ...]
+    # The mandatory-pickup pilot flag (R241 item 7): per-run, default
+    # off. Cold Plains pilots it; the census gate promotes it further.
+    mandatory_pickup: bool = False
 
     def with_radius(self, radius: int) -> RunDefinition:
         """A copy whose `clear_radius` steps use `radius` instead.
@@ -232,7 +235,7 @@ def load_run(path: str | Path, registry: StepRegistry) -> RunDefinition:
         data = tomllib.load(fh)
     where = path.name
 
-    unknown = sorted(set(data) - {"name", "step"})
+    unknown = sorted(set(data) - {"name", "step", "mandatory_pickup"})
     if unknown:
         raise RunError(
             f"{where}: unknown top-level key(s) {', '.join(map(repr, unknown))}"
@@ -240,6 +243,9 @@ def load_run(path: str | Path, registry: StepRegistry) -> RunDefinition:
     name = data.get("name")
     if not isinstance(name, str) or not name:
         raise RunError(f"{where}: a run needs a non-empty string 'name'")
+    mandatory_pickup = data.get("mandatory_pickup", False)
+    if not isinstance(mandatory_pickup, bool):
+        raise RunError(f"{where}: mandatory_pickup must be true or false")
     raw_steps = data.get("step")
     if not isinstance(raw_steps, list) or not raw_steps:
         raise RunError(f"{where}: a run needs at least one [[step]]")
@@ -254,7 +260,9 @@ def load_run(path: str | Path, registry: StepRegistry) -> RunDefinition:
             step_name, {k: v for k, v in raw.items() if k != "name"}, spec, where
         )
         steps.append(RunStep(name=step_name, params=params))
-    return RunDefinition(name=name, steps=tuple(steps))
+    return RunDefinition(
+        name=name, steps=tuple(steps), mandatory_pickup=mandatory_pickup
+    )
 
 
 def build_states(run: RunDefinition, registry: StepRegistry) -> list[StepState]:

@@ -272,6 +272,13 @@ class TraverseStep(_PickupMixin):
         # still.
         if self.maybe_cleanse(snap, ctx):
             return StepOutcome(done=False, acted=True, note="inventory cleansed")
+        # Mandatory orders (R241 item 7): below combat and the pickups
+        # above, ABOVE onward travel — a wanted drop left behind pulls the
+        # step back before it walks on toward the exit. None when the
+        # pilot flag is off or nothing is owed.
+        order_outcome = self.service_orders(snap, ctx)
+        if order_outcome is not None:
+            return order_outcome
         scan = self._locate_exit(here, origin)
         if self._exit is None:
             if scan is None:

@@ -44,6 +44,7 @@ from pd2bot.behavior.reflex import ReflexLadder, read_armor_ratio
 from pd2bot.behavior.run import build_states, default_registry, load_run
 from pd2bot.behavior.runner import BehaviorRunner
 from pd2bot.behavior.steps import RunServices, build_registry
+from pd2bot.behavior.steps.orders import OrderBook
 from pd2bot.behavior.town import PreambleReport, TownConfig, TownLayer
 from pd2bot.cycle import GameCycle
 from pd2bot.input.chat import Chat
@@ -566,6 +567,8 @@ class LiveBot:
         )
         registry = build_registry(services)
         run = load_run(self.paths.run, registry)
+        if run.mandatory_pickup:
+            services.order_book = OrderBook()
         if self.radius_override is not None:
             run = run.with_radius(self.radius_override)
         return BehaviorEngine(

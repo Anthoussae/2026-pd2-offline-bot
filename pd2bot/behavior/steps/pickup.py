@@ -13,7 +13,7 @@ from pd2bot.behavior.actions import (
     MoveTo,
     PickUpItem,
 )
-from pd2bot.behavior.engine import EngineContext
+from pd2bot.behavior.engine import EngineContext, StepOutcome
 from pd2bot.behavior.steps.services import RunServices
 from pd2bot.behavior.steps.util import (
     _chebyshev,
@@ -124,6 +124,29 @@ class _PickupMixin:
             elif self.services.inventory_full:
                 continue
             found.append(item)
+        # Mandatory orders (R241 item 7): every wanted sighting is booked
+        # so it cannot be silently forgotten. Booked even when the
+        # inventory is full or the belt refuses — those states pass and
+        # the order remains; the pilot flag gates whether anything ever
+        # SERVICES the book. Non-potions only: potions come from Akara
+        # once the restock chore lands, and a mandatory order chasing a
+        # potion is the time sink item 5 exists to remove.
+        if self.services.order_book is not None:
+            now = self.services.clock()
+            for item in found:
+                if potion_type_of(item) is not None:
+                    continue
+                new = self.services.order_book.sight(
+                    item.unit_id, item.kind, item.position, now
+                )
+                if new is not None:
+                    self.services.runlog.event(
+                        "pickup.order_open",
+                        unit_id=item.unit_id,
+                        kind=item.kind,
+                        item=self._logged_name(item.kind),
+                        position=list(item.position),
+                    )
         return found
 
     @staticmethod
@@ -170,6 +193,17 @@ class _PickupMixin:
                     del self.services.pending_pickup[unit_id]
                 continue
             del self.services.pending_pickup[unit_id]
+            # A verified collection closes any mandatory order on it —
+            # BEFORE the reap loop can mistake the empty floor for expiry.
+            if self.services.order_book is not None:
+                closed = self.services.order_book.collected(unit_id)
+                if closed is not None:
+                    self.services.runlog.event(
+                        "pickup.order_collected",
+                        unit_id=unit_id,
+                        kind=kind,
+                        active_s=round(closed.active_s, 1),
+                    )
             frame = self.services.frame() if self.services.frame else None
             self.services.runlog.event(
                 "item.collected",
@@ -811,3 +845,101 @@ class _PickupMixin:
 
 
 
+
+    # -- mandatory pickup orders (R241 item 7) ---------------------------------
+
+    def service_orders(
+        self, snap: GameSnapshot, ctx: EngineContext
+    ) -> StepOutcome | None:
+        """One tick of pursuing the oldest open PickupOrder, or None.
+
+        Called only on ticks combat declined (the priority contract:
+        combat and the ladder outrank orders; orders outrank onward
+        travel). The flow per tick, first branch that applies:
+
+        1. reap — an order whose position is comfortably inside
+           perception with no such unit on the floor is CLOSED (gone:
+           T51 expiry, or scooped during an earlier pile grab);
+        2. budget — next_order() closes an over-budget order; log it;
+        3. cleanse — inventory full defers to maybe_cleanse (which
+           already walks away from wanted items before dropping);
+        4. collect — in reach of the target: run the click schedule;
+        5. return — otherwise walk one leg back toward the order.
+        """
+        from pd2bot.behavior.steps.util import _route_leg
+
+        book = self.services.order_book
+        if book is None or snap.player is None or snap.in_town:
+            return None
+        now = self.services.clock()
+        origin = snap.player.position
+
+        on_ground = {g.unit_id for g in snap.ground_items}
+        for order in book.pending():
+            near = _chebyshev(order.position, origin) <= 25
+            if near and order.unit_id not in on_ground:
+                book.gone(order.unit_id)
+                self.services.runlog.event(
+                    "pickup.order_gone",
+                    unit_id=order.unit_id, kind=order.kind,
+                    position=list(order.position),
+                    active_s=round(order.active_s, 1),
+                )
+
+        order = book.next_order(now)
+        if order is None:
+            return None
+        if order.state == "budget":
+            self.services.runlog.event(
+                "pickup.order_abandoned",
+                unit_id=order.unit_id, kind=order.kind,
+                position=list(order.position),
+                active_s=round(order.active_s, 1),
+            )
+            self.services.alert(
+                f"pickup order written off after {order.active_s:.0f}s: "
+                f"kind {order.kind} at {order.position}"
+            )
+            return None  # re-decide next tick; the next order gets its turn
+
+        book.service_tick(order, now)
+
+        # Inventory full: the cleanse is the unblock, and its own hygiene
+        # already walks AWAY from wanted items before dropping junk.
+        if self.services.inventory_full and self.maybe_cleanse(snap, ctx):
+            return StepOutcome(
+                done=False, acted=True,
+                note=f"order {order.unit_id}: cleansing to make room",
+            )
+
+        target = next(
+            (g for g in snap.ground_items if g.unit_id == order.unit_id), None
+        )
+        if target is not None and _chebyshev(
+            target.position, origin
+        ) <= self.services.pickup_radius:
+            if self.collect(snap, ctx, target):
+                return StepOutcome(
+                    done=False, acted=True,
+                    note=f"order {order.unit_id}: collecting",
+                )
+            # The schedule is pacing/spent this tick; let the tick pass.
+            return StepOutcome(
+                done=False, acted=False, waiting=True,
+                note=f"order {order.unit_id}: pickup pacing",
+            )
+
+        leg = _route_leg(self.services, origin, order.position)
+        if leg is None:
+            # No route right now (atlas gap): costs the order nothing —
+            # active time was already booked; try again next tick.
+            return StepOutcome(
+                done=False, acted=False, waiting=True,
+                note=f"order {order.unit_id}: no route back yet",
+            )
+        landed = self.send(ctx, MoveTo(leg))
+        return StepOutcome(
+            done=False, acted=True,
+            note=f"order {order.unit_id}: returning via {leg}"
+            + ("" if landed else " (walk refused)"),
+        )
