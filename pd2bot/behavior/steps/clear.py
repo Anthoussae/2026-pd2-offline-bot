@@ -156,6 +156,12 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
         return self._centre
 
     def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
+        if not getattr(self, "_order_diag_done", False):
+            self._order_diag_done = True
+            self.services.runlog.event(
+                "pickup.order_book_diag",
+                armed=self.services.order_book is not None,
+            )
         if self.posture is not None and not self._posture_applied:
             # First tick: fight this step in its declared posture. The
             # module keeps all its bookkeeping across the swap — a
