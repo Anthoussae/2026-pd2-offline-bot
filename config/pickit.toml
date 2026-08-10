@@ -25,19 +25,12 @@
 # (T39 placement drill). A rule naming a pending item loads fine and
 # matches nothing until the drill fills the id in.
 
-# -- potions (R118 Q1: belt first, then a reserve of 2 per type) ---------------
-
-[[rule]]
-name = "healing potions to belt and reserve"
-kinds = ["healing_potion"]
-potion_reserve = 2
-action = "belt"
-
-[[rule]]
-name = "mana potions to belt and reserve"
-kinds = ["mana_potion"]
-potion_reserve = 2
-action = "belt"
+# -- potions -------------------------------------------------------------------
+# Healing and mana potions are NO LONGER picked up (R241, 2026-08-10):
+# the Akara restock station buys them in town (live-proven: "bought 3
+# healing, 2 mana"), and chasing tiny potion sprites on the ground was a
+# measured time sink. REJUVS ARE THE EXCEPTION and stay: they cannot be
+# bought (R47.6), so the ground is their only source.
 
 [[rule]]
 name = "rejuvs to belt and reserve"

@@ -95,10 +95,13 @@ def test_the_shipped_pickit_resolves_every_name_it_uses():
 
 
 def test_shipped_potion_rules_fire_on_verified_ids():
+    """R241: healing/mana come from the Akara restock now, not the
+    ground — their pickup rules are gone. Rejuvs stay: they cannot be
+    bought (R47.6), so the ground remains their only source."""
     pickit = load_pickit(SHIPPED)
     empty = carried_with()
-    assert pickit.decide(item(HEAL), empty)[0] == "belt"
-    assert pickit.decide(item(MANA), empty)[0] == "belt"
+    assert pickit.decide(item(HEAL), empty)[0] == "skip"
+    assert pickit.decide(item(MANA), empty)[0] == "skip"
     assert pickit.decide(item(REJUV), empty)[0] == "belt"
 
 
