@@ -274,3 +274,5 @@ headings, noted in parentheses, say roughly where they fell).
 - R239 resolved (now + all yes; 7-phase md plan, branch restructure) · 2026-08-09 05:06
 - R240 [execute] Clear the client for the restructure smoke run · 2026-08-09 05:33
 - R240 resolved (go; smoke PASSED, restructure merged 410b7b1) · 2026-08-09 06:35
+- R241 [decision] Combat & logistics plan: confirmations Q1–Q8 + phase table · 2026-08-09 21:37
+- R241 resolved (all yes + Q4 stock-cells refinement; md plan P1–P6, branch combat-logistics) · 2026-08-09 21:44
