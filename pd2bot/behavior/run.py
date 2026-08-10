@@ -132,6 +132,12 @@ def default_registry() -> StepRegistry:
     registry = StepRegistry()
     registry.register(StepSpec("town_preamble"))
     registry.register(
+        StepSpec(
+            "deplete_belt",  # TEST FIXTURE (R241); must mirror build_registry
+            params=(ParamSpec("count", int, required=False, default=3),),
+        )
+    )
+    registry.register(
         StepSpec("waypoint", params=(ParamSpec("dest", int),))
     )
     registry.register(

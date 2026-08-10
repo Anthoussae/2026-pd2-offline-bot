@@ -23,7 +23,10 @@ from pd2bot import offsets
 from pd2bot.input.gated import VK_DOWN, VK_RETURN
 from pd2bot.perception.items import VendorPotion, read_carried_items
 
-CALIBRATION_PATH = Path(__file__).resolve().parents[2] / "config" / "shop_calibration.json"
+# restock.py is REPO/pd2bot/behavior/town/restock.py, so the repo root
+# is parents[3] — NOT parents[2] (that is pd2bot/, which has no config/;
+# the first live run skipped every buy because of the off-by-one).
+CALIBRATION_PATH = Path(__file__).resolve().parents[3] / "config" / "shop_calibration.json"
 # Akara's Trade row is discovered by probing (her menu differs from
 # Charsi's and is not otherwise recorded); the search never exceeds this.
 MAX_DIALOG_ROWS = 6

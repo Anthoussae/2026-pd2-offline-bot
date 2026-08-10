@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from pd2bot import offsets
 from pd2bot.behavior.actions import (
+    DrinkPotion,
     MoveTo,
 )
 from pd2bot.behavior.engine import EngineContext, StepOutcome
@@ -201,3 +202,43 @@ class DoneStep:
 
 
 
+
+
+@dataclass
+class DepleteBeltStep:
+    """TEST FIXTURE (R241): drink `count` healing potions to depress the
+    belt below its minimum, so a following town_preamble's restock
+    station has something to buy. Not for real runs — a run that names
+    it is a restock acceptance run. Each tick drinks one healing belt
+    column until `count` have gone (measured by the belt count falling)
+    or no healing potion remains in the belt.
+    """
+
+    services: RunServices
+    count: int = 3
+    name: str = "deplete_belt"
+    _start: int | None = None
+    _drunk: int = 0
+
+    def _belt_healing(self, snap: GameSnapshot) -> list:
+        carried = self.services.carried()
+        return [i for i in carried.belt if i.is_healing_potion]
+
+    def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
+        healing = self._belt_healing(snap)
+        if self._start is None:
+            self._start = len(healing)
+        drunk = self._start - len(healing)
+        if drunk >= self.count or not healing:
+            return StepOutcome(
+                done=True,
+                note=f"depleted {drunk} healing potion(s) from the belt",
+            )
+        column = healing[0].belt_column
+        if column is None:
+            return StepOutcome(done=True, note="no belt column to drink from")
+        ctx.executor.execute(DrinkPotion(column=column, potion_type="healing"))
+        return StepOutcome(
+            done=False, acted=True, waiting=True,
+            note=f"drinking healing (belt key {column + 1}), {drunk}/{self.count}",
+        )
