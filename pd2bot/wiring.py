@@ -569,6 +569,7 @@ class LiveBot:
         run = load_run(self.paths.run, registry)
         if run.mandatory_pickup:
             services.order_book = OrderBook()
+            runlog.event("pickup.orders_armed", run=run.name)
         if self.radius_override is not None:
             run = run.with_radius(self.radius_override)
         return BehaviorEngine(

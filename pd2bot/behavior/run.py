@@ -91,7 +91,10 @@ class RunDefinition:
                 f"--radius {radius} has nothing to apply to: run "
                 f"{self.name!r} has no clear_radius step"
             )
-        return RunDefinition(name=self.name, steps=steps)
+        return RunDefinition(
+            name=self.name, steps=steps,
+            mandatory_pickup=self.mandatory_pickup,  # must survive the copy
+        )
 
     @property
     def radius(self) -> int | None:

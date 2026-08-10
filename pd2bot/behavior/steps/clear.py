@@ -306,6 +306,12 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
         if self._empty_since is None:
             self._empty_since = now
             return StepOutcome(done=False, acted=True, note="radius reads clear")
+        # Mandatory orders (R241 item 7): with the field clear, pursue any
+        # pending wanted drop before declaring the radius done — an order
+        # outlives the clearance, and this is the free time to satisfy it.
+        order_outcome = self.service_orders(snap, ctx)
+        if order_outcome is not None:
+            return order_outcome
         if now - self._empty_since >= self.services.clear_settle_s:
             # Say when "clear" means "clear except for the ones we gave up
             # on". A step that finishes with monsters still standing is the
