@@ -99,7 +99,11 @@ class _RestockMixin:
             return
 
         player = self._read_player(self.session)
-        gold = player.gold if player is not None else 0
+        # The user confirms vendor purchases can draw STASH gold, not just
+        # carried (2026-08-10); affordability is the sum. If a buy does not
+        # register, the belt-count verify in _buy_until is the backstop —
+        # bounded attempts, no runaway spend.
+        gold = (player.gold + player.gold_stash) if player is not None else 0
         if gold <= RESTOCK_GOLD_FLOOR:
             report.log.append(f"restock: gold {gold} at/under floor, skipped")
             return
@@ -149,7 +153,8 @@ class _RestockMixin:
             if bought >= need:
                 break
             player = self._read_player(self.session)
-            if player is not None and player.gold <= RESTOCK_GOLD_FLOOR:
+            spendable = (player.gold + player.gold_stash) if player is not None else 0
+            if spendable <= RESTOCK_GOLD_FLOOR:
                 self._narrate(f"restock: gold floor reached buying {potion_type}")
                 break
             want = start + bought + 1
