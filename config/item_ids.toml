@@ -115,6 +115,13 @@ runes = [
   "gul_rune", "vex_rune", "ohm_rune", "lo_rune", "sur_rune", "ber_rune",
   "jah_rune", "cham_rune", "zod_rune",
 ]
+# Ranks 1-12 (El..Sol), the R241 skip list. Each name binds BOTH the
+# plain and PD2 stackable codes (see item_ids.learned.toml: r01+r01s),
+# so a skip rule on this group covers both variants.
+runes_low = [
+  "el_rune", "eld_rune", "tir_rune", "nef_rune", "eth_rune", "ith_rune",
+  "tal_rune", "ral_rune", "ort_rune", "thul_rune", "amn_rune", "sol_rune",
+]
 charms = ["small_charm", "large_charm", "grand_charm"]
 jewelry = ["jewel", "ring", "amulet"]
 necro_heads = [

@@ -88,7 +88,9 @@ armor_skill = "bone_armor"
 
 # Rung 5 — healing potion: below this hp%, drink a healing column, at
 # most once per heal_cooldown_s. The second healing column is the backup.
-heal_below_pct = 100.0
+# 75 is the R241 choice: drink when meaningfully hurt, not to top up
+# after every scratch (was 100.0 until 2026-08-09).
+heal_below_pct = 75.0
 heal_cooldown_s = 10.0
 
 # Rung 6 — mana potion: below this mana%, at most once per

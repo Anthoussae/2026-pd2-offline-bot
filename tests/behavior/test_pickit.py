@@ -120,12 +120,36 @@ def test_shipped_cleanse_is_now_enabled_and_recognises_keepers():
     assert not keep(carried(4242))                          # unknown = junk
 
 
-def test_shipped_cleanse_drops_plain_socket_rule_bases():
-    """The R132 gap, against the file the bot actually runs.
+def test_shipped_low_runes_skipped_high_runes_kept():
+    """The R241 rune policy, against the file the bot actually runs.
 
-    `necro_heads` and `archon_plate` appear in the shipped pickit ONLY
-    under socket conditions (3, and 3-4). Every one of them used to be
-    kept and stashed regardless — the clutter this fix removes.
+    Ranks 1-12 (El..Sol) are skipped — in BOTH the plain and PD2
+    stackable variants, since each rune name binds both codes — while
+    Shael (rank 13) and up stay kept.
+    """
+    pickit = load_pickit(SHIPPED)
+    table = load_item_table(SHIPPED_TABLE)
+
+    sol_plain, sol_stack = table.ids["sol_rune"]
+    el_plain, el_stack = table.ids["el_rune"]
+    shael = table.ids["shael_rune"][0]
+    zod = table.ids["zod_rune"][0]
+
+    for kind in (el_plain, el_stack, sol_plain, sol_stack):
+        assert pickit.decide(item(kind))[0] == "skip"
+    for kind in (shael, zod):
+        assert pickit.decide(item(kind))[0] == "keep"
+
+
+def test_shipped_cleanse_drops_plain_socket_rule_bases():
+    """Archon plates are no longer kept at ANY socket count.
+
+    History: the R132 gap made socket-conditioned rules honored by the
+    cleanse (that mechanism is pinned below by
+    test_socket_rules_match_on_socket_count against an inline config).
+    The shipped socket rules themselves were removed 2026-08-09 (R241,
+    user decision — T38 never ran, so they had matched nothing), so the
+    shipped file now drops these bases regardless of sockets.
     """
     keep = cleanse_keep(load_pickit(SHIPPED))
     table = load_item_table(SHIPPED_TABLE)
@@ -136,10 +160,8 @@ def test_shipped_cleanse_drops_plain_socket_rule_bases():
                            (0, 0), 1, sockets=sockets)
 
     plate = table.ids["archon_plate"][0]
-    assert keep(carried(plate, 3))
-    assert keep(carried(plate, 4))
-    assert not keep(carried(plate, 0))
-    assert not keep(carried(plate, 2))
+    for socket_count in (0, 2, 3, 4):
+        assert not keep(carried(plate, socket_count))
 
 
 def test_cleanse_disabled_while_names_are_pending(tmp_path):

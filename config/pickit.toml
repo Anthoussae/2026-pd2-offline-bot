@@ -52,6 +52,14 @@ name = "flawless and perfect gems and skulls"
 kinds = ["gems_flawless_perfect"]
 action = "keep"
 
+# Low runes (El..Sol, plain AND stackable) are deliberately left on the
+# ground (R241): cheap, common, and the single worst pickup targets.
+# The skip must sit ABOVE "all runes" — first match wins.
+[[rule]]
+name = "skip low runes (El-Sol)"
+kinds = ["runes_low"]
+action = "skip"
+
 [[rule]]
 name = "all runes"
 kinds = ["runes"]
@@ -106,19 +114,9 @@ kinds = [
 qualities = ["unique"]
 action = "keep"
 
-# -- socketed bases (held back until T38 verifies the socket read) -------------
-
-[[rule]]
-name = "3-socket necro heads"
-kinds = ["necro_heads"]
-sockets = [3]
-action = "keep"
-
-[[rule]]
-name = "3- and 4-socket archon plate"
-kinds = ["archon_plate"]
-sockets = [3, 4]
-action = "keep"
+# (The 3-socket necro head and 3/4-socket Archon Plate rules were
+# removed 2026-08-09 at the user's request, R241 — T38 never ran, so
+# they had matched nothing since the day they were written.)
 
 # -- set bases -----------------------------------------------------------------
 
