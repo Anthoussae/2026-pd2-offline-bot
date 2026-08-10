@@ -68,21 +68,35 @@ def t85_body(run: DrillRun) -> str:
     # the geometry the operator hovers.
     stock = read_vendor_stock(session, akara)
     kinds = ", ".join(sorted({p.potion_type for p in stock})) or "none read"
-    run.say(f"Akara stocks: {len(stock)} potion(s) [{kinds}].", patience_s=2.5)
+    run.say(f"Akara stocks: {len(stock)} potion(s) [{kinds}].", patience_s=1.0)
 
+    print(
+        "  HOVER ORDER (relayed to the operator out of band): "
+        "(1) top-left cell (0,0), (2) top-right cell (3,0), "
+        "(3) bottom-left cell (0,4). Move the cursor OFF between each; "
+        "hold ~3s on each.",
+        flush=True,
+    )
     samples: dict[tuple[int, int], tuple[int, int]] = {}
+    previous: tuple[int, int] | None = None
     for cell in SAMPLE_CELLS:
-        run.say(
-            f"Hover cell (col {cell[0]}, row {cell[1]}) centre; hold still.",
-            patience_s=3.0,
-        )
-        pos = _await_still_cursor(run)
+        pos = _await_distinct_still_cursor(run, previous)
         samples[cell] = pos
+        previous = pos
         print(f"  cell {cell}: cursor at {pos}", flush=True)
 
     origin, cell_size = _derive_grid(samples)
     worst = _cross_check(samples, origin, cell_size)
-    verdict = "PASS" if worst <= TOLERANCE_PX else "RE-MEASURE"
+    # A degenerate grid (cells coincide) is a FAIL, never a vacuous PASS:
+    # the third T85 run "passed" at 0px because all three reads were the
+    # same point (cell size 0,0) — the operator saw no prompt and never
+    # moved. A real shop grid has cells at least a few px apart.
+    degenerate = abs(cell_size[0]) < 4 or abs(cell_size[1]) < 4
+    verdict = (
+        "RE-MEASURE (degenerate grid — cells coincide)" if degenerate
+        else "PASS" if worst <= TOLERANCE_PX
+        else "RE-MEASURE"
+    )
     rect = run.window.client_rect()
     fo = (origin[0] / rect.width, origin[1] / rect.height)
     fs = (cell_size[0] / rect.width, cell_size[1] / rect.height)
@@ -92,7 +106,7 @@ def t85_body(run: DrillRun) -> str:
         f"worst cross-check {worst:.1f}px -> {verdict}"
     )
     print(f"\n  {summary}", flush=True)
-    run.say(f"T85 {verdict} — {summary}", patience_s=10.0)
+    run.say(f"T85 {verdict} — {summary}", patience_s=1.0)
     return summary
 
 
@@ -145,18 +159,30 @@ def _find_akara(run: DrillRun) -> int | None:
     return None
 
 
-def _await_still_cursor(run: DrillRun) -> tuple[int, int]:
-    """Block until the cursor holds one spot for STILL_SAMPLES polls,
-    then return it (the T25 hover-capture idiom, inline)."""
+MIN_MOVE_PX = 12  # a new capture must sit this far from the last one
+
+
+def _await_distinct_still_cursor(
+    run: DrillRun, previous: tuple[int, int] | None
+) -> tuple[int, int]:
+    """Block until the cursor holds one spot for STILL_SAMPLES polls AND
+    that spot is >= MIN_MOVE_PX from the previous capture — so three
+    hovers cannot collapse into one reading (the vacuous-PASS bug)."""
     last = None
     held = 0
-    while held < STILL_SAMPLES:
+    while True:
         run.check_cancel()
         pos = run.cursor()
         held = held + 1 if pos == last else 0
         last = pos
+        if held >= STILL_SAMPLES:
+            if previous is None or (
+                abs(pos[0] - previous[0]) >= MIN_MOVE_PX
+                or abs(pos[1] - previous[1]) >= MIN_MOVE_PX
+            ):
+                return pos
+            held = 0  # settled, but on the SAME cell — wait for a move
         time.sleep(STILL_POLL_S)
-    return last
 
 
 def _akara_unit(run: DrillRun) -> int:  # kept for reference; superseded by _await_shop_open
