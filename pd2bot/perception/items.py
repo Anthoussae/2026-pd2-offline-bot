@@ -186,12 +186,15 @@ class CarriedItems:
         return sum(1 for i in self.belt if i.is_rejuv_potion)
 
 
-def _iter_carried_units(session: GameSession) -> Iterator[int]:
-    """Walk the player's inventory chain, bounded against torn reads."""
-    player = player_unit(session)
-    if player is None:
-        return
-    inventory = session.ptr(player + offsets.UNIT_INVENTORY)
+def _iter_inventory_units(session: GameSession, owner: int) -> Iterator[int]:
+    """Walk ANY unit's inventory chain, bounded against torn reads.
+
+    The player's items and a vendor's stock live in the same structure
+    hung off the owning unit — the player for the inventory/belt, an NPC
+    for its shop (R241). `_iter_carried_units` is this pointed at the
+    player; `read_vendor_stock` points it at the NPC.
+    """
+    inventory = session.ptr(owner + offsets.UNIT_INVENTORY)
     if inventory is None:
         return
     try:
@@ -207,6 +210,14 @@ def _iter_carried_units(session: GameSession) -> Iterator[int]:
             unit = session.ptr(data + offsets.ITEM_NEXT_INV) if data else None
         except Exception:
             return  # a freed item mid-walk ends the walk, same as units.py
+
+
+def _iter_carried_units(session: GameSession) -> Iterator[int]:
+    """The player's own inventory chain (the common case)."""
+    player = player_unit(session)
+    if player is None:
+        return
+    yield from _iter_inventory_units(session, player)
 
 
 def _read_carried(session: GameSession, unit: int) -> CarriedItem | None:
@@ -357,3 +368,52 @@ def read_carried_items(
 # a D2COMMON structure this module has no verified offsets for. P3's stash
 # guardrail verifies deposits by watching this list shrink instead
 # (plan: docs/archive/plans/2026-07-29-m5-trial-run/01-perception-extensions.md).
+
+
+@dataclass(frozen=True)
+class VendorPotion:
+    """One potion a vendor is selling: its type and its grid cell.
+
+    Cell is READ FRESH each visit (R241 Q4 — the user's point): the
+    shop's layout is not assumed stable, so the buy chore must aim at
+    where this potion actually is on this occasion. The cell is the
+    click's INPUT; the panel's grid geometry (origin + cell size) is the
+    one thing calibrated, in T85.
+    """
+
+    unit_id: int
+    kind: int
+    potion_type: str  # "healing" / "mana" / "rejuv"
+    cell: tuple[int, int]  # (column, row) within the shop grid
+
+
+def read_vendor_stock(session: GameSession, npc_unit: int) -> list[VendorPotion]:
+    """The potions a vendor NPC currently sells, with their grid cells.
+
+    Reads the NPC's own inventory chain (the same structure the player's
+    items hang off). Non-potions are ignored — this chore only buys
+    potions. Best-effort per item: a torn read drops that one, never the
+    whole stock.
+    """
+    from pd2bot.pickit import potion_type_of
+
+    stock: list[VendorPotion] = []
+    for unit in _iter_inventory_units(session, npc_unit):
+        try:
+            item = _read_carried(session, unit)
+        except Exception:
+            item = None
+        if item is None:
+            continue
+        ptype = potion_type_of(item)
+        if ptype is None:
+            continue
+        stock.append(
+            VendorPotion(
+                unit_id=item.unit_id,
+                kind=item.kind,
+                potion_type=ptype,
+                cell=item.position,  # grid (col, row) for a stored item
+            )
+        )
+    return stock
