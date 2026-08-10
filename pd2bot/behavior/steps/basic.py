@@ -216,29 +216,34 @@ class DepleteBeltStep:
 
     services: RunServices
     count: int = 3
+    potion: str = "healing"  # "healing" | "mana" — which type to deplete
     name: str = "deplete_belt"
     _start: int | None = None
-    _drunk: int = 0
 
-    def _belt_healing(self, snap: GameSnapshot) -> list:
+    def _belt_of_type(self) -> list:
         carried = self.services.carried()
-        return [i for i in carried.belt if i.is_healing_potion]
+        return [
+            i for i in carried.belt
+            if (i.is_healing_potion and self.potion == "healing")
+            or (i.is_mana_potion and self.potion == "mana")
+        ]
 
     def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
-        healing = self._belt_healing(snap)
+        remaining = self._belt_of_type()
         if self._start is None:
-            self._start = len(healing)
-        drunk = self._start - len(healing)
-        if drunk >= self.count or not healing:
+            self._start = len(remaining)
+        drunk = self._start - len(remaining)
+        if drunk >= self.count or not remaining:
             return StepOutcome(
                 done=True,
-                note=f"depleted {drunk} healing potion(s) from the belt",
+                note=f"depleted {drunk} {self.potion} potion(s) from the belt",
             )
-        column = healing[0].belt_column
+        column = remaining[0].belt_column
         if column is None:
             return StepOutcome(done=True, note="no belt column to drink from")
-        ctx.executor.execute(DrinkPotion(column=column, potion_type="healing"))
+        ctx.executor.execute(DrinkPotion(column=column, potion_type=self.potion))
         return StepOutcome(
             done=False, acted=True, waiting=True,
-            note=f"drinking healing (belt key {column + 1}), {drunk}/{self.count}",
+            note=f"drinking {self.potion} (belt key {column + 1}), "
+            f"{drunk}/{self.count}",
         )

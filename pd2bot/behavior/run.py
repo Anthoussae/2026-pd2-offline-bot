@@ -134,7 +134,10 @@ def default_registry() -> StepRegistry:
     registry.register(
         StepSpec(
             "deplete_belt",  # TEST FIXTURE (R241); must mirror build_registry
-            params=(ParamSpec("count", int, required=False, default=3),),
+            params=(
+                ParamSpec("count", int, required=False, default=3),
+                ParamSpec("potion", str, required=False, default="healing"),
+            ),
         )
     )
     registry.register(

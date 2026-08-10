@@ -53,8 +53,13 @@ def build_registry(services: RunServices) -> StepRegistry:
     registry.register(
         StepSpec(
             "deplete_belt",  # TEST FIXTURE (R241 restock acceptance)
-            params=(ParamSpec("count", int, required=False, default=3),),
-            factory=lambda p: DepleteBeltStep(services, count=p["count"]),
+            params=(
+                ParamSpec("count", int, required=False, default=3),
+                ParamSpec("potion", str, required=False, default="healing"),
+            ),
+            factory=lambda p: DepleteBeltStep(
+                services, count=p["count"], potion=p["potion"]
+            ),
         )
     )
     registry.register(

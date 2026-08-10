@@ -1,12 +1,17 @@
-# The R241 P4 live acceptance (self-contained): create a game, drink 3
-# healing potions to depress the belt below its minimum, then run the
-# town preamble — whose restock station buys them back from Akara —
-# and leave. One launch, no operator action. Scratch run.
+# The R241 P4 live acceptance (self-contained): drink 3 healing AND 2
+# mana potions to depress both belt minimums, then run the preamble —
+# whose restock station buys BOTH back from Akara — and leave.
 name = "restock-test"
 
 [[step]]
 name = "deplete_belt"
 count = 3
+potion = "healing"
+
+[[step]]
+name = "deplete_belt"
+count = 2
+potion = "mana"
 
 [[step]]
 name = "town_preamble"
