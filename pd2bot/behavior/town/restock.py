@@ -2,9 +2,10 @@
 
 Two halves: the pure planning (plan_purchases below, unit-tested) and
 the `_RestockMixin` station that drives it live — approach Akara, open
-her Trade screen (discovering the menu row once and caching it), then
-right-click the calibrated potion spot until the belt reaches its
-minimum, verifying every purchase by the belt count rising. The click
+her Trade screen (the akara.trade uipoint: Talk/Trade/Cancel, row 2,
+the shared dialog-row discipline), then right-click the calibrated
+potion spot until the belt reaches its minimum, verifying every
+purchase by the belt count rising. The click
 geometry is calibrated in T85c (config/shop_calibration.json); WHICH
 potion sits at a cell is read fresh each visit (the Q4 principle).
 
@@ -20,16 +21,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pd2bot import offsets
-from pd2bot.input.gated import VK_DOWN, VK_RETURN
+from pd2bot.behavior.town.config import TownError
 from pd2bot.perception.items import VendorPotion, read_carried_items
 
 # restock.py is REPO/pd2bot/behavior/town/restock.py, so the repo root
 # is parents[3] — NOT parents[2] (that is pd2bot/, which has no config/;
 # the first live run skipped every buy because of the off-by-one).
 CALIBRATION_PATH = Path(__file__).resolve().parents[3] / "config" / "shop_calibration.json"
-# Akara's Trade row is discovered by probing (her menu differs from
-# Charsi's and is not otherwise recorded); the search never exceeds this.
-MAX_DIALOG_ROWS = 6
 # Buying is bounded per type so a mis-verify cannot drain gold forever.
 MAX_BUYS_PER_TYPE = 12
 RESTOCK_GOLD_FLOOR = 5000
@@ -80,7 +78,6 @@ class _RestockMixin:
     """The Akara buy station. Composed into TownLayer; uses the shared
     town toolkit (open_npc_dialog, panel, config, _await, _narrate)."""
 
-    _trade_row: int | None = None  # cached across a session once found
 
     def restock_at_akara(self, report) -> None:
         """Fill the belt from Akara if it is short and she stocks it.
@@ -109,7 +106,16 @@ class _RestockMixin:
 
         self._begin_step()
         self.open_npc_dialog(offsets.NPC_AKARA, "Akara")
-        if not self._open_trade():
+        # Akara's Talk/Trade/Cancel menu, selected by the shared dialog-row
+        # discipline (the charsi.trade_repair pattern): row 2, verified by
+        # the shop panel opening. No hardcoding in the caller — the point
+        # carries the row, select_dialog_row does the keys.
+        try:
+            self.select_dialog_row(
+                self.point("akara.trade"),
+                lambda: self._panel_open(offsets.UI_NPCSHOP),
+            )
+        except TownError:
             self.close_panels()
             report.log.append("restock: could not open Akara's Trade — skipped")
             return
@@ -130,35 +136,6 @@ class _RestockMixin:
         report.log.append(f"restock: bought {summary}")
         # A residual shortfall after buying hands off to the existing
         # belt-minimum guard downstream (BeltBelowMinimum), unchanged.
-
-    def _open_trade(self) -> bool:
-        """Select Akara's Trade row, discovering it once by probing.
-
-        Her menu has no gold-costing option (unlike Kashya), so probing
-        rows is safe; the winning row is cached for the session."""
-        rows = (
-            [self._trade_row] if self._trade_row is not None
-            else range(1, MAX_DIALOG_ROWS + 1)
-        )
-        for row in rows:
-            if self._panel_open(offsets.UI_NPCSHOP):
-                return True
-            if not self._panel_open(offsets.UI_NPCMENU):
-                self.open_npc_dialog(offsets.NPC_AKARA, "Akara")
-            for _ in range(row - 1):
-                self.panel.press_key(offsets.UI_NPCMENU, VK_DOWN)
-                self._sleep(self.config.key_step_s)
-            self.panel.press_key(offsets.UI_NPCMENU, VK_RETURN)
-            if self._await(
-                lambda: self._panel_open(offsets.UI_NPCSHOP),
-                self.config.verify_timeout_s,
-            ):
-                self._trade_row = row
-                return True
-            # Wrong row: it may have opened gossip or closed the menu.
-            # Reopen for the next probe (row 1 is a known highlight).
-            self.close_panels()
-        return False
 
     def _buy_until(self, potion_type: str, need: int, px: int, py: int) -> int:
         """Right-click the calibrated spot until `need` more of this type

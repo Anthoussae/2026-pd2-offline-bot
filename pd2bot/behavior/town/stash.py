@@ -310,6 +310,18 @@ class _StashMixin:
         if carried == 0:
             report.log.append("gold: none carried")
             return 0
+        # Keep a working reserve on the character so the Akara restock has
+        # money to spend (R241): the deposit dialog banks ALL carried gold,
+        # so depositing whenever any is carried left the bot broke every
+        # run and the restock could never buy — found live 2026-08-10.
+        # Below the reserve, skip the deposit entirely; a level-92 necro is
+        # nowhere near the carry cap, so gold on hand is harmless.
+        if carried <= self.config.gold_reserve:
+            report.log.append(
+                f"gold: {carried} carried, kept as restock reserve "
+                f"(<= {self.config.gold_reserve})"
+            )
+            return 0
         point = self.point("stash.gold_button")
 
         def carried_now() -> int:

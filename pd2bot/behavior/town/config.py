@@ -135,6 +135,11 @@ class TownConfig:
     # Belt minimums per potion type, checked after refill (columns per the
     # permanent layout, R53: key 1 mana, key 2 rejuv, keys 3+4 healing).
     # Rejuvs are unbuyable (R47.6) so their minimum is advisory-zero.
+    # Gold kept ON THE CHARACTER (not banked) so the Akara restock can
+    # buy potions (R241, 2026-08-10). The gold-deposit dialog banks all
+    # carried gold, so a reserve is kept by SKIPPING the deposit below
+    # this; well above a belt's worth of potions and the restock floor.
+    gold_reserve: int = 30000
     min_healing: int = 4
     min_mana: int = 2
     min_rejuv: int = 0

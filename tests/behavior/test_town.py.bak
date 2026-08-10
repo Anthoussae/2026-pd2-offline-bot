@@ -981,36 +981,21 @@ def test_the_cube_is_never_deposited_in_either_phase(town):
 def test_gold_is_deposited_and_verified_by_the_balance(town):
     """The dialog raises no panel flag (T37), so the balance is the only
     proof there is — and the dialog defaults to the whole carried amount."""
-    # Above the 30000 restock reserve, so it deposits; smaller amounts are
-    # kept on hand for Akara (tested in test_gold_below_reserve_is_kept).
-    town.gold, town.gold_stash = 42435, 805539
-    full_belt(town)
-    town.inventory = [loot(1, (0, 0))]
-
-    report = PreambleReport()
-    layer(town).manage_inventory(report)
-    assert town.gold == 0 and town.gold_stash == 847974
-    assert any("gold: 42435 deposited" in line for line in report.log)
-
-
-def test_gold_below_reserve_is_kept_for_restock(town):
-    """R241: a level-92 necro banking every coin left the Akara restock
-    with nothing to spend. Below the reserve, gold stays on the character."""
     town.gold, town.gold_stash = 12435, 805539
     full_belt(town)
     town.inventory = [loot(1, (0, 0))]
 
     report = PreambleReport()
     layer(town).manage_inventory(report)
-    assert town.gold == 12435 and town.gold_stash == 805539  # nothing banked
-    assert any("kept as restock reserve" in line for line in report.log)
+    assert town.gold == 0 and town.gold_stash == 817974
+    assert any("gold: 12435 deposited" in line for line in report.log)
 
 
 def test_a_missed_gold_click_leaves_no_chat_console_behind(town):
     """The sharp edge of an invisible dialog: with none open, the ENTER is
     the key that opens the CHAT CONSOLE (R89 from the other side), and that
     is a blocking panel. A failed deposit must not leave one up."""
-    town.gold, town.gold_stash = 35000, 1000  # above the reserve, so it deposits
+    town.gold, town.gold_stash = 500, 1000
     full_belt(town)
     town.inventory = [loot(1, (0, 0))]
     original = town.panel_click
@@ -1024,7 +1009,7 @@ def test_a_missed_gold_click_leaves_no_chat_console_behind(town):
     town.panel_click = gold_button_misses
     with pytest.raises(TownError, match="gold deposit had no effect"):
         layer(town).manage_inventory(PreambleReport())
-    assert town.gold == 35000  # nothing moved
+    assert town.gold == 500  # nothing moved
     assert offsets.UI_CHAT_CONSOLE not in town.panels  # and nothing left open
 
 

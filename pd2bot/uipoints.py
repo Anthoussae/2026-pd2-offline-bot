@@ -164,6 +164,22 @@ def default_points() -> dict[str, UIPoint]:
             ),
         ),
         UIPoint(
+            "akara.trade",
+            offsets.UI_NPCMENU,
+            opens=offsets.UI_NPCSHOP,
+            anchor_npc=offsets.NPC_AKARA,
+            keyboard_row=2,
+            row_count=3,
+            note=(
+                "Akara's menu is Talk / Trade / Cancel (operator-confirmed, "
+                "2026-08-10), the same three-row shape as Charsi's "
+                "trade/repair: 1 Down then Enter selects TRADE (row 2) and "
+                "opens the shop. Same discipline as charsi.trade_repair — "
+                "the row INDEX is stable while its pixels move as she paces; "
+                "verified by effect (UI_NPCSHOP opens)."
+            ),
+        ),
+        UIPoint(
             "charsi.repair_all",
             offsets.UI_NPCSHOP,
             (0.4648, 0.7650),
