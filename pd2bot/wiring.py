@@ -409,6 +409,9 @@ class LiveBot:
         combat.note_write_off = note_write_off
         ladder = ReflexLadder(
             self.class_config.reflex,
+            # Posture-aware (R241 berserk): the active posture may tighten
+            # the armor recast; None defers to [reflex]'s number.
+            armor_threshold=lambda: combat.config.armor_recast_below_pct,
             # with_sockets=False: this runs EVERY TICK and only ever reads
             # the belt, so it must not pay for a stat read per inventory
             # item. The cleanse is the only consumer that needs sockets and

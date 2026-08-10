@@ -48,6 +48,16 @@ from pd2bot.perception.units import Monster
 class CombatConfig:
     """Every combat number. Defaults mirror config/necro.toml's [combat]."""
 
+    # The fight STYLE (R241, ADR 2026-08-09-posture-fight-styles): a
+    # bounded enum this module implements. "skirmish" is the classic
+    # dash-in/strike/dash-out beat; "charge" (berserk's engine) attacks
+    # the nearest strikeable hostile with no dash-out and no waiting for
+    # the wall. The reflex ladder sits ABOVE either style, unchanged.
+    style: str = "skirmish"
+    # Posture-only armor override: when set, the ladder's bone-armor
+    # rung recasts below THIS percent instead of [reflex]'s number
+    # (berserk wants 60). None = defer to the reflex config.
+    armor_recast_below_pct: float | None = None
     # Engagement.
     engage_radius: int = 40  # hostiles this close mean "we are in a fight"
     melee_range: int = 3  # close enough to strike
@@ -486,7 +496,14 @@ class NecroCombat:
             candidates.append((not adjacent, struck_at is not None, distance, hostile))
         if not candidates:
             return None
-        candidates.sort(key=lambda c: (c[0], c[1], c[2], c[3].unit_id))
+        if self.config.style == "charge":
+            # Charge: the nearest strikeable hostile, full stop (R241's
+            # berserk definition). Restrike pacing and write-offs still
+            # apply — clicking one poisoned target forever is not rage,
+            # it is a livelock.
+            candidates.sort(key=lambda c: (c[2], c[3].unit_id))
+        else:
+            candidates.sort(key=lambda c: (c[0], c[1], c[2], c[3].unit_id))
         return candidates[0][3]
 
     def _dash_target(
@@ -519,9 +536,13 @@ class NecroCombat:
         if self._engagement_start is None:
             self._engagement_start = now
 
+        charge = self.config.style == "charge"
+
         # Phase 2 — let the tanks get in front. Ends early once they have.
+        # Charge (berserk) does not wait for tanks — that is its point.
         if (
-            snap.revives
+            not charge
+            and snap.revives
             and not self._revives_engaged(snap, hostiles)
             and now - self._engagement_start < self.config.wait_for_revives_s
         ):
@@ -586,10 +607,10 @@ class NecroCombat:
             # after `desecrate_rounds` fruitless casts, and a gate that did
             # not know that would hold offense back forever on ground where
             # no corpse can be raised.
-            if len(
-                snap.revives
-            ) < self.config.approach_with_revives and self._building_wall(
-                snap, origin
+            if (
+                not charge
+                and len(snap.revives) < self.config.approach_with_revives
+                and self._building_wall(snap, origin)
             ):
                 return self._reposition(origin, hostiles)
             # `toward` names the monster this dash is for, so a caller that
@@ -611,7 +632,9 @@ class NecroCombat:
         # Aggressive (M6 P3): the post-strike retreat is group-conditioned.
         # 0 keeps the cautious beat — back out after every strike.
         group = self.config.retreat_group_size
-        self._retreat_after_strike = group == 0 or (
+        # Charge never takes the dash-out: the strike ends where it lands
+        # (the reflex ladder, not the beat, owns berserk's survival).
+        self._retreat_after_strike = not charge and (group == 0 or (
             sum(
                 1
                 for h in hostiles
@@ -619,7 +642,7 @@ class NecroCombat:
                 <= self.config.retreat_group_radius
             )
             >= group
-        )
+        ))
         return AttackUnit(target.unit_id, target.position)
 
     # -- desecrate -> revive maintenance (R47.4) --------------------------------

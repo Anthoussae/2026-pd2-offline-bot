@@ -288,3 +288,14 @@ stray_subtiles = 12.0
 # Non-brisk postures wait until no living hostile is within this radius
 # before walking back to the line; brisk returns immediately.
 return_hostile_radius = 12
+
+# Berserk (R241): the charge style — always attack the nearest visible
+# enemy with the dagger, no dash-out, no waiting for the wall. The
+# reflex ladder still owns survival (potions, escapes), with the armor
+# recast tightened to 60%. Returns to a route line only when nothing
+# hostile is nearby (the traverse leash's default wait).
+[combat.postures.berserk]
+style = "charge"
+armor_recast_below_pct = 60.0
+restrike_s = 0.5
+linger = true

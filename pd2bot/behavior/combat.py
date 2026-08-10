@@ -258,11 +258,19 @@ _COMBAT_NUMBERS: dict[str, type] = {
 # [combat] boolean keys (same treatment as [reflex].armor_in_town).
 _COMBAT_BOOLS = ("linger", "revive_urgency_hold")
 
+# The fight styles the class module implements (R241; ADR
+# 2026-08-09-posture-fight-styles). A posture naming a style is the ONE
+# licensed crossing of "a posture is a manner, not a build": the enum is
+# bounded, the class module owns every implementation, skills stay out.
+_COMBAT_STYLES = ("skirmish", "charge")
+
 # What a [combat.postures.<name>] table may override: the behavior knobs,
 # NOT the skills (a posture is a manner, not a build) and NOT
 # park_grace_s (executor wiring reads it once at startup — a per-posture
 # value would look tunable and silently not be).
-_POSTURE_KEYS = (set(_COMBAT_NUMBERS) | set(_COMBAT_BOOLS)) - {"park_grace_s"}
+_POSTURE_KEYS = (
+    set(_COMBAT_NUMBERS) | set(_COMBAT_BOOLS) | {"style", "armor_recast_below_pct"}
+) - {"park_grace_s"}
 
 
 def load_class_config(path: str | Path) -> ClassConfig:
@@ -375,7 +383,7 @@ def load_class_config(path: str | Path) -> ClassConfig:
         combat_raw,
         set(_COMBAT_NUMBERS)
         | set(_COMBAT_BOOLS)
-        | {"desecrate_skill", "revive_skill", "postures"},
+        | {"desecrate_skill", "revive_skill", "postures", "style"},
         f"{where}.combat",
     )
     combat_numbers = {
@@ -392,9 +400,16 @@ def load_class_config(path: str | Path) -> ClassConfig:
             raise ConfigError(
                 f"{where}.combat.{ref_key}: {ref!r} is not a [skills] entry"
             )
+    base_style = combat_raw.get("style", "skirmish")
+    if base_style not in _COMBAT_STYLES:
+        raise ConfigError(
+            f"{where}.combat.style: {base_style!r} is not one of "
+            f"{_COMBAT_STYLES}"
+        )
     combat = CombatConfig(
         desecrate_skill_id=skills[combat_raw["desecrate_skill"]],
         revive_skill_id=skills[combat_raw["revive_skill"]],
+        style=base_style,
         **combat_numbers,
         **combat_bools,
     )
@@ -416,12 +431,27 @@ def load_class_config(path: str | Path) -> ClassConfig:
         if not isinstance(table, dict):
             raise ConfigError(f"{p_where}: expected a table of overrides")
         _reject_unknown(table, _POSTURE_KEYS, p_where)
-        overrides = {
-            key: _require(
-                table, key, _COMBAT_NUMBERS.get(key, bool), p_where
-            )
-            for key in table
-        }
+        overrides = {}
+        for key in table:
+            if key == "style":
+                value = _require(table, key, str, p_where)
+                if value not in _COMBAT_STYLES:
+                    raise ConfigError(
+                        f"{p_where}.style: {value!r} is not one of "
+                        f"{_COMBAT_STYLES}"
+                    )
+            elif key == "armor_recast_below_pct":
+                raw = table[key]
+                if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                    raise ConfigError(
+                        f"{p_where}.{key}: expected a number"
+                    )
+                value = float(raw)
+            else:
+                value = _require(
+                    table, key, _COMBAT_NUMBERS.get(key, bool), p_where
+                )
+            overrides[key] = value
         postures[posture_name] = replace(combat, **overrides)
 
     # [route] — optional; absent means the defaults (leash still works,

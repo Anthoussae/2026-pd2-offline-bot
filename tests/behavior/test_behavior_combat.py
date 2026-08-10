@@ -173,7 +173,7 @@ def test_fake_combat_module_scripts_pop_in_order():
 
 def test_the_shipped_postures_load():
     config = load_class_config(NECRO)
-    assert set(config.postures) == {"cautious", "brisk", "aggressive"}
+    assert set(config.postures) == {"cautious", "brisk", "aggressive", "berserk"}
     # Cautious IS the base numbers, by identity not by copy.
     assert config.postures["cautious"] is config.combat
     # Brisk: the corridor bubble and no lingering; everything it does not
