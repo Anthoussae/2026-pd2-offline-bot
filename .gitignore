@@ -19,3 +19,4 @@ maps/
 # The narrative run logs (pd2bot/narrate.py, R179): one wall-clock-stamped
 # file per run, machine-local run history.
 logs/
+pd2bot/behavior/steps/*.bak
