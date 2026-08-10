@@ -79,3 +79,17 @@ def test_a_potion_never_becomes_an_order():
     potion = GroundItem(unit_id=51, kind=hp_kind, position=(1005, 1000), quality=2)
     tick(step, ctx, world, items=[potion])
     assert events(log, "pickup.order_open") == []
+
+
+def test_orders_book_even_when_the_inventory_is_full():
+    """The live bug (2026-08-10): 8 whitelisted items dropped, 0 orders —
+    booking lived in wanted_items' `found` list, which the inventory-full
+    filter empties, so orders never opened in the one case they exist for.
+    Booking now rides log_wanted_drops, which sees every whitelisted drop
+    regardless of inventory state."""
+    clock = Clock()
+    step, world, executor, log, ctx = ordered_world(clock)
+    step.services.inventory_full = True  # the case that used to book nothing
+    tick(step, ctx, world, items=[rare(50, (1005, 1000))])
+    assert events(log, "pickup.order_open"), "a full inventory suppressed the order"
+    assert step.services.order_book.pending(), "the order was not booked"

@@ -74,16 +74,36 @@ class _PickupMixin:
         is checked before any pickit work.
         """
         log = getattr(self.services, "runlog", None)
-        if log is None or not getattr(log, "enabled", False):
+        log_on = log is not None and getattr(log, "enabled", False)
+        book = self.services.order_book
+        if not log_on and book is None:
             return
         seen = self.services.seen_drops
+        now = self.services.clock()
         for item in snap.ground_items:
-            if item.unit_id in seen:
-                continue
             if carried is None:
                 carried = self.services.carried()
             action, rule = self.services.pickit.decide(item, carried)
             if action == "skip":
+                continue
+            # Mandatory orders (R241 item 7): book EVERY whitelisted
+            # non-potion drop here, in the same situation-independent loop
+            # that logs it — NOT in wanted_items' `found` list, which the
+            # inventory-full filter empties. Booking after that filter
+            # meant orders never opened precisely when the inventory was
+            # full, the one case they exist to handle (found live: 8
+            # whitelisted drops, 0 orders, full inventory).
+            if book is not None and potion_type_of(item) is None:
+                opened = book.sight(item.unit_id, item.kind, item.position, now)
+                if opened is not None:
+                    self.services.runlog.event(
+                        "pickup.order_open",
+                        unit_id=item.unit_id,
+                        kind=item.kind,
+                        item=self._logged_name(item.kind),
+                        position=list(item.position),
+                    )
+            if not log_on or item.unit_id in seen:
                 continue
             self._log_drop(item, rule)
 
@@ -124,29 +144,11 @@ class _PickupMixin:
             elif self.services.inventory_full:
                 continue
             found.append(item)
-        # Mandatory orders (R241 item 7): every wanted sighting is booked
-        # so it cannot be silently forgotten. Booked even when the
-        # inventory is full or the belt refuses — those states pass and
-        # the order remains; the pilot flag gates whether anything ever
-        # SERVICES the book. Non-potions only: potions come from Akara
-        # once the restock chore lands, and a mandatory order chasing a
-        # potion is the time sink item 5 exists to remove.
-        if self.services.order_book is not None:
-            now = self.services.clock()
-            for item in found:
-                if potion_type_of(item) is not None:
-                    continue
-                new = self.services.order_book.sight(
-                    item.unit_id, item.kind, item.position, now
-                )
-                if new is not None:
-                    self.services.runlog.event(
-                        "pickup.order_open",
-                        unit_id=item.unit_id,
-                        kind=item.kind,
-                        item=self._logged_name(item.kind),
-                        position=list(item.position),
-                    )
+        # Order BOOKING happens in log_wanted_drops (called above), which
+        # sees every whitelisted drop regardless of the inventory-full
+        # filter that shapes `found` — an order must open even for an item
+        # this tick cannot collect. (R241; the found-list booking that
+        # used to live here missed every drop under a full inventory.)
         return found
 
     @staticmethod
