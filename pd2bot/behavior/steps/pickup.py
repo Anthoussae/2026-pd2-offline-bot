@@ -95,14 +95,14 @@ class _PickupMixin:
             # whitelisted drops, 0 orders, full inventory).
             if book is not None and potion_type_of(item) is None:
                 opened = book.sight(item.unit_id, item.kind, item.position, now)
-                if opened is not None:
-                    self.services.runlog.event(
-                        "pickup.order_open",
-                        unit_id=item.unit_id,
-                        kind=item.kind,
-                        item=self._logged_name(item.kind),
-                        position=list(item.position),
-                    )
+                self.services.runlog.event(
+                    "pickup.order_open" if opened is not None
+                    else "pickup.order_resight",
+                    unit_id=item.unit_id,
+                    kind=item.kind,
+                    item=self._logged_name(item.kind),
+                    position=list(item.position),
+                )
             if not log_on or item.unit_id in seen:
                 continue
             self._log_drop(item, rule)

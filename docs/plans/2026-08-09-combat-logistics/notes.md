@@ -137,3 +137,40 @@ against and the user dropped it: *"I'm convinced it's unwise."*
   line + leash run; supervised berserk run (Q6); T85 + the buy chore +
   pickit potion removal (Q5, same commit); the order-book pilot run +
   census review. Merge to m6-countess only after the batch.
+
+## Live batch progress + OPEN items (2026-08-10, paused by operator)
+
+DONE live-proven this session (branch combat-logistics):
+- P1 config trio (no live needed).
+- P2 leash: T84 recorded the Cold Plains line; leash run traversed to
+  the Cave hugging the line, returned after strays (route.stray x3),
+  arrived. PASS.
+- P3 berserk: supervised Cold Plains clearance, charge behaviour
+  operator-judged correct, safety silent, armor upkeep firing. PASS
+  (low-stress; berserk-in-danger still unproven).
+- P4 restock: T85c calibrated Akara's two potion spots; the autonomous
+  restock station bought "3 healing, 2 mana" (each belt-verified) via
+  the akara.trade row and stash gold; potions removed from pickit (Q5).
+  PASS. Prereqs found+fixed live: calibration path parents[3]; stash
+  gold spendable; akara.trade uipoint (Talk/Trade/Cancel row 2); gold
+  reserve (deposit_gold kept 0 -> restock broke).
+
+OPEN (need an instrumented live run when testing resumes):
+1. **Order booking discrepancy.** order_book arms live
+   (pickup.order_book_diag armed:true), whitelisted NON-potion items
+   drop (item.dropped: amethyst/ring/diamond/skull), yet ZERO
+   pickup.order_open — despite log_wanted_drops booking correctly
+   OFFLINE (test_clear_orders + test_traverse_orders, 7 tests). The
+   booking now emits order_open OR order_resight unconditionally, so
+   the next run with a whitelisted non-potion drop is decisive: if
+   NEITHER fires, log_wanted_drops isn't the item.dropped source we
+   think, or book is None on that call.
+2. **Cleanse on full inventory.** Operator watched the bot attempt
+   pickups on a full inventory without ever cleansing. Cleanse IS
+   enabled (no pending names, cleanse_keep present), so the gap is
+   cleanse_queued not being set, or maybe_cleanse not reached on the
+   pursued path. Needs a full-inventory run with the collect/cleanse
+   path instrumented.
+
+The mandatory-pickup pilot census gate is therefore NOT yet passed;
+the flag stays pilot-only (cold-plains) and unmerged.
