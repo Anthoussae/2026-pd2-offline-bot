@@ -277,3 +277,5 @@ headings, noted in parentheses, say roughly where they fell).
 - R241 [decision] Combat & logistics plan: confirmations Q1–Q8 + phase table · 2026-08-09 21:37
 - R241 resolved (all yes + Q4 stock-cells refinement; md plan P1–P6, branch combat-logistics) · 2026-08-09 21:44
 - R242 [execute] The R241 live batch: line, leash, berserk, shop, pilot · 2026-08-09 23:21
+- R243 [decision] Chat may type while the TRADE screen is open · 2026-08-10 00:39
+- R243 resolved (opt-in Chat allow_panels; T85 uses it; address bug fixed too) · 2026-08-10 00:39

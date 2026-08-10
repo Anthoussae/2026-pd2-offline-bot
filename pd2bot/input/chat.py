@@ -69,12 +69,22 @@ class Chat:
         session: GameSession,
         window: GameWindow | None = None,
         ui_array: int | None = None,
+        allow_panels: frozenset[int] = frozenset(),
     ) -> None:
         self.session = session
         self.window = window if window is not None else GameWindow(session.process_id)
         self._ui_array = (
             ui_array if ui_array is not None else uistate.find_ui_array(session)
         )
+        # Operator-licensed exceptions to the blocking-panel refusal
+        # (R243, 2026-08-10): the SHOP screen has no Enter-activated
+        # default control, so Enter opens the console normally there —
+        # unlike the dialog LIST, where Enter selects a row (the M1
+        # shape this guard exists for). The verify-by-effect check
+        # below (`_console_open` before any typing) remains the real
+        # gate: a wrong allowance costs one inert Enter, never typed
+        # text landing on the game.
+        self._allow_panels = allow_panels
 
     def _console_open(self) -> bool:
         return uistate.read_ui_state(self.session, self._ui_array).is_open(
@@ -102,7 +112,9 @@ class Chat:
         blocking = [
             p
             for p in uistate.blocking_panels()
-            if p != offsets.UI_CHAT_CONSOLE and state.is_open(p)
+            if p != offsets.UI_CHAT_CONSOLE
+            and p not in self._allow_panels
+            and state.is_open(p)
         ]
         if blocking:
             names = ", ".join(

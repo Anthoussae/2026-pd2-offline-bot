@@ -51,10 +51,22 @@ T85 = Drill(
 
 def t85_body(run: DrillRun) -> str:
     session = run.session
+    # R243: chatting is allowed while the TRADE screen is open — the
+    # operator's call, and the whole point of this drill is prompting
+    # them while they look at that screen.
+    from pd2bot import offsets
+    from pd2bot.input.chat import Chat
+
+    run.chat = Chat(session, allow_panels=frozenset({offsets.UI_NPCSHOP}))
+    # WAIT for the operator to reach Akara and open the shop — the first
+    # run of this drill read instantly on OK and failed while the
+    # operator was still walking (the announcement-vs-reality gap the
+    # T70 run 1 lesson already named).
+    akara = _await_shop_open(run)
     # Read the stock once so the write-up records what Akara had — proof
     # the vendor-stock read works against the live NPC, independent of
     # the geometry the operator hovers.
-    stock = read_vendor_stock(session, _akara_unit(run))
+    stock = read_vendor_stock(session, akara)
     kinds = ", ".join(sorted({p.potion_type for p in stock})) or "none read"
     run.say(f"Akara stocks: {len(stock)} potion(s) [{kinds}].", patience_s=2.5)
 
@@ -84,6 +96,55 @@ def t85_body(run: DrillRun) -> str:
     return summary
 
 
+def _await_shop_open(run: DrillRun, timeout_s: float = 300.0) -> int:
+    """Block until Akara is in perception AND her shop panel is open;
+    returns her unit id. Announces progress; the drill's backstop is the
+    timeout."""
+    from pd2bot import offsets
+    from pd2bot.perception.uistate import read_ui_state
+
+    started = time.monotonic()
+    last_nag = 0.0
+    while time.monotonic() - started < timeout_s:
+        run.check_cancel()
+        akara = _find_akara(run)
+        shop_open = False
+        try:
+            ui = read_ui_state(run.session)
+            shop_open = ui is not None and offsets.UI_NPCSHOP in ui.open_panels
+        except Exception:
+            pass
+        if akara is not None and shop_open:
+            return akara
+        now = time.monotonic()
+        if now - last_nag >= 20.0:
+            last_nag = now
+            missing = "walk to Akara" if akara is None else "open TRADE"
+            run.say(f"Waiting: {missing} (the drill reads when the shop is open).",
+                    patience_s=2.5)
+        time.sleep(1.0)
+    raise RuntimeError("the shop never opened — T85 backstop expired")
+
+
+def _find_akara(run: DrillRun) -> int | None:
+    """Akara's unit ADDRESS (what the inventory walk dereferences) —
+    the first T85b run passed her unit ID here and read address ~110."""
+    from pd2bot import offsets
+    from pd2bot.perception.units import iter_units_of_type
+
+    try:
+        for unit in iter_units_of_type(
+            run.session, offsets.UNIT_TYPE_MONSTER
+        ):
+            if run.session.u32(
+                unit + offsets.UNIT_TXT_FILE_NO
+            ) == offsets.NPC_AKARA:
+                return unit
+    except Exception:
+        return None
+    return None
+
+
 def _await_still_cursor(run: DrillRun) -> tuple[int, int]:
     """Block until the cursor holds one spot for STILL_SAMPLES polls,
     then return it (the T25 hover-capture idiom, inline)."""
@@ -98,7 +159,7 @@ def _await_still_cursor(run: DrillRun) -> tuple[int, int]:
     return last
 
 
-def _akara_unit(run: DrillRun) -> int:
+def _akara_unit(run: DrillRun) -> int:  # kept for reference; superseded by _await_shop_open
     from pd2bot import offsets
     from pd2bot.perception.units import scan_units
 
