@@ -176,3 +176,4 @@ and have one fewer cell; new rows carry milestone/phase.
 | T85 | 4 | 2026-08-10 00:48 | M6 P4 | calibrate the vendor shop grid — you hover, the bot measures | human calibration | ABORTED | cancelled by request |
 | T85b | 1 | 2026-08-10 01:04 | M6 P4 | survey Akara's shop — read-only layout + hover pre-test | human calibration | PASS | stock: 2 potions, cols [9] rows [6, 7]; hover-read did NOT resolve a shop item — calibration will need geometry from known cells instead |
 | T85c | 1 | 2026-08-10 01:12 | M6 P4 | calibrate Akara's potion spots — hover healing, then mana | human calibration | PASS | healing @ px (729, 421) cell (9, 6); mana @ px (730, 463) cell (9, 7) -> shop_calibration.json |
+| T86 | 1 | 2026-08-10 01:26 | M6 P4 | prove the buy mechanic — right-click buys, belt-count verifies | supervised live | ABORTED | cancelled by request |

@@ -1,0 +1,8 @@
+# The R241 P4 live acceptance (autonomous): create a game, run the town
+# preamble — which now includes the Akara restock station — and leave.
+# Deplete the belt (drink a few healing potions) before launching so
+# restock has something to buy. Scratch run, deleted after the batch.
+name = "restock-test"
+
+[[step]]
+name = "town_preamble"

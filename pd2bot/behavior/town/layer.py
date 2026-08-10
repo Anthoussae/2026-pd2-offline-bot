@@ -21,6 +21,7 @@ from pd2bot.behavior.town.config import (
 )
 from pd2bot.behavior.town.inventory import _InventoryMixin
 from pd2bot.behavior.town.panels import _PanelMixin
+from pd2bot.behavior.town.restock import _RestockMixin
 from pd2bot.behavior.town.services import _ServiceMixin
 from pd2bot.behavior.town.stash import _StashMixin
 from pd2bot.behavior.town.walk import _WalkMixin
@@ -42,6 +43,7 @@ class TownLayer(
     _WalkMixin,
     _PanelMixin,
     _ServiceMixin,
+    _RestockMixin,
     _StashMixin,
     _BeltMixin,
     _InventoryMixin,
@@ -179,6 +181,7 @@ class TownLayer(
         stations: tuple[tuple[str, Callable[[PreambleReport], None]], ...] = (
             ("heal", self.heal_at_akara),
             ("repair", self.repair_at_charsi),
+            ("restock", self.restock_at_akara),
             ("inventory", self.manage_inventory),
             ("merc", self.resurrect_merc_if_dead),
         )

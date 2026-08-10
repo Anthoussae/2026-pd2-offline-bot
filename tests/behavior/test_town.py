@@ -1066,9 +1066,11 @@ def test_preamble_runs_in_the_agreed_order(town):
     # reached the stash used to be indistinguishable from one where the
     # cleanse looked and found none (user request, 2026-08-01).
     assert steps == [
-        "heal", "repair", "belt", "cleanse", "belt",
+        "heal", "repair", "restock", "belt", "cleanse", "belt",
         "stash", "stash", "gold", "merc"
-    ]  # two stash lines: the deposit, then the held-item count
+    ]  # two stash lines: the deposit, then the held-item count. "restock"
+    # (R241) sits after repair; with the belt at minimums it reports
+    # "skipped" and buys nothing.
 
 
 def test_preamble_narrates_each_station_with_its_duration(town):
@@ -1081,7 +1083,7 @@ def test_preamble_narrates_each_station_with_its_duration(town):
     _stock_belt_at_minimums(town)
     lines = []
     layer(town, narrate=lines.append).run_preamble()
-    assert len(lines) == 4  # heal, repair, inventory, merc — never per poll
+    assert len(lines) == 5  # heal, repair, restock, inventory, merc
     assert lines[0].startswith("heal:")
     assert lines[-1].startswith("merc:")
     assert all(re.search(r"\(\d+\.\ds\)$", line) for line in lines)
