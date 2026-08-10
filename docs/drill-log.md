@@ -173,3 +173,4 @@ and have one fewer cell; new rows carry milestone/phase.
 | T85 | 1 | 2026-08-10 00:32 | M6 P4 | calibrate the vendor shop grid — you hover, the bot measures | human calibration | FAILED | RuntimeError: Akara is not in perception range — stand at her shop |
 | T85 | 2 | 2026-08-10 00:37 | M6 P4 | calibrate the vendor shop grid — you hover, the bot measures | human calibration | FAILED | MemoryReadError: Could not read memory at: 110, length: 4 - GetLastError: 299 |
 | T85 | 3 | 2026-08-10 00:41 | M6 P4 | calibrate the vendor shop grid — you hover, the bot measures | human calibration | PASS | grid origin px (833, 217) ~ fraction (0.5423, 0.2512); cell size px (0, 0) ~ (0.0000, 0.0000); worst cross-check 0.0px -> PASS |
+| T85 | 4 | 2026-08-10 00:48 | M6 P4 | calibrate the vendor shop grid — you hover, the bot measures | human calibration | ABORTED | cancelled by request |
