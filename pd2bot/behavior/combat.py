@@ -133,6 +133,16 @@ class BeltConfig:
 
 
 @dataclass(frozen=True)
+class RouteConfig:
+    """The leash numbers (R241): when a run has a recorded route line,
+    how far off it counts as strayed, and how close a hostile must be
+    to make a non-brisk posture wait before walking back."""
+
+    stray_subtiles: float = 12.0
+    return_hostile_radius: int = 12
+
+
+@dataclass(frozen=True)
 class ClassConfig:
     """Everything class-specific, loaded from config/<class>.toml."""
 
@@ -144,6 +154,7 @@ class ClassConfig:
     combat: CombatConfig
     # Rung 2 — NOT the ladder's: handed to SafetyConfig by the cycle wiring.
     chicken_life_pct: float
+    route: RouteConfig = field(default_factory=RouteConfig)
     # Named posture presets (M6 P3, R212 Q5): full CombatConfigs built
     # from [combat.postures.<name>] override tables. "cautious" is always
     # present and always IS `combat` — the base numbers are the cautious
@@ -263,7 +274,7 @@ def load_class_config(path: str | Path) -> ClassConfig:
     where = path.name
 
     _reject_unknown(
-        data, {"name", "skills", "hotkeys", "belt", "reflex", "combat"}, where
+        data, {"name", "skills", "hotkeys", "belt", "reflex", "combat", "route"}, where
     )
     name = _require(data, "name", str, where)
 
@@ -413,6 +424,19 @@ def load_class_config(path: str | Path) -> ClassConfig:
         }
         postures[posture_name] = replace(combat, **overrides)
 
+    # [route] — optional; absent means the defaults (leash still works,
+    # it just uses the stock numbers).
+    route_raw = data.get("route", {})
+    if not isinstance(route_raw, dict):
+        raise ConfigError(f"{where}.route: expected a table")
+    _reject_unknown(
+        route_raw, {"stray_subtiles", "return_hostile_radius"}, f"{where}.route"
+    )
+    route = RouteConfig(
+        stray_subtiles=float(route_raw.get("stray_subtiles", 12.0)),
+        return_hostile_radius=int(route_raw.get("return_hostile_radius", 12)),
+    )
+
     return ClassConfig(
         name=name,
         skills=skills,
@@ -422,4 +446,5 @@ def load_class_config(path: str | Path) -> ClassConfig:
         combat=combat,
         chicken_life_pct=chicken_life_pct,
         postures=postures,
+        route=route,
     )

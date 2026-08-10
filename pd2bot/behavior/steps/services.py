@@ -35,6 +35,13 @@ class RunServices:
     # (sims, drills), and naming one is then a loud build error rather
     # than a runtime surprise.
     postures: frozenset[str] = frozenset()
+    # The route leash (R241): `route_line_for(area_id)` -> RouteLine or
+    # None. None for the whole field = no leash anywhere (sims, tests,
+    # pre-leash wiring) — every consumer must tolerate that.
+    route_line_for: Callable[[int], object | None] | None = None
+    # Leash numbers, threaded from ClassConfig.route at wiring time.
+    route_stray_subtiles: float = 12.0
+    route_return_hostile_radius: int = 12
     # Tuning that belongs to the steps rather than to a class.
     clear_settle_s: float = 5.0
     pickup_radius: int = 30  # opportunistic pickups during clearance

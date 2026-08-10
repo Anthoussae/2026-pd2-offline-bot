@@ -54,6 +54,7 @@ from pd2bot.nav import mapframe, survey
 from pd2bot.nav.mapstore import MapStore
 from pd2bot.nav.navigate import live_navigator
 from pd2bot.nav.pathing import astar, nearest_walkable, simplify
+from pd2bot.nav.routeline import line_service
 from pd2bot.nav.waypoint import WaypointTravel
 from pd2bot.perception.exits import ExitMemory, read_level_exits
 from pd2bot.perception.items import read_carried_items
@@ -548,6 +549,15 @@ class LiveBot:
             clear_panels=clear_panels_tracked,
             narrate=narrator.narrate,
             route_to=route_service(self.navigator),
+            # The route leash (R241): recorded lines live beside the
+            # atlas, keyed the same way; missing line = no leash.
+            route_line_for=line_service(
+                session, self.difficulty, self.store.root
+            ),
+            route_stray_subtiles=self.class_config.route.stray_subtiles,
+            route_return_hostile_radius=(
+                self.class_config.route.return_hostile_radius
+            ),
             runlog=runlog,
             frame=frame,
         )

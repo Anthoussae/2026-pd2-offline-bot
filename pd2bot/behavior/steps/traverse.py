@@ -63,7 +63,14 @@ class TraverseStep(_PickupMixin):
     services: RunServices = None  # type: ignore[assignment]
     dest: int = 0
     posture: str | None = None
+    # `line = true` in the run file: this traverse REQUIRES a recorded
+    # route line for its area and stops loudly if none exists. (Checked
+    # at first in-area tick — the map seed is unknowable at build time.)
+    require_line: bool = False
     name: str = "traverse"
+    _strayed: bool = False
+    _last_stray_emit: float = 0.0
+    _line_missing_reported: bool = False
     # Close enough to click the staircase: safely on screen (T50: the
     # nearest screen edge is 19-38 subtiles out) and inside the
     # loaded-room horizon, so the click projects and resolves.
@@ -336,7 +343,16 @@ class TraverseStep(_PickupMixin):
                 note=f"clicked the staircase (attempt {self._clicks})",
             )
 
-        leg = _route_leg(self.services, origin, self._exit)
+        # The leash (R241): with a recorded line and a real stray, the
+        # next leg walks BACK to the line instead of onward — posture
+        # permitting — so combat excursions do not compound into drift.
+        leash_target = self._leash(snap, origin)
+
+        leg = _route_leg(self.services, origin, leash_target or self._exit)
+        if leg is None and leash_target is not None:
+            # The line point is unreachable right now (atlas gap between
+            # here and there). Fall back to the exit rather than stall.
+            leg = _route_leg(self.services, origin, self._exit)
         if leg is None:
             self._flush_decision()
             raise NavigationError(
@@ -349,6 +365,65 @@ class TraverseStep(_PickupMixin):
             done=False, acted=True,
             note=f"walking to the exit via {leg}"
             + ("" if landed else " (walk refused)"),
+        )
+
+    def _leash(
+        self, snap: GameSnapshot, origin: tuple[int, int]
+    ) -> tuple[int, int] | None:
+        """The route leash (R241): the point to walk back to, or None.
+
+        None means "no leash applies this tick": no line recorded, not
+        strayed beyond the threshold, or the posture is waiting for the
+        neighbourhood to empty before returning (cautious/aggressive/
+        berserk wait; brisk returns immediately — it only ever fought
+        what obstructed the corridor). Emits `route.stray` on the
+        crossing and every ~5 s while out, never per tick.
+        """
+        line_for = self.services.route_line_for
+        if line_for is None or snap.area is None:
+            return None
+        line = line_for(snap.area.level_no)
+        if line is None:
+            if self.require_line and not self._line_missing_reported:
+                self._line_missing_reported = True
+                raise NavigationError(
+                    f"step requires a route line for area "
+                    f"{snap.area.level_no} and none is recorded — walk it "
+                    "once with drills/t84_record_line.py"
+                )
+            return None
+        stray = line.stray_from(origin)
+        threshold = self.services.route_stray_subtiles
+        now = self.services.clock()
+        outside = stray.distance > threshold
+        if outside and (
+            not self._strayed or now - self._last_stray_emit >= 5.0
+        ):
+            self._last_stray_emit = now
+            self.services.runlog.event(
+                "route.stray",
+                distance=round(stray.distance, 1),
+                nearest=list(stray.nearest),
+                progress=round(stray.progress, 3),
+                returning=self._return_allowed(snap),
+            )
+        self._strayed = outside
+        if not outside:
+            return None
+        if not self._return_allowed(snap):
+            return None
+        return stray.nearest
+
+    def _return_allowed(self, snap: GameSnapshot) -> bool:
+        """Brisk walks back through trouble; everyone else waits for the
+        neighbourhood to empty first (the R241 return policy)."""
+        if self.posture == "brisk":
+            return True
+        radius = self.services.route_return_hostile_radius
+        me = snap.player.position
+        return not any(
+            m.is_alive and _chebyshev(m.position, me) <= radius
+            for m in snap.monsters
         )
 
     def _locate_exit(self, here: int, origin: tuple[int, int]):

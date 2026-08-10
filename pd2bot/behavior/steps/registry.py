@@ -80,10 +80,12 @@ def build_registry(services: RunServices) -> StepRegistry:
             params=(
                 ParamSpec("dest", int),
                 ParamSpec("posture", str, required=False, default=None),
+                ParamSpec("line", bool, required=False, default=False),
             ),
             factory=lambda p: TraverseStep(
                 services,
                 dest=p["dest"],
+                require_line=p["line"],
                 posture=_checked_posture(services, p["posture"]),
             ),
         )

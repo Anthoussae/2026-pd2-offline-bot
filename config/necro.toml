@@ -277,3 +277,14 @@ retreat_subtiles = 8
 restrike_s = 0.5
 retreat_group_size = 3
 wait_for_revives_s = 0.5
+
+# -- the route leash (R241) ----------------------------------------------------
+# When a run step has a recorded route line (maps/<seed>/line-<area>.json,
+# recorded by walking it once with drills/t84_record_line.py), the step
+# reports and corrects drift from that line.
+[route]
+# Farther than this from the line counts as strayed (subtiles).
+stray_subtiles = 12.0
+# Non-brisk postures wait until no living hostile is within this radius
+# before walking back to the line; brisk returns immediately.
+return_hostile_radius = 12
