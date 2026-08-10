@@ -1,0 +1,23 @@
+# Order-pilot census WITHOUT the town preamble (R241 item 7): a
+# pre-existing stash NPC-misclick (R234/T83 family) aborts the preamble
+# intermittently and is unrelated to the order code. Skipping it lets
+# the pilot reach the clearance where orders are exercised. The
+# character is already healed and belted; safety still guards.
+name = "cold-plains"
+mandatory_pickup = true
+
+[[step]]
+name = "waypoint"
+dest = 3
+
+[[step]]
+name = "clear_radius"
+center = "arrival"
+radius = 150
+patrol = true
+
+[[step]]
+name = "pickup"
+
+[[step]]
+name = "done"
