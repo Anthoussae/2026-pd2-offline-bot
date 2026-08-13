@@ -325,3 +325,43 @@ can produce the diagnosis):
 
 Not proven yet (game ended before): pickup census with collections,
 cleanse-on-full live, order collect/close lifecycle. Next: relaunch.
+
+## 2026-08-13 R244/R245 games 2-3: batch COMPLETE — everything fired
+
+**Game 2** (`20260813-024533`, COMPLETE, 451 s, run.end's first-ever
+emission): 8 drops all rejuvs → zero orders is CORRECT (orders skip
+potions by design). Pickup 1/3: one walk-arrived-short, one honestly
+diagnosed "belt full for rejuv". One `stash.refused` (a ring, kind 537,
+one deposit click did not take; non-blocking, retries next preamble).
+No watchdog freeze.
+
+**Game 3** (`20260813-025430`, COMPLETE, 644 s) — every system under
+test fired live, and the whole R241 item-7 design is now observed
+end-to-end in one log:
+
+- `town.click_dodge` strategy=offset: a real NPC (kind 155) covered the
+  stash aim; the click stepped from (0,0) to (-1,-1) and opened the
+  stash with NO wait (the merc exemption kept the merc out of it).
+- **Flawless diamond order**: opened t=129, resighted through combat
+  (priority held), closed `order_gone` at t=414 after ~285 s on the
+  floor — the T51 expiry window; combat owned the ticks that long.
+- **Ko rune order**: opened t=359 (unit 804); **id churn REBOUND live**
+  (resights continue under unit 874, no duplicate order); clicks spent
+  with no neighbours → `inventory.full` (a genuinely full grid this
+  time) → `inventory.cleanse_queued` → **`inventory.cleanse` dropped 6
+  items seven seconds later, mid-field** — the exact operator-observed
+  2026-08-10 gap, closed and live-proven; post-cleanse retry ran;
+  order closed `order_abandoned` "active budget spent" (76.3 s); the
+  id churned AGAIN (unit 1094) and the closed order STAYED closed
+  (convergence across ids, live-proven) — and the ordinary pickup
+  sweep then **collected the rune anyway** under the new id.
+- Census 2/3 (rejuv + ko rune in the bag; the "miss" is the rune's
+  earlier id). The 7-click failure on the rune's first id is the known
+  pickup-accuracy signature (T65's kind-class shape), pre-existing
+  workstream, not this plan's regression.
+
+Watchdog: no recurrence of the freeze (451 s and 644 s clean runs with
+the faulthandler dead-man armed).
+
+**The P5 census gate is now IN THE OPERATOR'S HANDS** (R246): review
+the three logs and rule on `mandatory_pickup` beyond cold-plains.
