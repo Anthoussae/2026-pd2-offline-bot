@@ -1,0 +1,2 @@
+39d3946 feat(pickup): the tag-mode battery T90/T91, and the label policy inverted by its own measurement (R248-R254)
+01b6967 fix(safety): watchdog staleness gets a 15s grace; guarded-run waits for the dead-man dump (R253)
