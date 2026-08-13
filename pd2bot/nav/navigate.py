@@ -214,12 +214,17 @@ def _inside_sprite(hazard: Point, point: Point) -> bool:
 def _sprite_escapes(hazard: Point) -> tuple[Point, ...]:
     """Click points just outside a sprite, nearest wall first.
 
-    Left, right, and DOWN-screen. Up is deliberately not offered: it is
-    the far wall of a box that is 150 px tall and 80 wide, it puts the
-    click behind the unit rather than past them, and it is precisely
-    what the old world-space push produced — the click that opened
-    Kashya's dialog was 120 px straight up her sprite, and the nudge had
-    put it there.
+    Left, right, DOWN-screen — and, last, UP-screen BEYOND the box.
+    Up-screen INSIDE the box is what the old world-space push produced
+    (the click that opened Kashya's dialog was 120 px straight up her
+    sprite), and stays forbidden: the up candidate here clears the box's
+    150 px wall plus the margin — above the head, on clear ground. It is
+    offered at all because of T88 (2026-08-13): Charsi lay up-screen of
+    a bystander NPC, the three old escapes were all lateral or backward,
+    and the walk "escaped" sideways without progress five times and gave
+    up 18 subtiles short. When the goal lies past the unit, behind them
+    IS past them — the goal-aware selection in `_nudged_click_point` is
+    what promotes this candidate, and only when the goal earns it.
 
     Built from whole subtiles rather than by inverting the projection and
     rounding. Two reasons, both found by the tests: rounding lands on the
@@ -244,11 +249,13 @@ def _sprite_escapes(hazard: Point) -> tuple[Point, ...]:
 
     side = steps(SPRITE_HALF_WIDTH_PX + SPRITE_MARGIN_PX, PX_PER_SUBTILE_X)
     down = steps(SPRITE_BELOW_FEET_PX + SPRITE_MARGIN_PX, PX_PER_SUBTILE_Y)
+    up = steps(SPRITE_ABOVE_FEET_PX + SPRITE_MARGIN_PX, PX_PER_SUBTILE_Y)
     hx, hy = hazard
     return (
         (hx - side, hy + side),  # left across the floor
         (hx + side, hy - side),  # right across the floor
         (hx + down, hy + down),  # toward the camera, in front of them
+        (hx - up, hy - up),      # past them, above the head (T88)
     )
 
 
@@ -544,12 +551,18 @@ class Navigator:
                     if not any(_inside_sprite(s, c) for s in sprites)
                     and clearance(c) >= AVOID_RADIUS
                 ]
-                # Closest to what we MEANT to click: the click is only a
-                # direction to walk, so the least deviation that clears the
-                # sprite is the best one available.
+                # Closest to where the WALK IS GOING, not to what we meant
+                # to click. Least-deviation-from-the-waypoint was the T88
+                # loop: the blocked waypoint sits inside the sprite's tall
+                # band, so the nearest escape stayed on the WRONG side of
+                # the blocker, and five "successful" walks gained nothing.
+                # The goal is the one point that is never inside the band
+                # (it is exempted above), so keying on it picks the side
+                # of the unit that actually advances.
+                aim = self._goal if self._goal is not None else waypoint
                 current = min(
                     clear or list(candidates),
-                    key=lambda c: _distance(c, waypoint),
+                    key=lambda c: _distance(c, aim),
                 )
                 nudges += 1
                 result.log.append(

@@ -697,15 +697,29 @@ def test_world_distance_alone_cannot_tell_those_clicks_apart():
     assert 6 > AVOID_RADIUS  # both were already outside the old rule
 
 
-def test_an_escape_never_goes_up_screen():
-    """Up-screen is behind the unit and is the far wall of a box 150 px tall
-    — and it is what the old world-space push chose when it produced the
-    click that opened the dialog."""
-    from pd2bot.nav.navigate import _screen_offset, _sprite_escapes
+def test_an_up_screen_escape_exists_only_beyond_the_box():
+    """The refined contract (T88). Up-screen INSIDE the box is what
+    produced the dialog-opening click and stays forbidden; the one
+    up-screen candidate must clear the 150 px wall plus the margin —
+    above the head, on clear ground — because when the goal lies past
+    the unit, behind them IS past them, and without this candidate the
+    T88 walk 'escaped' sideways five times and gave up 18 short."""
+    from pd2bot.nav.navigate import (
+        SPRITE_ABOVE_FEET_PX,
+        SPRITE_MARGIN_PX,
+        _screen_offset,
+        _sprite_escapes,
+    )
 
+    ups = 0
     for escape in _sprite_escapes(KASHYA):
         _, sy = _screen_offset(KASHYA, escape)
-        assert sy >= 0, f"escape {escape} is drawn above her feet"
+        if sy < 0:
+            ups += 1
+            assert sy <= -(SPRITE_ABOVE_FEET_PX + SPRITE_MARGIN_PX), (
+                f"escape {escape} is above her feet but INSIDE the box"
+            )
+    assert ups == 1, "exactly one past-the-head escape is offered"
 
 
 def test_every_escape_actually_leaves_the_sprite():
@@ -793,6 +807,39 @@ def test_the_goal_is_exempt_from_the_sprite_box_too():
 
     assert point == CLICK_UP_KASHYAS_SPRITE
     assert nudges == 0
+
+
+def test_the_escape_crosses_the_blocker_when_the_goal_is_beyond_it():
+    """T88 run 1, the live loop this exists to end: Charsi at (5834, 5726)
+    lay up-screen of a bystander at (5846, 5742); the on-route waypoint
+    (5842, 5734) sat inside the bystander's tall sprite band, and every
+    old escape stayed on the wrong side — five capped walks, no progress,
+    NavigationError 18 subtiles short. Goal-aware selection must pick an
+    escape on the GOAL side of the unit."""
+    from pd2bot.nav.navigate import _distance, _inside_sprite
+
+    HAZARD = (5846, 5742)
+    GOAL = (5834, 5726)
+    BLOCKED = (5842, 5734)  # the drill's own logged click
+    assert _inside_sprite(HAZARD, BLOCKED), "the fixture must be the live shape"
+
+    world = World()
+    sim = Sim(world)
+    fake = FakeInput(world)
+    nav = navigator(world, sim, fake, avoid=lambda: (HAZARD,))
+    nav._sprites = lambda: (HAZARD,)
+    nav._goal = GOAL
+    result = WalkResult(target=GOAL, arrived_at=(0, 0), duration_seconds=0.0,
+                        waypoints=0)
+
+    point, nudges = nav._nudged_click_point(BLOCKED, result)
+
+    assert nudges >= 1
+    assert not _inside_sprite(HAZARD, point)
+    assert _distance(point, GOAL) < _distance(BLOCKED, GOAL), (
+        f"the escape {point} is no closer to the goal than the blocked "
+        "click was — the walk would loop exactly as T88 did"
+    )
 
 
 def test_a_town_npc_is_a_hazard_whatever_its_hp_reads(monkeypatch):
