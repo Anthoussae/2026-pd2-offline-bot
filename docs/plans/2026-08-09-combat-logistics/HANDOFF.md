@@ -1,95 +1,87 @@
-# HANDOFF — combat-logistics live batch, paused 2026-08-10
+# HANDOFF — 2026-08-13 session end (context migration)
 
-> **SUPERSEDED 2026-08-13.** Open items 1, 2 and 4a were solved OFFLINE
-> from the 2026-08-10 logs themselves — see the "2026-08-13 session"
-> section of `notes.md`. The order discrepancy was a run-log bug (a
-> `kind=` field clobbered the event kind on disk; orders booked fine),
-> the cleanse starvation was a two-cause branch gap (fixed +
-> instrumented), and the stash misclick was the T83 sprite rule missing
-> from deliberate clicks (fixed, `town.click_dodge`). What remains live:
-> the R244 verification batch + the P5 census gate, then P6 closeout.
+Branch **combat-logistics**, all work committed + pushed, CI green,
+**1275 tests**, ruff clean. NOT merged to m6-countess. Next request
+number: **R248**. Next test id: **T90**. The bridge is up; the operator
+is at the machine and the client was last left at the menu.
 
-Written at the operator's request at end of session (context limit).
-Branch: **combat-logistics** (all work committed + pushed, CI green,
-1226 tests). NOT merged to m6-countess. Next request number: **R244**.
+## What this session proved and shipped (all live-verified)
 
-## State: what is DONE and live-proven
+1. **The R244 "order-booking discrepancy" was a run-log bug, solved
+   OFFLINE**: a field named `kind` clobbered the event kind on disk
+   (orders had booked fine all along). Envelope keys are now
+   inviolable; emitters renamed (`item_kind`/`monster_kind`); the test
+   fake fails on collisions. `run.end` is finally EMITTED (documented
+   since birth, called by nobody); `watchdog.down` event added.
+2. **Cleanse-on-full-inventory fixed** (pile-ambiguity write-offs now
+   queue a cleanse; `service_orders` calls it ungated) — game 3 of the
+   pilot batch ran the WHOLE lifecycle live: full grid → queue →
+   mid-field cleanse (6 dropped) → retry → budget close → id-churn
+   convergence → the rune collected anyway by the sweep.
+3. **MAX_CARRIED_ITEMS truncation** (the real restock over-buy root
+   cause, operator-corrected diagnosis): the item chain is 560 long,
+   the old 512 cap silently dropped belt/gear; cap 4096 +
+   `CarriedItems.truncated` + the preamble refuses truncated reads.
+   Restock hardened (belt-room check, inventory-landed stop,
+   MAX_DEAD_CLICKS, `town.restock` event).
+4. **Misclick family**: interact clicks dodge bystander sprite boxes
+   (`town.click_dodge`; merc exempt — live-proven it can't intercept);
+   `_await_interact` ends the 15 s missed-click stall (trips 25 s →
+   13 s; EVERY run used to pay it); the sprite escape is GOAL-AWARE
+   with a past-the-head candidate (T88's Charsi loop, fixed + unit-
+   pinned).
+5. **The stack sampler** (`pd2bot/runlog/sampler.py`) — always on in
+   real launches, writes `logs/samples-*.log`, span-compressed main-
+   thread stacks; it found the 15 s stall on its first run. The
+   watchdog got a faulthandler dead-man (its silent-freeze mystery is
+   3 occurrences old; did NOT recur since — next freeze writes its own
+   stack to the .err.log).
+6. **R247 hotkey config — COMPLETE and archived**
+   (`docs/archive/plans/2026-08-13-hotkey-config/`): bindings read from
+   the client's per-character `.key` file (self-validating parser),
+   one registry (`input/keys.py`), toml verified against the client at
+   every game build, T89 demonstrated 6/6 live. ADR accepted.
+7. **Pilot batch (R244/R245) complete**: game 1 fixes-verified (ended
+   by watchdog freeze), games 2–3 COMPLETE with census. **Two new test
+   kinds** established: demonstration (T88 6/6 closures 0.66 s,
+   operator satisfied; T89) and the trip battery (T87, 13 runs).
 
-- **P1 config trio** — heal 75; El–Sol runes skipped (both variants);
-  socket rules removed. `0236efe`.
-- **P2 route leash** — routeline.py geometry + per-seed store; T84
-  recorder (map-agnostic; Cold Plains line recorded, `line-003.json`);
-  TraverseStep leash with posture return policy + goal-off-line guard
-  (two live-found fixes). Live PASS: traverse to the Cave hugging the
-  line, 3 route.stray events, returned, arrived.
-- **P3 berserk** — style enum ('skirmish'|'charge'), posture-only
-  armor_recast override wired into the ladder; shipped berserk posture.
-  Live PASS supervised (operator judged charge correct; safety silent).
-  NOTE: only proven on low-threat Cold Plains.
-- **P4 Akara restock** — read_vendor_stock (cells fresh per visit),
-  T85c calibration (config/shop_calibration.json, 1536x864),
-  _RestockMixin in the preamble (akara.trade row 2, buys verified by
-  belt count, gold floor 5000 counting carried+stash). Live PASS:
-  "bought 3 healing, 2 mana". Q5 executed: healing/mana OUT of pickit
-  (`45254cd`); REJUVS KEPT (unbuyable, R47.6). deplete_belt test step
-  exists for self-contained re-tests (runs/restock-test.toml).
-- **P6 partial** — ADRs written (posture-fight-styles, vendor-buying);
-  run-log.md event kinds documented.
+## OPEN — the next session's work, in order
 
-## OPEN — the next session's work
-
-1. **Order-booking discrepancy (P5 blocker).** OrderBook arms live
-   (pickup.order_book_diag armed:true) and whitelisted non-potion items
-   drop (item.dropped fired for amethysts/ring/diamonds), but NO
-   pickup.order_open ever appears — while the same path books correctly
-   offline (tests/behavior/test_clear_orders.py + test_traverse_orders,
-   7 tests). An unconditional instrument is IN PLACE: booking now emits
-   order_open OR order_resight per sighting (pickup.py,
-   log_wanted_drops). **One live run with any whitelisted drop is
-   decisive**: neither event firing means log_wanted_drops is not the
-   item.dropped emitter path we think, or book is None on that call
-   path. Runs: runs/pilot-orders-nopre.toml (preamble-less). Read the
-   newest logs/runs/*pilot-orders-nopre* events.jsonl.
-2. **Cleanse never runs on a full inventory (operator-observed).** The
-   bot attempted pickups on a full inventory without cleansing.
-   Cleanse IS enabled (no pending names; cleanse_keep present), so
-   suspect: services.cleanse_queued never set on that path, or
-   maybe_cleanse unreached / declining (hostile radius? in_town?).
-   Instrument collect()/_mark_inventory_full/maybe_cleanse decision
-   points, run full-inventory live, read the log.
-3. **P5 census gate — NOT passed.** After 1+2, one pilot run whose
-   census shows every order collected/gone/budget with trails; the
-   OPERATOR reviews before mandatory_pickup is allowed beyond
-   cold-plains. Note: whitelisted drops are now rare in Cold Plains
-   (potions/low-runes removed) — the drop-driven drill option (operator
-   drops a Shael+/gem, deterministic lifecycle incl. walk-away-return)
-   remains the fast alternative the operator previously declined.
-4. **NPC-dialog misclick family (operator: "ought to be resolved").**
-   Two live manifestations this session:
-   (a) **stash-open misclick** — the open-stash click lands on an NPC
-   (MISCLICK opened npc_menu), 3 attempts, TownError, preamble aborts
-   (~2 of 6 runs!). Spawned as background task task_a372c555 with full
-   evidence; the T83/R234 click-clearance work is prior art
-   (drills/town_click_clearance.py).
-   (b) npc.accidental events during preambles (2x per stalled run).
-   Fixing (a) likely fixes the intermittent 2-tick town stalls that
-   wasted ~4 launches this session.
-5. **Housekeeping at close**: remove diag event pickup.order_book_diag
-   (clear.py step start) once item 1 is solved; delete scratch runs
-   (leash-acceptance, berserk-acceptance, restock-test,
-   pilot-orders-nopre, cold-plains-pilot-orders) or keep deliberately;
-   R242 outcome + R243 already logged; then P6 closeout: teach step,
-   _DONE.md, archive, merge combat-logistics -> m6-countess, resolve
-   R242 in the instruction log.
+1. **The operator opens with a small detour: item pickup setting
+   calibrations** — they will propose the specifics; the deferred
+   "(b) item-pickup/whitelist battery" from R244 is likely part of it.
+   Hear the proposal before touching anything else.
+2. **R246 [verify], STANDING — the P5 census gate**: the operator
+   reviews the batch (`logs/runs/20260813-022855/-024533/-025430-*`)
+   and rules on `mandatory_pickup` beyond cold-plains: promote / keep
+   piloting / adjust (the one tension: combat priority let a diamond
+   expire on the floor after ~285 s — T51 window — while the order
+   held correctly).
+3. **P6 closeout of combat-logistics** after 1–2: remove
+   `pickup.order_book_diag` (clear.py step start); delete-or-keep
+   scratch runs (leash-acceptance, berserk-acceptance, restock-test,
+   pilot-orders-nopre, cold-plains-pilot-orders); teach step (MUST
+   also cover the hotkey-config detour's concepts per its _DONE.md);
+   `_DONE.md`; archive; resolve R242 in the instruction log; refresh
+   the badly stale `docs/project-state.md` (says R236/T82 — reality is
+   R248/T90); merge combat-logistics → m6-countess.
+4. **Small known items**: waypoint first-click aim still misses from
+   the SW approach (~2.8 s/trip; SHELVED low-prio with T83 by the
+   operator — general solutions preferred); a ring (kind 537) refused
+   one stash-deposit click per game (retries fine); execute.py's cast
+   events pass a field named `at` (now preserved as `field_at` — a
+   rename to `cast_at` is P6-grade housekeeping).
 
 ## Where things are
 
-- Plan dir: docs/plans/2026-08-09-combat-logistics/ (plan.md, phase
-  files 01-06, notes.md carries the full live-batch record).
-- Live-run method: guarded-run via the bridge —
-  `tools/guarded-run.ps1 -Run runs\<file>.toml -Games 1` queued as a
-  bridge cmd (see CLAUDE.md bridge protocol); ALWAYS read
-  logs/runs/<newest>/events.jsonl before judging.
-- Standing mandate R241 Q8 covered THIS batch's live work; it was
-  paused by the operator 2026-08-10 ("Let's pause live testing") —
-  re-confirm before resuming launches.
+- Live-run method unchanged (bridge, guarded-run, ALWAYS read
+  `logs/runs/<newest>/events.jsonl` first; census via
+  `python -m pd2bot.runlog <dir> --pickup`); plus the NEW sampler file
+  per launch (`logs/samples-*.log`) for any lost-seconds question.
+- Standing mandate: live launches were re-authorized this session for
+  the batch + demos; the operator has been present throughout. Confirm
+  presence before new launches as usual.
+- This plan dir's `notes.md` carries the full session record (three
+  dated 2026-08-13 sections); the instruction log has R244–R247
+  resolved inline.
