@@ -237,3 +237,33 @@ State: 1239 tests, ruff clean. Still owed LIVE (R244): one verification
 batch — preamble runs confirm the misclick fix and the order/cleanse
 event stream under their real kinds, and the P5 census comes from the
 same runs for the operator's review.
+
+## 2026-08-13 R244 game 1: ABORTED — the restock over-buy
+
+The first verification run never left town: the restock station bought
+healing/mana potions for 127.5 s straight into the INVENTORY until the
+client's can't-carry popup stopped everything (operator aborted; the
+run then exited on the refusal streak, watchdog clean). Two stacked
+design holes in the P4 chore, both offline-visible in hindsight and
+neither covered by a test (only the pure planning half was tested):
+
+1. `_belt_shortfall` counts bottles against minimums and knows nothing
+   about COLUMNS. A belt whose columns are occupied by other types
+   (rejuvs squatting — the R178 shape) reads "short" forever while the
+   game routes every purchase into the inventory. `_belt_accepts` — the
+   routing question — existed in belt.py and the restock never asked it.
+2. `_buy_until` believed an unverified click was a non-event and
+   bounded CLICKS (`need + 12` per type), not purchases. A vendor
+   right-click is a purchase wherever the potion lands; the 5000 gold
+   floor cannot save you from cheap potions. The 127.5 s matches ~16
+   clicks x (3 s failed verify + settle) x 2 types exactly.
+
+Fix (commit pending): the station asks `_belt_accepts` before any gold
+moves (a short-but-no-room type is skipped with a notice); a purchase
+that lands in the inventory STOPS its type immediately (the bottle is
+the proof the belt is out of room); true mis-aim clicks are bounded at
+MAX_DEAD_CLICKS=3; and the station finally emits the `town.restock`
+event run-log.md had documented but never received. The fake town got a
+vendor that routes purchases the way the game does, and the station
+loop has tests for all four shapes (happy path, no-room refusal,
+mid-loop overflow stop, dead-click bound).

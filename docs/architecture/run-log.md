@@ -371,8 +371,14 @@ honest `kind <n>` fallback, and add the kind to the table above.
   in one run); the book rebinds an open order to the item's new id at
   the same kind+position — logged as a resight — and a CLOSED order
   stays closed whatever the id says.
-- `town.restock` — (arrives with the live-gated Akara chore) potions
-  bought per type, with gold before/after.
+- `town.restock` — one per restock station visit that reached (or
+  skipped at) the buying decision: `bought` (belt-verified buys per
+  type), `no_room` (types short by count but with no belt column to
+  take them — not bought), `overflowed` (types stopped because a
+  purchase landed in the inventory), `gold_before`/`gold_after`.
+  First emitted 2026-08-13, with the over-buy fix: the station's
+  2026-08-13 failure bought ~30 potions into the inventory precisely
+  because an unverified vendor click was believed to be a non-event.
 
 ## Event kinds added by the cleanse-starvation fix (2026-08-13)
 

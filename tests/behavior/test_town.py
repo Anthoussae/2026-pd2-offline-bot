@@ -177,6 +177,13 @@ class Town:
         # keeps it as hidden state — which is exactly the bot's problem: it
         # cannot see whether this is true before pressing Enter.
         self.gold_dialog = False
+        # Akara's shop (the restock station tests, 2026-08-13). Keys are
+        # the calibrated (px, py) a right-click buys at; the fake routes
+        # the bought potion the way the GAME does — a belt column of its
+        # own type with room, an empty column, else the INVENTORY. That
+        # routing is the entire over-buy bug, so the fake must own it.
+        self.vendor_spots: dict[tuple[int, int], int] = {}
+        self.vendor_sells = True
 
     # -- readers ---------------------------------------------------------------
 
@@ -300,6 +307,23 @@ class Town:
 
     def panel_click(self, panel_id, sx, sy, button="left", shift=False, ctrl=False):
         self.panel_clicks.append((panel_id, sx, sy, button, shift, ctrl))
+        if panel_id == offsets.UI_NPCSHOP and button == "right":
+            kind = self.vendor_spots.get((sx, sy))
+            if kind is not None and self.vendor_sells:
+                self._uid += 1
+                bottle = potion(950 + self._uid, kind)
+                column = self._route_belt_column(bottle)
+                if column is not None:
+                    slot = column + offsets.BELT_COLUMNS * len(
+                        self._belt_column_items(column)
+                    )
+                    self.belt.append(
+                        potion(950 + self._uid, kind, belt_slot=slot)
+                    )
+                else:
+                    self.inventory.append(bottle)
+                self.gold = max(0, self.gold - 320)
+            return
         if ctrl and panel_id == offsets.UI_INVENTORY and button == "right":
             # Ctrl+right-click drops the item to the ground (R117). Routed
             # BEFORE the plain right-click branch: an unmodified reading of
@@ -400,6 +424,10 @@ class Town:
         if self.dialog_row == self.dialog_rows:  # Cancel, always last
             self.panels.discard(offsets.UI_NPCMENU)
         elif self.dialog_row == 2 and self.dialog_npc == offsets.NPC_CHARSI:
+            self.panels.add(offsets.UI_NPCSHOP)
+        elif self.dialog_row == 2 and self.dialog_npc == offsets.NPC_AKARA:
+            # Talk / TRADE / Cancel (operator-confirmed 2026-08-10): row 2
+            # opens her shop — the restock station's doorway.
             self.panels.add(offsets.UI_NPCSHOP)
         elif self.dialog_row == 2 and self.dialog_npc == offsets.NPC_KASHYA:
             if self.merc_alive:
@@ -2153,6 +2181,122 @@ def test_the_npc_click_waits_out_a_bystander_covering_the_target(town):
     assert town.dialog_npc == offsets.NPC_AKARA
     dodges = [f for k, f in events if k == "town.click_dodge"]
     assert dodges and dodges[0]["strategy"] == "wait" and dodges[0]["cleared"]
+
+
+# -- the restock station's driving loop (2026-08-13) ---------------------------
+#
+# Only the PLANNING half had tests (test_restock.py); the station shipped
+# on one favorable live run and then bought ~30 potions into the
+# inventory: a vendor right-click is a purchase wherever the potion
+# lands, and the loop believed an unverified click was a non-event.
+
+HEAL_KIND = next(iter(offsets.HEALING_POTION_KINDS))
+MANA_KIND = next(iter(offsets.MANA_POTION_KINDS))
+REJUV_KIND = next(iter(offsets.REJUV_POTION_KINDS))
+
+VENDOR_CALIB = {
+    "healing": {"fraction": [0.25, 0.25]},
+    "mana": {"fraction": [0.5, 0.25]},
+}
+
+
+def vendor_town(town, monkeypatch):
+    """Wire the fake shop: calibration + which pixel sells which potion."""
+    monkeypatch.setattr(
+        "pd2bot.behavior.town.restock.load_calibration",
+        lambda *a, **k: VENDOR_CALIB,
+    )
+    for potion_type, kind in (("healing", HEAL_KIND), ("mana", MANA_KIND)):
+        fx, fy = VENDOR_CALIB[potion_type]["fraction"]
+        town.vendor_spots[(round(fx * 1536), round(fy * 864))] = kind
+    return town
+
+
+def shop_right_clicks(town):
+    return [
+        c for c in town.panel_clicks
+        if c[0] == offsets.UI_NPCSHOP and c[3] == "right"
+    ]
+
+
+def test_restock_buys_to_the_minimums_and_verifies_by_the_belt(
+    town, monkeypatch
+):
+    vendor_town(town, monkeypatch)
+    step = layer(town)
+    events = _dodge_log(step)
+    report = PreambleReport()
+
+    step.restock_at_akara(report)
+
+    assert sum(1 for i in town.belt if i.is_healing_potion) == 4
+    assert sum(1 for i in town.belt if i.is_mana_potion) == 2
+    assert town.inventory == [], "nothing may land in the inventory"
+    assert len(shop_right_clicks(town)) == 6, "exactly one click per buy"
+    assert any("bought 4 healing, 2 mana" in line for line in report.log)
+    restocks = [f for k, f in events if k == "town.restock"]
+    assert restocks and restocks[0]["bought"] == {"healing": 4, "mana": 2}
+    assert restocks[0]["gold_before"] > restocks[0]["gold_after"]
+
+
+def test_restock_refuses_a_type_the_belt_has_no_column_for(town, monkeypatch):
+    """The 2026-08-13 precondition: a belt whose columns are occupied by
+    OTHER types reads 'short' by count forever, while every purchase
+    would route to the inventory. No gold may move."""
+    vendor_town(town, monkeypatch)
+    town.belt = [
+        potion(700 + c, REJUV_KIND, belt_slot=c) for c in range(offsets.BELT_COLUMNS)
+    ]
+    step = layer(town)
+    report = PreambleReport()
+
+    step.restock_at_akara(report)
+
+    assert shop_right_clicks(town) == [], "no purchase may even be attempted"
+    assert town.inventory == []
+    assert any("no room" in line or "no column" in line for line in report.log
+               ) or any("no column" in n for n in town.notices)
+
+
+def test_a_buy_that_lands_in_the_inventory_stops_the_type(town, monkeypatch):
+    """Room can run out MID-loop even when the precheck passed: the belt
+    had one open column and the shortfall was bigger. The purchase that
+    lands in the inventory is the proof — stop immediately, keep the
+    bottle on the record, and never click that type again."""
+    vendor_town(town, monkeypatch)
+    # Three columns squatted by rejuvs, one empty: healing is accepted
+    # (the empty column) but only 4 fit; a minimum of 6 wants more.
+    town.belt = [potion(700 + c, REJUV_KIND, belt_slot=c) for c in range(3)]
+    config = replace(CALIBRATED, min_healing=6, min_mana=0)
+    step = layer(town, config=config)
+    events = _dodge_log(step)
+    report = PreambleReport()
+
+    step.restock_at_akara(report)
+
+    assert sum(1 for i in town.belt if i.is_healing_potion) == 4
+    overflow = [i for i in town.inventory if i.is_healing_potion]
+    assert len(overflow) == 1, "exactly ONE purchase may land in the grid"
+    assert any("landed in the INVENTORY" in n for n in town.notices)
+    restocks = [f for k, f in events if k == "town.restock"]
+    assert restocks and restocks[0]["overflowed"] == ["healing"]
+
+
+def test_dead_clicks_are_bounded_tightly(town, monkeypatch):
+    """A click that moved NEITHER the belt nor the inventory is a
+    mis-aim; the old bound allowed 12 of them per type at a real
+    purchase each. The new bound is small and click-count honest."""
+    from pd2bot.behavior.town.restock import MAX_DEAD_CLICKS
+
+    vendor_town(town, monkeypatch)
+    town.vendor_sells = False  # the calibrated spot buys nothing at all
+    step = layer(town)
+    report = PreambleReport()
+
+    step.restock_at_akara(report)
+
+    assert len(shop_right_clicks(town)) == 2 * MAX_DEAD_CLICKS
+    assert town.belt == [] and town.inventory == []
 
 
 def test_deposit_closes_a_stale_stash_then_opens_it_itself(town):
