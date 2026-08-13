@@ -139,6 +139,9 @@ class Town:
         self.resurrect_works = True
         self.world_clicks = []
         self.panel_clicks = []
+        # Bystanders beyond the standard cast, for the sprite-box dodge
+        # tests (2026-08-13): a pacer parked in front of the stash.
+        self.extra_allies = []
         self.pressed = []
         self.walked = []
         self.pos = (5880, 5720)
@@ -206,6 +209,7 @@ class Town:
             allies.append(ally(offsets.NPC_CHARSI, CHARSI_POS))
         if self.merc_alive:
             allies.append(ally(271, (5881, 5721)))
+        allies.extend(self.extra_allies)
         return GameSnapshot(
             in_game=True, taken_at=0.0,
             area=Area(level_no=1, position=(0, 0), size=(500, 500)),
@@ -2039,6 +2043,116 @@ def test_open_object_panel_short_circuits_when_already_open(town):
     step = layer(town)
     step.open_object_panel(offsets.OBJ_STASH, "the stash", offsets.UI_STASH)
     assert town.world_clicks == [] and town.walked == []
+
+
+def _dodge_log(step):
+    """Collect this layer's runlog events as (kind, fields) tuples."""
+    events = []
+    step.runlog = SimpleNamespace(
+        event=lambda kind, **fields: events.append((kind, fields)),
+        enabled=True,
+    )
+    return events
+
+
+def test_the_stash_click_dodges_a_bystanders_sprite_box(town):
+    """The 2026-08-10 preamble killer: 'MISCLICK opened npc_menu', three
+    identical attempts, TownError — 2 of 6 runs. The travel path got the
+    T83 sprite rule on 2026-08-08; the deliberate interact click did not.
+    A bystander drawn just down-screen of the stash owns the click at its
+    feet, so the aim must step out of her box BEFORE clicking, not after
+    three misclicks."""
+    # 6,6 down-screen of the stash: her box covers aims (0,0)/(-1,-1)/(1,1)
+    # (drawn 120/140/100 px above her feet) but not (-2,-2) (160 px, above
+    # her head). Geometry per the T83 constants.
+    town.extra_allies.append(ally(150, (STASH_POS[0] + 6, STASH_POS[1] + 6)))
+    step = layer(town)
+    events = _dodge_log(step)
+
+    step.open_object_panel(offsets.OBJ_STASH, "the stash", offsets.UI_STASH)
+
+    assert offsets.UI_STASH in town.panels
+    assert offsets.UI_NPCMENU not in town.panels, "the click hit the bystander"
+    assert town.world_clicks[-1] == (STASH_POS[0] - 2, STASH_POS[1] - 2)
+    dodges = [f for k, f in events if k == "town.click_dodge"]
+    assert dodges and dodges[0]["strategy"] == "offset"
+    assert dodges[0]["blocker_kind"] == 150
+
+
+def test_a_fully_blocked_stash_waits_for_the_pacer_then_clicks(town):
+    """When the bystander stands right on the stash, NO aim offset escapes
+    her box (they all move the click along the axis her sprite is 190 px
+    tall in). Town NPCs pace, so the answer is a bounded wait — and if she
+    never moves, the click goes ahead anyway: the MISCLICK recovery still
+    backstops it, and standing forever loses more runs than one misclick."""
+    town.extra_allies.append(ally(150, (STASH_POS[0] + 3, STASH_POS[1] + 3)))
+    step = layer(town)
+    events = _dodge_log(step)
+    real = town.snapshot
+    calls = {"n": 0}
+
+    def pacing():
+        # The threshold sits above the handful of snapshots the approach
+        # takes BEFORE the aim check, so she is still there when the wait
+        # begins, and well below the wait's own polling budget.
+        calls["n"] += 1
+        if calls["n"] > 12:
+            town.extra_allies.clear()  # she wandered off mid-wait
+        return real()
+
+    step.snapshot = pacing
+    step.open_object_panel(offsets.OBJ_STASH, "the stash", offsets.UI_STASH)
+
+    assert offsets.UI_STASH in town.panels
+    dodges = [f for k, f in events if k == "town.click_dodge"]
+    assert dodges and dodges[0]["strategy"] == "wait"
+    assert dodges[0]["cleared"] is True
+    assert dodges[0]["waited_s"] > 0
+
+
+def test_a_blocked_stash_still_clicks_when_the_pacer_never_moves(town):
+    town.extra_allies.append(ally(150, (STASH_POS[0] + 3, STASH_POS[1] + 3)))
+    step = layer(town)
+    events = _dodge_log(step)
+
+    step.open_object_panel(offsets.OBJ_STASH, "the stash", offsets.UI_STASH)
+
+    # The fake opens the stash for any click within 2 subtiles of the
+    # tile, blocker or no blocker — what matters here is that the step
+    # DID click after the bounded wait instead of hanging or raising.
+    assert offsets.UI_STASH in town.panels
+    dodges = [f for k, f in events if k == "town.click_dodge"]
+    assert dodges and dodges[0]["cleared"] is False
+    assert dodges[0]["waited_s"] >= CALIBRATED.aim_blocker_wait_s
+
+
+def test_the_npc_click_waits_out_a_bystander_covering_the_target(town):
+    """The silent variant: a bystander whose sprite covers Akara gets the
+    click, HER menu opens, `landed` reads true — and the keyboard row that
+    follows selects from the WRONG NPC's menu (Akara's row 2 trades;
+    Kashya's row 2 hires, for 50,000 gold). Wait for the pacer, then click
+    the freshest read of the target."""
+    town.extra_allies.append(ally(150, (AKARA_POS[0] + 4, AKARA_POS[1] + 4)))
+    step = layer(town)
+    events = _dodge_log(step)
+    real = town.snapshot
+    calls = {"n": 0}
+
+    def pacing():
+        # Above the approach's own snapshot count, below the wait's
+        # polling budget — same reasoning as the stash test above.
+        calls["n"] += 1
+        if calls["n"] > 12:
+            town.extra_allies.clear()
+        return real()
+
+    step.snapshot = pacing
+    step.open_npc_dialog(offsets.NPC_AKARA, "Akara")
+
+    assert offsets.UI_NPCMENU in town.panels
+    assert town.dialog_npc == offsets.NPC_AKARA
+    dodges = [f for k, f in events if k == "town.click_dodge"]
+    assert dodges and dodges[0]["strategy"] == "wait" and dodges[0]["cleared"]
 
 
 def test_deposit_closes_a_stale_stash_then_opens_it_itself(town):

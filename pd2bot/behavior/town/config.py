@@ -199,6 +199,14 @@ class TownConfig:
     object_aim_offsets: tuple[tuple[int, int], ...] = (
         (0, 0), (-1, -1), (1, 1), (-2, -2),
     )
+    # How long a deliberate interact click may wait for a bystander NPC
+    # to pace out of the aim's sprite box (T83's screen-space rule,
+    # applied to interact clicks after 2026-08-10: 'MISCLICK opened
+    # npc_menu' aborted 2 of 6 preambles at the stash). Town NPCs pace
+    # on a few-second cycle, so a short wait usually clears the aim; the
+    # click goes ahead regardless when the wait runs out, because the
+    # MISCLICK recovery still backstops it and standing forever is worse.
+    aim_blocker_wait_s: float = 4.0
     interact_timeout_s: float = 6.0
     # Clicking an NPC from across the screen makes the character walk over
     # before the dialog opens, so this wait covers a journey. Six seconds

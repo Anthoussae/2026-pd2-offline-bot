@@ -389,3 +389,10 @@ cleanse path's decision points now speak (`docs/plans/
 - `inventory.cleanse_deferred` — a QUEUED cleanse did not run this tick:
   `reason` (hostiles in radius, or no cleanse service wired). Once per
   streak of the same reason, so a lingering fight is one event.
+- `town.click_dodge` — a deliberate interact click found a bystander's
+  sprite box over its aim (the T83 rule, applied to interact clicks
+  after the 2026-08-10 stash misclicks): `target`, `strategy`
+  (`"offset"` = a clear aim offset existed; `"wait"` = every aim was
+  covered and the click waited for the pacer, `cleared` saying whether
+  she moved before `aim_blocker_wait_s` ran out), `blocker_kind`,
+  `blocker_position`, and the offsets involved.

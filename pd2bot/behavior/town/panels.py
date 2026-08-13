@@ -14,6 +14,12 @@ from pd2bot.behavior.town.config import (
 )
 from pd2bot.input.gated import VK_DOWN, VK_RETURN
 from pd2bot.input.screen import projection_for
+
+# The T83 sprite box: the client hit-tests SPRITES in screen space, and a
+# world-space radius cannot express that (the whole NPC-misclick lesson).
+# Imported rather than re-typed for the same reason navigate imports the
+# screen constants — display geometry must have exactly one home.
+from pd2bot.nav.navigate import _inside_sprite
 from pd2bot.perception import uistate
 from pd2bot.uipoints import UIPoint
 
@@ -269,6 +275,98 @@ class _PanelMixin:
             f"panels now open: {', '.join(state.names) or 'none'}"
         )
 
+    def _aim_blockers(
+        self, point: tuple[int, int], ignore_kind: int | None = None
+    ) -> list:
+        """Town allies whose sprite box a world click at `point` would hit.
+
+        The same screen-space rule the travel path learned from T83
+        (2026-08-08): the client hit-tests sprites, so a click at an
+        object's feet with an NPC pacing just down-screen of it opens her
+        dialog instead. `ignore_kind` exempts the unit we MEAN to click.
+        """
+        snap = self.snapshot()
+        return [
+            ally for ally in snap.allies
+            if ally.kind != ignore_kind
+            and _inside_sprite(ally.position, point)
+        ]
+
+    def _unblocked_aim(
+        self,
+        what: str,
+        clicked: tuple[int, int],
+        aims: tuple[tuple[int, int], ...],
+        attempt: int,
+    ) -> tuple[tuple[int, int], tuple[int, int]]:
+        """The attempt's aim, dodged out of any bystander's sprite box.
+
+        The deliberate interact click had no sprite rule until 2026-08-13,
+        a full T83 after the travel clicks got theirs — and the stash paid
+        for the gap live: 'MISCLICK opened npc_menu', three identical
+        attempts, TownError, preamble aborted (2 of 6 runs, 2026-08-10).
+        The aim rotation could never save it, because its offsets all move
+        the click along the same screen axis (dx == dy shifts only
+        screen-y), which is the axis a sprite is 190 px tall in.
+
+        Prefer the attempt's own offset; if a bystander's box covers it,
+        take the first offset in the rotation that is clear. If EVERY aim
+        is covered, wait a bounded few seconds — town NPCs pace, and the
+        blocker is usually gone shortly — then click the attempt's own aim
+        regardless: the MISCLICK recovery still backstops the click, and
+        standing forever loses more runs than one more misclick does.
+        Every dodge and every wait is on the record (`town.click_dodge`).
+        """
+        def clear_choice():
+            for i in range(len(aims)):
+                offset = aims[(attempt + i) % len(aims)]
+                point = (clicked[0] + offset[0], clicked[1] + offset[1])
+                blockers = self._aim_blockers(point)
+                if not blockers:
+                    return offset, point
+            return None
+
+        own = aims[attempt % len(aims)]
+        own_point = (clicked[0] + own[0], clicked[1] + own[1])
+        first_blockers = self._aim_blockers(own_point)
+        if not first_blockers:
+            return own, own_point
+        choice = clear_choice()
+        if choice is not None:
+            self.runlog.event(
+                "town.click_dodge",
+                target=what, strategy="offset",
+                from_offset=list(own), to_offset=list(choice[0]),
+                blocker_kind=first_blockers[0].kind,
+                blocker_position=list(first_blockers[0].position),
+            )
+            return choice
+        started = self._clock()
+        deadline = started + self.config.aim_blocker_wait_s
+        while self._clock() < deadline:
+            self._check_stop()
+            self._sleep(self.config.poll_s)
+            choice = clear_choice()
+            if choice is not None:
+                self.runlog.event(
+                    "town.click_dodge",
+                    target=what, strategy="wait",
+                    waited_s=round(self._clock() - started, 1),
+                    cleared=True, to_offset=list(choice[0]),
+                    blocker_kind=first_blockers[0].kind,
+                    blocker_position=list(first_blockers[0].position),
+                )
+                return choice
+        self.runlog.event(
+            "town.click_dodge",
+            target=what, strategy="wait",
+            waited_s=round(self._clock() - started, 1),
+            cleared=False, to_offset=list(own),
+            blocker_kind=first_blockers[0].kind,
+            blocker_position=list(first_blockers[0].position),
+        )
+        return own, own_point
+
     def open_object_panel(self, kind: int, name: str, panel_id: int) -> tuple[int, int]:
         """Click a world object and wait for its panel. Same shape as
         `open_npc_dialog`, and for the same reasons.
@@ -322,8 +420,10 @@ class _PanelMixin:
                 else None
             )
             state = uistate.read_ui_state(self.session, self.panel._ui_array)
-            offset = aims[attempt % len(aims)]
-            aim = (clicked[0] + offset[0], clicked[1] + offset[1])
+            # `turn` rotates the stand, the offsets rotate the aim — and
+            # since 2026-08-13 the aim also dodges bystanders' sprite
+            # boxes (the stash misclick, 2 of 6 preambles on 2026-08-10).
+            offset, aim = self._unblocked_aim(name, clicked, aims, attempt)
             screen = self.gated.click_world(*aim)
             landed = self._await(
                 lambda: self._panel_open(panel_id), self.config.npc_walk_timeout_s
@@ -379,6 +479,33 @@ class _PanelMixin:
             if self._panel_open(offsets.UI_NPCMENU):
                 return clicked if clicked is not None else self._find_ally(kind)
             clicked = self._approach_ally(kind, name)
+            # A bystander whose sprite covers the target gets the click —
+            # and HERE that failure is silent: the wrong npc_menu opens,
+            # `landed` reads true, and the keyboard row that follows
+            # selects from the WRONG NPC's menu (Akara's row 2 trades;
+            # another NPC's row 2 does something else entirely). Same T83
+            # sprite rule as the object path: wait briefly for the pacer
+            # to clear, then click the freshest read of the target.
+            blockers = self._aim_blockers(clicked, ignore_kind=kind)
+            if blockers:
+                started = self._clock()
+                cleared = self._await(
+                    lambda at=clicked: not self._aim_blockers(
+                        self._find_ally(kind) or at, ignore_kind=kind
+                    ),
+                    self.config.aim_blocker_wait_s,
+                )
+                self.runlog.event(
+                    "town.click_dodge",
+                    target=name, strategy="wait",
+                    waited_s=round(self._clock() - started, 1),
+                    cleared=cleared,
+                    blocker_kind=blockers[0].kind,
+                    blocker_position=list(blockers[0].position),
+                )
+                fresh = self._find_ally(kind)
+                if fresh is not None:
+                    clicked = fresh
             self.gated.click_world(*clicked)
             # Clicking an NPC from a distance makes the character WALK to
             # them first, so this wait covers a journey, not a frame.
