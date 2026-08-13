@@ -51,8 +51,10 @@ DEFAULT_HOTKEYS: dict[int, int] = {
     offsets.SKILL_REVIVE: VK_F6,
 }
 
-# Belt columns 0-3 are the keys 1-4 (permanent layout, R53: mana / rejuv /
-# health / health — but the *meaning* is config; this maps column to key).
+# Belt columns 0-3 are the keys 1-4 BY DEFAULT (R53 layout note: the
+# column MEANINGS are config). Since R247 the character's real belt keys
+# come from their .key file via `keys.KeyBindings.belt`; this tuple is
+# the no-keyfile fallback the belt functions default to.
 BELT_KEYS = (VK_1, VK_2, VK_3, VK_4)
 
 # One press usually registers within a frame or two; the game runs a 25 fps
@@ -163,14 +165,22 @@ def _failure_context(session: GameSession, waited: float) -> str:
     return "; ".join(parts)
 
 
-def belt_drink(gated: GatedInput, column: int) -> None:
-    """Press one belt column's drink key (0-3 -> keys 1-4), through the gate."""
-    if not 0 <= column < len(BELT_KEYS):
+def belt_drink(
+    gated: GatedInput, column: int, belt: tuple[int, ...] | None = None
+) -> None:
+    """Press one belt column's drink key, through the gate.
+
+    `belt` is the character's real column keys (`KeyBindings.belt`,
+    R247); None falls back to the default 1-4."""
+    keys = belt if belt is not None else BELT_KEYS
+    if not 0 <= column < len(keys):
         raise ValueError(f"belt column must be 0-3, got {column}")
-    gated.press_key(BELT_KEYS[column])
+    gated.press_key(keys[column])
 
 
-def belt_give_merc(gated: GatedInput, column: int) -> None:
+def belt_give_merc(
+    gated: GatedInput, column: int, belt: tuple[int, ...] | None = None
+) -> None:
     """Shift + one belt column's key: feed that potion to the mercenary
     (R179, chord corrected to Shift at R183 — user-verified by hand).
 
@@ -178,6 +188,7 @@ def belt_give_merc(gated: GatedInput, column: int) -> None:
     threshold, pacing, which column holds a healing potion) is the reflex
     ladder's; the chord sequencing (Shift provably down first) is the
     input layer's."""
-    if not 0 <= column < len(BELT_KEYS):
+    keys = belt if belt is not None else BELT_KEYS
+    if not 0 <= column < len(keys):
         raise ValueError(f"belt column must be 0-3, got {column}")
-    gated.press_key_with_shift(BELT_KEYS[column])
+    gated.press_key_with_shift(keys[column])

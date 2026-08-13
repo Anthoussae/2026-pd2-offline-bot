@@ -47,6 +47,7 @@ from pd2bot.behavior.steps import RunServices, build_registry
 from pd2bot.behavior.steps.orders import OrderBook
 from pd2bot.behavior.town import PreambleReport, TownConfig, TownLayer
 from pd2bot.cycle import GameCycle
+from pd2bot.input import keys
 from pd2bot.input.chat import Chat
 from pd2bot.input.gated import GatedInput
 from pd2bot.input.menu import MenuInput
@@ -261,6 +262,10 @@ class BotPaths:
     pickit: Path = CONFIG / "pickit.toml"
     item_table: Path = CONFIG / "item_ids.toml"
     run: Path = RUNS / "cold-plains.toml"
+    # The character's .key file (R247). None = discover it from the
+    # running client's install; set it explicitly when the save dir
+    # holds several characters.
+    keyfile: Path | None = None
 
 
 @dataclass
@@ -423,11 +428,32 @@ class LiveBot:
             combat_upkeep=lambda snap: combat.upkeep(snap),
             clock=self.clock,
         )
+        # The character's REAL keybindings (R247), re-read per game so a
+        # mid-session rebind is honored (the client rewrites the file on
+        # the spot). Drift between the class config's skill keys and the
+        # client's layout refuses HERE, before a game is created around
+        # it. The town layer is session-scoped, so it takes the repoint
+        # treatment runlog gets.
+        bindings = keys.resolve_bindings(
+            getattr(session, "process_id", None),
+            override=self.paths.keyfile,
+            notice=lambda text: print(text, flush=True),
+        )
+        keys.verify_skill_hotkeys(
+            self.class_config.hotkeys,
+            bindings,
+            skill_names={
+                skill_id: name
+                for name, skill_id in self.class_config.skills.items()
+            },
+        )
+        self.town.bindings = bindings
         executor = GameActionExecutor(
             session=session,
             gated=self.gated,
             walk_to=self.navigator.walk_to,
             hotkeys=self.class_config.hotkeys,
+            bindings=bindings,
             clock=self.clock,
             # Right-skill parking (M6 P3, user note 1): after a cast
             # burst, switch back to the armor skill so Revive never stays

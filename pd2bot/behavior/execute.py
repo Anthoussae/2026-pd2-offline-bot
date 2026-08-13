@@ -46,7 +46,8 @@ from pd2bot.behavior.actions import (
     ParkSkill,
     PickUpItem,
 )
-from pd2bot.input.gated import VK_MENU, GatedInput, InputRefused
+from pd2bot.input import keys
+from pd2bot.input.gated import GatedInput, InputRefused
 from pd2bot.input.skills import (
     SkillSwitchFailed,
     belt_drink,
@@ -264,6 +265,10 @@ class GameActionExecutor(ActionLogging):
     gated: GatedInput
     walk_to: Callable[[tuple[int, int]], object]
     hotkeys: dict[int, int]  # skill id -> VK, from the class config
+    # The character's real key layout (belt columns, the Show Items label
+    # toggle) from their .key file — R247. Defaults keep sims and bare
+    # drills on the historical assumptions.
+    bindings: keys.KeyBindings = field(default_factory=keys.default_bindings)
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
     # How long to keep asking the game whether the cast is still playing
@@ -450,15 +455,22 @@ class GameActionExecutor(ActionLogging):
             # Deliberately BEFORE the cast check: a drink is a keypress, and
             # T48 proved keypresses land mid-animation. The ladder's fastest
             # rungs must never queue behind an animation.
-            belt_drink(self.gated, action.column)
-            self._record(action, f"key {action.column + 1} ({action.potion_type})")
+            belt_drink(self.gated, action.column, belt=self.bindings.belt)
+            self._record(
+                action,
+                f"key {keys.key_name(self.bindings.belt[action.column])} "
+                f"({action.potion_type})",
+            )
             return
 
         if isinstance(action, GiveMercPotion):
             # A keypress chord, same reasoning as DrinkPotion: T48 proved
             # keypresses land mid-animation, so no cast check queues it.
-            belt_give_merc(self.gated, action.column)
-            self._record(action, f"shift+key {action.column + 1} (merc)")
+            belt_give_merc(self.gated, action.column, belt=self.bindings.belt)
+            self._record(
+                action,
+                f"shift+key {keys.key_name(self.bindings.belt[action.column])} (merc)",
+            )
             return
 
         # Everything below CLICKS, and a click inside a cast animation is the
@@ -550,7 +562,9 @@ class GameActionExecutor(ActionLogging):
         # attempt. Unknown (None) means do not touch the key.
         if label_display_on(self.session) is False:
             try:
-                self.gated.press_key(VK_MENU)
+                # The character's real Show Items key (R247) — ALT unless
+                # rebound; keyfile-resolved by the wiring.
+                self.gated.press_key(self.bindings.show_items)
                 self.sleep(0.1)
             except InputRefused:
                 pass

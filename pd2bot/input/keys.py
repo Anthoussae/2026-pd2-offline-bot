@@ -168,6 +168,121 @@ def load_bindings(path: str | Path) -> KeyBindings:
     )
 
 
+def discover_keyfile(process_id: int | None) -> Path | None:
+    """The character's `.key` file, found from the RUNNING client.
+
+    The exe path (via the process id) locates the install —
+    `<root>\\ProjectD2\\Game.exe` → `<root>\\Save\\ProjectD2\\` — and a
+    single `*.key` there is unambiguous. Several candidates → refuse
+    with the list (a `BotPaths.keyfile` override resolves it); no client
+    or no file → None, and the caller falls back to defaults. Never
+    guesses between characters: pressing another character's layout is
+    exactly the failure this whole module exists to end.
+    """
+    if process_id is None:
+        return None
+    exe = _process_exe(process_id)
+    if exe is None:
+        return None
+    save_dir = exe.parent.parent / "Save" / "ProjectD2"
+    if not save_dir.is_dir():
+        return None
+    candidates = sorted(save_dir.glob("*.key"))
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        raise KeyfileError(
+            f"{save_dir} holds {len(candidates)} .key files "
+            f"({', '.join(c.name for c in candidates)}) — set "
+            "BotPaths.keyfile to the character the bot plays"
+        )
+    return candidates[0]
+
+
+def _process_exe(process_id: int) -> Path | None:
+    """The process's image path, via QueryFullProcessImageNameW."""
+    import ctypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION, False, process_id
+    )
+    if not handle:
+        return None
+    try:
+        size = ctypes.c_ulong(32768)
+        buffer = ctypes.create_unicode_buffer(size.value)
+        ok = kernel32.QueryFullProcessImageNameW(
+            handle, 0, buffer, ctypes.byref(size)
+        )
+        return Path(buffer.value) if ok else None
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def resolve_bindings(
+    process_id: int | None,
+    override: Path | None = None,
+    notice=print,
+) -> KeyBindings:
+    """Discovery + load + fallback, with the operator told what happened.
+
+    The one entry point the wiring calls (per game, so a mid-session
+    rebind is honored — the client rewrites the file on the spot).
+    Required-function refusals and multi-candidate ambiguity PROPAGATE:
+    those need a human. Absence falls back to defaults with one notice.
+    """
+    path = Path(override) if override is not None else discover_keyfile(process_id)
+    if path is None:
+        bindings = default_bindings()
+        notice(
+            "keybindings: no character .key file found — using the "
+            "default layout (F1.., 1-4, I, Alt)"
+        )
+        return bindings
+    bindings = load_bindings(path)
+    for note in bindings.notes:
+        notice(f"keybindings: {note}")
+    return bindings
+
+
+def verify_skill_hotkeys(
+    hotkeys: dict[int, int],
+    bindings: KeyBindings,
+    skill_names: dict[int, str] | None = None,
+) -> None:
+    """The class config's skill keys must exist in the client's layout.
+
+    The toml declares WHICH SKILL the operator put on a key; only the
+    client knows whether that key still drives a skill-hotkey slot at
+    all. A rebind that drifts under the toml used to fail live as
+    unexplained `SkillSwitchFailed`s mid-run; this turns it into a
+    build-time refusal that names the drift. Skipped for default-source
+    bindings (nothing to verify against).
+    """
+    if bindings.source == "defaults":
+        return
+    names = skill_names or {}
+    drifted = [
+        f"skill {names.get(skill_id, skill_id)} is configured on "
+        f"{key_name(vk)}, but the client's keyfile binds no skill-hotkey "
+        "slot to that key"
+        for skill_id, vk in hotkeys.items()
+        if bindings.skill_slot_for(vk) is None
+    ]
+    if drifted:
+        slots = ", ".join(
+            f"slot {i + 1}={key_name(k)}" for i, k in enumerate(bindings.skill_keys)
+        )
+        raise KeyfileError(
+            "; ".join(drifted)
+            + f" — the client's skill keys are: {slots} "
+            f"(source {bindings.source}). Fix config/necro.toml [hotkeys] "
+            "or rebind in the game's Configure Controls."
+        )
+
+
 def key_name(vk: int | None) -> str:
     """A human-readable name for a VK, for messages and the T89 table."""
     if vk is None:

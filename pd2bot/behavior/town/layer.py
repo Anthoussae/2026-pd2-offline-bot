@@ -120,6 +120,13 @@ class TownLayer(
         # layer is SESSION-scoped and outlives any one run, so the wiring
         # repoints it per run.
         self.runlog = runlog if runlog is not None else NullRunLog()
+        # The character's real key layout (R247), a holder like `runlog`:
+        # the layer is session-scoped, so the wiring re-points this per
+        # run after re-reading the keyfile. Defaults = the historical
+        # hardcoded assumptions, so tests and drills change nothing.
+        from pd2bot.input.keys import default_bindings
+
+        self.bindings = default_bindings()
         self._pressure_warned = False
         self._clock = clock
         self._sleep = sleep

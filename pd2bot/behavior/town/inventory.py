@@ -11,7 +11,6 @@ from pd2bot.behavior.town.config import (
     StashFull,
     TownError,
 )
-from pd2bot.input.gated import VK_I
 from pd2bot.perception.items import (
     CarriedItem,
 )
@@ -325,7 +324,7 @@ class _InventoryMixin:
         if self._panel_open(offsets.UI_INVENTORY):
             return
         self.send_until(
-            lambda: self.gated.press_key(VK_I),
+            lambda: self.gated.press_key(self.bindings.inventory),
             lambda: self._panel_open(offsets.UI_INVENTORY),
             what="opening the inventory",
         )

@@ -13,7 +13,6 @@ from pd2bot.behavior.town.config import (
     PreambleReport,
     _potion_type,
 )
-from pd2bot.input.gated import VK_I
 from pd2bot.perception.items import (
     CarriedItem,
     CarriedItems,
@@ -232,7 +231,7 @@ class _BeltMixin:
                 # that `_begin_step` just issued, which is precisely the
                 # frame where a keypress is most likely to be eaten (R94).
                 self.send_until(
-                    lambda: self.gated.press_key(VK_I),
+                    lambda: self.gated.press_key(self.bindings.inventory),
                     lambda: self._panel_open(offsets.UI_INVENTORY),
                     what="opening the inventory for the refill",
                 )
