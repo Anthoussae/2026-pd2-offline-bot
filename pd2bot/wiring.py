@@ -914,7 +914,20 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
             "names unresolved items; junk will be stashed, not dropped."
         )
 
-    report = bot.cycle().run_games(bot.runner(), max_games=args.games)
+    # The stack watcher (T87, 2026-08-13): every real run samples the main
+    # thread so a silent stall attributes itself to a line. Always on, per
+    # the run log's rule 5 — the run that needs explaining is the one
+    # where an optional flag was forgotten.
+    from pd2bot.runlog.sampler import StackSampler
+
+    samples_path = Path("logs") / f"samples-{time.strftime('%Y%m%d-%H%M%S')}.log"
+    sampler = StackSampler(samples_path)
+    sampler.start()
+    print(f"stack samples -> {samples_path}")
+    try:
+        report = bot.cycle().run_games(bot.runner(), max_games=args.games)
+    finally:
+        sampler.stop()
     print(f"\n{report.summary() if hasattr(report, 'summary') else report}")
     for index, engine in enumerate(bot.engines(), start=1):
         print(f"\n--- game {index}: {engine.report.summary()} ---")

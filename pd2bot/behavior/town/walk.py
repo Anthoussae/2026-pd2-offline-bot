@@ -83,8 +83,18 @@ class _WalkMixin:
         """
         deadline = self._clock() + self.config.approach_timeout_s
         while True:
+            # Timed separately from the walk (T87 follow-up): the 15 s hole
+            # between two 1-second legs sat BEFORE the leg timer started,
+            # and this call — the operator-abort poll, which reads the
+            # in-game chat list — is one of only two things in that window.
+            check_began = self._clock()
             self._check_stop()
+            stop_check_s = self._clock() - check_began
+            began = self._clock()
             result = self.walk_to(destination)
+            self._log_leg(
+                destination, result, self._clock() - began, stop_check_s
+            )
             if not getattr(result, "capped", False):
                 return  # arrived, or stopped short for a reason of its own
             if self._clock() >= deadline:
@@ -93,6 +103,40 @@ class _WalkMixin:
                     f"{self.config.approach_timeout_s:.0f}s of capped legs — "
                     "the route may be crawling or blocked"
                 )
+
+    def _log_leg(
+        self, destination, result, seconds: float, stop_check_s: float = 0.0
+    ) -> None:
+        """One `nav.leg` per town walk_to call. Telemetry only; never raises.
+
+        Written for T87 (2026-08-13): the same 24-subtile spawn-to-waypoint
+        walk took 4.5 s in trial 1 and ~18.5 s in trials 2-5, and the event
+        log could not say why — the town walk's legs were the one stretch
+        of the bot's life below the log's resolution. The WalkResult
+        already carries the whole story (clicks, replans, its own trail);
+        this puts it on the record. Slow legs (> 4 s) carry the trail.
+        """
+        log = getattr(self, "runlog", None)
+        if log is None or not getattr(log, "enabled", False):
+            return
+        try:
+            arrived = getattr(result, "arrived_at", None)
+            fields = {
+                "target": list(destination),
+                "arrived_at": list(arrived) if arrived else None,
+                "seconds": round(seconds, 2),
+                "clicks": getattr(result, "clicks", None),
+                "reclicks": getattr(result, "reclicks", None),
+                "replans": getattr(result, "replans", None),
+                "waypoints": getattr(result, "waypoints", None),
+                "capped": getattr(result, "capped", None),
+                "stop_check_s": round(stop_check_s, 2),
+            }
+            if seconds > 4.0:
+                fields["trail"] = list(getattr(result, "log", ()))[-6:]
+            log.event("nav.leg", **fields)
+        except Exception:  # noqa: BLE001 - telemetry must not cost the walk
+            return
 
     def _walk_guarded(self, destination: tuple[int, int]) -> None:
         """Walk, surviving travel clicks that land on a bystander.
@@ -309,7 +353,19 @@ class _WalkMixin:
         discipline as the skill switch and the deposit.
         """
         for _ in range(1 + self.config.interact_retries):
+            read_began = self._clock()
             player = self._read_player(self.session)
+            read_s = self._clock() - read_began
+            if read_s > 1.0:
+                # The other suspect in the T87 15-second hole. Telemetry
+                # only; a slow read is news, not a failure.
+                try:
+                    self.runlog.event(
+                        "nav.slow_read", what="read_player",
+                        seconds=round(read_s, 2),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             if player is None:
                 self._walk_guarded(target)
                 return
