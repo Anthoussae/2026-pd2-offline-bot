@@ -182,3 +182,11 @@ and have one fewer cell; new rows carry milestone/phase.
 | T87 | 3 | 2026-08-13 03:28 | M6 P5 | waypoint trip battery: town -> Black Marsh, leave, remake | unattended live | PASS | arrived area 6 verified; 7 commands, 25.0s; log 20260813-032813 |
 | T87 | 4 | 2026-08-13 03:28 | M6 P5 | waypoint trip battery: town -> Black Marsh, leave, remake | unattended live | PASS | arrived area 6 verified; 7 commands, 25.3s; log 20260813-032845 |
 | T87 | 5 | 2026-08-13 03:29 | M6 P5 | waypoint trip battery: town -> Black Marsh, leave, remake | unattended live | PASS | arrived area 6 verified; 7 commands, 25.3s; log 20260813-032918 |
+| T87 | 6 | 2026-08-13 03:46 | M6 P5 | trip battery rerun with nav.leg leg timing | unattended live | PASS | legs 1.6s+0.9s fast; 15s hole isolated BETWEEN legs; log 20260813-034646 |
+| T87 | 7 | 2026-08-13 03:47 | M6 P5 | trip battery rerun with nav.leg leg timing | unattended live | PASS | same shape; log 20260813-034716 |
+| T87 | 8 | 2026-08-13 03:47 | M6 P5 | trip battery rerun with nav.leg leg timing | unattended live | PASS | same shape; log 20260813-034750 |
+| T87 | 9 | 2026-08-13 03:51 | M6 P5 | rerun with stop_check_s timing | unattended live | FAILED | no game contact: char_select never appeared from main_menu (menu click flake); clean exit |
+| T87 | 10 | 2026-08-13 03:54 | M6 P5 | first run under the STACK SAMPLER | unattended live | PASS | the catch: 15.03s at walk.py _await in open_object_panel - a missed waypoint click burning npc_walk_timeout_s; samples-20260813-035454.log |
+| T87 | 11 | 2026-08-13 03:55 | M6 P5 | first run under the STACK SAMPLER | unattended live | PASS | identical 15.09s span - the miss is systematic from this approach angle |
+| T87 | 12 | 2026-08-13 03:59 | M6 P5 | proof run with the early-miss fix | unattended live | PASS | waypoint.open t=7.0s (was 19s), trip 13.0s (was 25s); miss now costs 2.8s; log 20260813-035901 |
+| T87 | 13 | 2026-08-13 03:59 | M6 P5 | proof run with the early-miss fix | unattended live | PASS | waypoint.open t=7.0s, trip 13.0s; no span over 2.8s in-game; log 20260813-035925 |

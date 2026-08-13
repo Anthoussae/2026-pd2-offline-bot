@@ -365,3 +365,37 @@ the faulthandler dead-man armed).
 
 **The P5 census gate is now IN THE OPERATOR'S HANDS** (R246): review
 the three logs and rule on `mandatory_pickup` beyond cold-plains.
+
+## 2026-08-13 T87 (operator-requested, pre-R246): the 15-second stall
+
+The operator ordered a 5-trip waypoint battery (town -> Black Marsh,
+leave, remake) with per-trip logs, then spotted the finding the census
+could not: the bot reached the waypoint in ~1.7 s and then STOOD IDLE
+~15 s before clicking it — and suspected the same lost seconds plague
+every run. Confirmed, and root-caused in three instrumentation rounds
+(runs 1-13 in the drill log):
+
+1. `nav.leg` town-walk telemetry: the walk was innocent (1.6 s + 0.9 s
+   legs, zero replans); the hole sat BETWEEN instruments.
+2. **The stack sampler** (`pd2bot/runlog/sampler.py`, the operator's
+   "watch the python code" requirement, now permanent kit): a daemon
+   thread samples the main thread's stack at 50 ms and span-compresses;
+   always on in the real launcher, writing `logs/samples-*.log`. Its
+   first two catches were identical 15.03 s / 15.09 s spans at
+   `_await` inside `open_object_panel`: **the waypoint's first click
+   misses the sprite from the spawn approach angle, and the code then
+   waited the full `npc_walk_timeout_s` (15 s, sized for cross-town NPC
+   journeys) for a panel that could never open.** The cold-plains
+   pilots' "waypoint: done after 23 s" is the same burn — every run
+   paid it on every first-click miss.
+3. Fix (`997dec8`): `_await_interact` — a landed interact click either
+   opens the panel or WALKS the character, so a character standing
+   still 2 s with nothing open is a PROVEN miss and the retry starts
+   immediately. Applied to the object path and the NPC-dialog path.
+   Proof runs: waypoint.open t=7.0 s (was ~19), trip 13.0 s (was ~25);
+   the systematic first-click miss now costs 2.8 s.
+
+Still open, low priority: the waypoint's first click misses
+systematically from the south-west approach (the (0,0) aim lands off
+the sprite); a measured aim offset for that angle would save the
+remaining ~2.8 s. The T83 drill generalises to measure it.
