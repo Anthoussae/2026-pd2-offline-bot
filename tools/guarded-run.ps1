@@ -99,6 +99,17 @@ try {
             Write-Warning "the watchdog had ALREADY EXITED (code $($watchdog.ExitCode)) - it did not survive the run"
         } else {
             Write-Output 'watchdog process was still alive at the end'
+            # A live process with a STALE heartbeat is the silent freeze
+            # (4th occurrence 2026-08-13). Its faulthandler dead-man dumps
+            # all stacks 10 s into a freeze (FREEZE_DUMP_AFTER_S) - but the
+            # bot reacts to staleness in 3 s and this block used to kill
+            # the watchdog ~5-8 s in, so the dump could NEVER mature. Give
+            # it time to speak before the kill; the .err.log is the whole
+            # point of the instrumentation.
+            if (-not (Test-HeartbeatFresh)) {
+                Write-Output 'heartbeat is STALE (freeze suspected) - waiting 12s for the faulthandler dump before the kill'
+                Start-Sleep -Seconds 12
+            }
         }
         # /T because the pid we hold is a LAUNCHER SHIM, not the watchdog:
         # the venv's python.exe re-execs (measured 2026-08-07 - a latch

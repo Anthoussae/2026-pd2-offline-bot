@@ -1047,3 +1047,66 @@ def test_an_unreadable_latch_does_not_accuse_the_watchdog():
     )
     with pytest.raises(StopRequested, match="operator"):
         eng.tick()
+
+
+def test_a_transient_watchdog_stall_survives_the_grace():
+    """R253: the watchdog transiently stalls ~4-10s and RECOVERS (five
+    healthy runs died to instant declaration before the diagnosis). A
+    stall shorter than the grace must cost nothing, and the stale/
+    recovered pair must be on the record."""
+    from pd2bot.behavior.engine import WatchdogDown  # noqa: F401
+
+    events = []
+
+    class Log:
+        enabled = True
+
+        def event(self, kind, /, **fields):
+            events.append(kind)
+
+        def area(self, *args, **kwargs):
+            pass
+
+    clock = Clock()
+    heartbeat = {"fresh": True}
+    eng = BehaviorEngine(
+        snapshot=lambda: snap(),
+        monitor=ScriptedMonitor(),
+        states=[FakeStep("s", ticks_to_done=50)],
+        executor=RecordingExecutor(),
+        config=EngineConfig(require_watchdog=True),
+        clock=clock,
+        sleep=lambda s: None,
+        watchdog_alive=lambda: heartbeat["fresh"],
+    )
+    eng._runlog = Log()
+    eng.tick()
+    heartbeat["fresh"] = False  # the stall begins
+    for _ in range(4):  # 8s of staleness — under the 15s grace
+        eng.tick()
+        clock.advance(2.0)
+    heartbeat["fresh"] = True  # ...and recovers, like all five did
+    eng.tick()
+    assert "watchdog.stale" in events
+    assert "watchdog.recovered" in events
+    assert "watchdog.down" not in events
+
+
+def test_staleness_that_outlasts_the_grace_is_a_down_watchdog():
+    from pd2bot.behavior.engine import WatchdogDown
+
+    clock = Clock()
+    eng = BehaviorEngine(
+        snapshot=lambda: snap(),
+        monitor=ScriptedMonitor(),
+        states=[FakeStep("s", ticks_to_done=50)],
+        executor=RecordingExecutor(),
+        config=EngineConfig(require_watchdog=True),
+        clock=clock,
+        sleep=lambda s: None,
+        watchdog_alive=lambda: False,
+    )
+    eng.tick()  # first stale read: the clock starts, nothing raises
+    clock.advance(16.0)  # past watchdog_stale_grace_s
+    with pytest.raises(WatchdogDown, match="has not answered"):
+        eng.tick()

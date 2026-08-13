@@ -253,6 +253,17 @@ class EngineConfig:
     # and must keep working. `tools/live-run.ps1` — the real entry point,
     # and the one that starts a watchdog — turns it on.
     require_watchdog: bool = False
+    # How long the heartbeat must read stale CONTINUOUSLY before the
+    # watchdog is declared down (R253, operator-approved). The watchdog
+    # transiently stalls ~4-10 s and RECOVERS (five occurrences before
+    # the 2026-08-13 diagnosis: its own log gap-free, the heartbeat
+    # fresh again at teardown, every 10 s faulthandler dump empty) — and
+    # the old instant declaration meant the backstop's own hiccups ended
+    # healthy runs. Safety analysis: Track A (the in-process poll,
+    # 0.100 s chicken latency, ADR 2026-08-07) is untouched; a backstop
+    # that answers a REAL watchdog death within 15 s still bounds the
+    # unguarded window to seconds. A fresh read resets the clock.
+    watchdog_stale_grace_s: float = 15.0
 
 
 @dataclass
@@ -322,6 +333,9 @@ class BehaviorEngine:
         # dead-man check is opt-in rather than default-on.
         self._watchdog_alive = watchdog_alive
         self._watchdog_latch = watchdog_latch
+        # When the heartbeat FIRST read stale, for the R253 grace; None
+        # while it reads fresh.
+        self._watchdog_stale_since: float | None = None
         # The narrative channel (R179): step transitions with durations —
         # the engine is the only thing that knows when a step began.
         self._narrate = narrate
@@ -438,19 +452,56 @@ class BehaviorEngine:
         engine bare have no watchdog and must keep working. A default-on
         check would either break them or be quietly switched off, and a
         safety check that is routinely switched off is worse than none.
+
+        Staleness gets a GRACE (`watchdog_stale_grace_s`, R253): the
+        watchdog transiently stalls and recovers, and declaring it down
+        on the first stale read let the backstop's own hiccups end
+        healthy runs — five times before the diagnosis. The first stale
+        read starts the clock and is put on the record once
+        (`watchdog.stale`); a fresh read resets it; only staleness that
+        OUTLASTS the grace is a down watchdog.
         """
         if not self.config.require_watchdog:
             return
-        if self._watchdog_alive is not None and self._watchdog_alive():
+        if self._watchdog_alive is None:
+            # No channel wired AT ALL — a misconfiguration, not a stall:
+            # nothing can ever recover, so the grace would just delay
+            # the same refusal by 15 s.
+            self._runlog.event("watchdog.down")
+            raise WatchdogDown(
+                "the chicken watchdog is not running (no heartbeat channel "
+                "is wired) and this run requires it — start it with "
+                "`python -m pd2bot.safety.watchdog` and launch again"
+            )
+        if self._watchdog_alive():
+            if self._watchdog_stale_since is not None:
+                self._watchdog_stale_since = None
+                self._runlog.event("watchdog.recovered")
+            return
+        now = self._clock()
+        if self._watchdog_stale_since is None:
+            self._watchdog_stale_since = now
+            # On the record from the FIRST stale read: the transient
+            # stalls were invisible for five runs because nothing spoke
+            # until the run was already being ended.
+            self._runlog.event(
+                "watchdog.stale", grace_s=self.config.watchdog_stale_grace_s
+            )
+            return
+        if now - self._watchdog_stale_since < self.config.watchdog_stale_grace_s:
             return
         self._narrate("the watchdog is not answering — standing down")
         # On the record: the 2026-08-13 stand-down was invisible in the
         # event stream (the narration lives in a different file), and the
         # run's log simply STOPPED — indistinguishable from a crash.
-        self._runlog.event("watchdog.down")
+        self._runlog.event(
+            "watchdog.down",
+            stale_s=round(now - self._watchdog_stale_since, 1),
+        )
         raise WatchdogDown(
-            "the chicken watchdog is not running (no fresh heartbeat) and "
-            "this run requires it — start it with "
+            "the chicken watchdog has not answered for "
+            f"{self.config.watchdog_stale_grace_s:.0f}s and this run "
+            "requires it — start it with "
             "`python -m pd2bot.safety.watchdog` and launch again"
         )
 
