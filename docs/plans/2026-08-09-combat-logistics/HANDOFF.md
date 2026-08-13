@@ -1,5 +1,14 @@
 # HANDOFF — combat-logistics live batch, paused 2026-08-10
 
+> **SUPERSEDED 2026-08-13.** Open items 1, 2 and 4a were solved OFFLINE
+> from the 2026-08-10 logs themselves — see the "2026-08-13 session"
+> section of `notes.md`. The order discrepancy was a run-log bug (a
+> `kind=` field clobbered the event kind on disk; orders booked fine),
+> the cleanse starvation was a two-cause branch gap (fixed +
+> instrumented), and the stash misclick was the T83 sprite rule missing
+> from deliberate clicks (fixed, `town.click_dodge`). What remains live:
+> the R244 verification batch + the P5 census gate, then P6 closeout.
+
 Written at the operator's request at end of session (context limit).
 Branch: **combat-logistics** (all work committed + pushed, CI green,
 1226 tests). NOT merged to m6-countess. Next request number: **R244**.

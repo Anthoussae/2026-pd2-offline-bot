@@ -279,3 +279,4 @@ headings, noted in parentheses, say roughly where they fell).
 - R242 [execute] The R241 live batch: line, leash, berserk, shop, pilot · 2026-08-09 23:21
 - R243 [decision] Chat may type while the TRADE screen is open · 2026-08-10 00:39
 - R243 resolved (opt-in Chat allow_panels; T85 uses it; address bug fixed too) · 2026-08-10 00:39
+- R244 [decision] Resume live testing: verification batch + P5 census · 2026-08-13 01:39

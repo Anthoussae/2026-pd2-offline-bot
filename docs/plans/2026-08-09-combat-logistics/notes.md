@@ -174,3 +174,66 @@ OPEN (need an instrumented live run when testing resumes):
 
 The mandatory-pickup pilot census gate is therefore NOT yet passed;
 the flag stays pilot-only (cold-plains) and unmerged.
+
+## 2026-08-13 session: both OPEN items solved OFFLINE, from the logs
+
+No live run was needed for either diagnosis. Commits `7a2f7d9` (orders +
+cleanse) and `b20bce4` (misclick).
+
+1. **The order "discrepancy" was never a booking failure.** The
+   2026-08-10 events with numeric kinds (685, 537, 714, 695, 697) in the
+   pilot logs ARE the order events: `pickup.order_open` and
+   `pickup.order_gone`, emitted with `kind=<item kind>` as a field —
+   and `RunLog.event`'s `record.update(fields)` let that field CLOBBER
+   the envelope's event kind on disk. Orders booked, re-sighted and
+   reaped live the whole time, invisible to every kind-filtered reader.
+   The offline fakes keep `(kind, fields)` apart, which is why seven
+   tests stayed green around it. Fixed at the root (envelope identity
+   keys are inviolable; colliding fields become `field_<name>`), the
+   emitters renamed (`item_kind`, `monster_kind` — `combat.write_off`
+   had the same bug), and the test fake now FAILS on a collision.
+   run-log.md documents that pre-2026-08-13 logs carry these events
+   under numeric kinds.
+   - Bonus finding from the same logs: **ground-item unit ids churn on
+     room unload/reload** (one amethyst at one subtile = ids 604, 661,
+     764). The OrderBook now rebinds an open order to the new id at the
+     same kind+position (budget survives; no duplicate orders, no false
+     `gone`), and a gone/budget close stays closed across ids
+     (convergence). A COLLECTED twin's position books normally — that
+     item is in the bag, so a new sighting there is a new drop.
+2. **The cleanse starvation had two stacked causes**, both visible in
+   run 031347's 89 write-offs: (a) 88 took the pile-ambiguity branch,
+   which never queued a cleanse and never marked the inventory full —
+   with a full grid, clustered drops ALWAYS read as pile ambiguity, so
+   the one branch that queues never fired; (b) even a queued cleanse
+   could not run while orders were serviced, because `service_orders`'
+   only `maybe_cleanse` call was gated on `inventory_full` and the
+   step's own call sits after the `service_orders` return. Pile
+   write-offs now queue a cleanse (`cleanse_retried` still caps the
+   R173 loop) and `service_orders` calls `maybe_cleanse` ungated. The
+   whole path is instrumented: `inventory.full`,
+   `inventory.cleanse_queued`, `inventory.cleanse_deferred`.
+   - Also fixed from the same evidence: `collect()` re-logged a stuck
+     item's write-off every serviced tick (the 88 duplicate
+     `item.abandoned` events), and a terminally stuck order (clicks
+     spent, post-cleanse retry failed) now closes immediately instead
+     of standing out its 75 s budget in "pickup pacing".
+3. **The stash misclick (handoff item 4a) is the T83 sprite rule
+   missing from DELIBERATE clicks.** The travel path got the
+   screen-space sprite box on 2026-08-08; `open_object_panel` aimed
+   blind, and its aim-offset rotation is all `dx == dy` — movement
+   along exactly the screen axis a sprite is 190 px tall in, so a
+   bystander parked in front of the stash defeated every retry.
+   Interact clicks now dodge bystanders' sprite boxes (first clear
+   offset), wait a bounded `aim_blocker_wait_s` for the pacer when
+   every aim is covered, and click anyway when it expires (the
+   MISCLICK recovery still backstops). `open_npc_dialog` got the same
+   wait for the silent variant (the wrong NPC's menu + keyboard-row
+   selection — Akara row 2 trades, Kashya row 2 hires for 50k).
+   Events: `town.click_dodge`. 4a's spawned background task is
+   superseded by this fix.
+
+State: 1239 tests, ruff clean. Still owed LIVE (R244): one verification
+batch — preamble runs confirm the misclick fix and the order/cleanse
+event stream under their real kinds, and the P5 census comes from the
+same runs for the operator's review.
