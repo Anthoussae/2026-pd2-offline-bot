@@ -2183,6 +2183,23 @@ def test_the_npc_click_waits_out_a_bystander_covering_the_target(town):
     assert dodges and dodges[0]["strategy"] == "wait" and dodges[0]["cleared"]
 
 
+def test_the_preamble_refuses_a_truncated_item_read(town):
+    """The 2026-08-13 over-buy's real root cause: the stash outgrew the
+    item-chain walk cap, the read silently truncated, and every station
+    ran against hallucinated absences (repair: 0 worn on a geared
+    character; restock: an empty belt over 2 visible mana potions). A
+    read that ADMITS truncation must stop the preamble before any
+    station can act on it."""
+    step = layer(
+        town,
+        carried=lambda s: CarriedItems(items=(), skipped=0, truncated=True),
+    )
+    with pytest.raises(TownError, match="truncated"):
+        step.run_preamble()
+    assert town.world_clicks == [], "no station may run on a truncated read"
+    assert any("TRUNCATED" in a for a in town.alerts)
+
+
 # -- the restock station's driving loop (2026-08-13) ---------------------------
 #
 # Only the PLANNING half had tests (test_restock.py); the station shipped

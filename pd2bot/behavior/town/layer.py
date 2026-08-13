@@ -15,6 +15,7 @@ from pd2bot.behavior.town.belt import _BeltMixin
 from pd2bot.behavior.town.config import (
     PreambleReport,
     TownConfig,
+    TownError,
     _carried_for_polling,
     _default_alert,
     _default_notice,
@@ -171,6 +172,24 @@ class TownLayer(
         (T13, T14).
         """
         report = report if report is not None else PreambleReport()
+        # A truncated item read means every "absent" below is a potential
+        # lie — the 2026-08-13 over-buy ran the WHOLE preamble against
+        # one: repair saw 0 worn items on a geared character, the restock
+        # saw an empty belt over 2 visible mana potions and bought ~30
+        # potions into the inventory. No station may trust that read, so
+        # none of them runs. This should never fire at the raised cap;
+        # if it does, the stash has genuinely outgrown the reader and a
+        # human must prune or the cap must rise again.
+        carried = self._carried(self.session)
+        if getattr(carried, "truncated", False):
+            self._alert(
+                f"the item read is TRUNCATED at the walk cap with "
+                f"{len(carried.items)} items — the belt, worn gear and "
+                "inventory cannot be trusted, so the preamble refuses to "
+                "run. The stash has likely outgrown the reader; prune it "
+                "or raise MAX_CARRIED_ITEMS."
+            )
+            raise TownError("item read truncated — preamble refused")
         # Each station narrates ONE completion line: what its own report
         # lines said, plus how long it took. The duration is the answer to
         # "what was it doing while it dawdled at Akara?" (R179) — the

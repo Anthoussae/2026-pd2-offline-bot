@@ -184,7 +184,7 @@ def test_an_unreadable_item_is_skipped_and_ends_nothing():
     assert [i.unit_id for i in carried.items] == [1]
 
 
-def test_a_looped_chain_terminates():
+def test_a_looped_chain_terminates_and_confesses_truncation():
     session = build_typical()
     dagger_data = 0x0C040000 + 0x200
     session.memory.regions[dagger_data][
@@ -192,6 +192,16 @@ def test_a_looped_chain_terminates():
     ] = u32(0x0C010000)  # tail points back at the head
     carried = read_carried_items(session)
     assert len(carried.items) == MAX_CARRIED_ITEMS
+    # A walk that hit the cap dropped an unknown remainder (a cycle is
+    # indistinguishable from a genuinely too-long chain — 2026-08-13: the
+    # grown stash pushed the REAL chain past the old cap of 512, and the
+    # silent truncation read a full belt as empty and bought ~30 potions).
+    # Either way, "absent" answers from this read are untrustworthy.
+    assert carried.truncated
+
+
+def test_an_ordinary_read_is_not_truncated():
+    assert read_carried_items(build_typical()).truncated is False
 
 
 def test_cursor_item_is_read_from_its_own_pointer_not_the_chain():

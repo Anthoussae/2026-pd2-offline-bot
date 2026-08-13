@@ -243,27 +243,45 @@ same runs for the operator's review.
 The first verification run never left town: the restock station bought
 healing/mana potions for 127.5 s straight into the INVENTORY until the
 client's can't-carry popup stopped everything (operator aborted; the
-run then exited on the refusal streak, watchdog clean). Two stacked
-design holes in the P4 chore, both offline-visible in hindsight and
-neither covered by a test (only the pure planning half was tested):
+run then exited on the refusal streak, watchdog clean).
 
-1. `_belt_shortfall` counts bottles against minimums and knows nothing
-   about COLUMNS. A belt whose columns are occupied by other types
-   (rejuvs squatting — the R178 shape) reads "short" forever while the
-   game routes every purchase into the inventory. `_belt_accepts` — the
-   routing question — existed in belt.py and the restock never asked it.
-2. `_buy_until` believed an unverified click was a non-event and
-   bounded CLICKS (`need + 12` per type), not purchases. A vendor
-   right-click is a purchase wherever the potion lands; the 5000 gold
-   floor cannot save you from cheap potions. The 127.5 s matches ~16
-   clicks x (3 s failed verify + settle) x 2 types exactly.
+**ROOT CAUSE (operator-corrected).** The first written diagnosis here
+blamed belt-column squatting; the OPERATOR's observation disproved it —
+they watched the belt sitting FULL (2 mana potions among it) while the
+bot bought more, and two bought mana potions visibly ENTER the belt.
+With `min_mana = 2` a genuinely-read belt would have had zero mana
+shortfall, so the read itself was the lie. Probed live: the player's
+item chain is **560 items long** (PD2's expanded stash rides the same
+chain and has grown with every game's deposits), and the walk cap
+`MAX_CARRIED_ITEMS = 512` — written when "a character can own at most
+~200 items" — was silently TRUNCATING the read: everything past entry
+512 (the belt, the worn gear, most of the inventory) read as absent,
+with `skipped: 0`. Same-run corroboration: `repair: nothing damaged
+(0 worn item(s) checked)` on a geared character, where the 2026-08-10
+preamble had read `8 worn item(s)`. The chain crossed the cap between
+08-10 and 08-13.
 
-Fix (commit pending): the station asks `_belt_accepts` before any gold
-moves (a short-but-no-room type is skipped with a notice); a purchase
-that lands in the inventory STOPS its type immediately (the bottle is
-the proof the belt is out of room); true mis-aim clicks are bounded at
-MAX_DEAD_CLICKS=3; and the station finally emits the `town.restock`
-event run-log.md had documented but never received. The fake town got a
-vendor that routes purchases the way the game does, and the station
-loop has tests for all four shapes (happy path, no-room refusal,
-mid-loop overflow stop, dead-click bound).
+Fixes (`87b3131` + follow-up):
+
+1. **The reader confesses.** Cap raised to 4096; `CarriedItems` gains
+   `truncated`, set whenever the walk hits the cap (a cycle lands there
+   too — indistinguishable, equally untrusted); the town preamble
+   REFUSES to run on a truncated read (every station would act on
+   hallucinated absences). Live re-probe after the fix: 560 items,
+   truncated False, belt 15, equipped 8.
+2. **The station is hardened anyway** (defense in depth — these hold
+   even when a read lies): `_belt_accepts` is asked before any gold
+   moves; a purchase that lands in the inventory STOPS its type
+   immediately (the bottle is the proof the belt is out of room); true
+   mis-aim clicks are bounded at MAX_DEAD_CLICKS=3 (the old bound
+   allowed `need + 12` real purchases per type believing unverified
+   clicks were non-events); and the station finally emits the
+   `town.restock` event run-log.md had documented but never received.
+   The fake town got a vendor that routes purchases the way the game
+   does; tests cover happy path, no-room refusal, mid-loop overflow
+   stop, dead-click bound, and the preamble's truncation refusal.
+
+Method note, paid for again: the first diagnosis was drawn from code
+reading plus a post-cleanup probe; the operator's direct observation of
+the LIVE failure was the datum that broke it. When an operator report
+contradicts a tidy story, the report wins until the log says otherwise.

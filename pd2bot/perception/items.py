@@ -28,9 +28,17 @@ from pd2bot import offsets
 from pd2bot.perception.memory import GameSession
 from pd2bot.perception.units import player_unit, read_socket_count
 
-# A character can own at most ~200 items (40 inventory + 16 belt + equips +
-# stash); the bound only exists so a torn chain cannot loop forever.
-MAX_CARRIED_ITEMS = 512
+# The bound exists so a torn chain cannot loop forever — it must sit far
+# ABOVE any legitimate total, because the walk hitting it truncates the
+# read. The original 512 assumed "a character can own at most ~200 items";
+# PD2's expanded stash rides the same chain and falsified that on
+# 2026-08-13: the stash had grown past 512, the walk silently dropped
+# everything after it — the belt, the worn gear, most of the inventory —
+# and the restock station bought ~30 potions against a hallucinated-empty
+# belt (`repair: 0 worn item(s) checked` was the same lie). A read that
+# hits this bound now says so (`CarriedItems.truncated`), and the town
+# preamble refuses to run on one.
+MAX_CARRIED_ITEMS = 4096
 
 
 @dataclass(frozen=True)
@@ -141,6 +149,11 @@ class CarriedItems:
 
     items: tuple[CarriedItem, ...]
     skipped: int  # chain entries that could not be read; nonzero is notable
+    # The walk hit MAX_CARRIED_ITEMS and stopped: everything past the cap
+    # is MISSING from `items`, so "absent" answers from this read are
+    # untrustworthy. Consumers that act on absence (the restock, the
+    # deposit, the cleanse) must refuse a truncated read.
+    truncated: bool = False
 
     def in_container(self, name: str) -> tuple[CarriedItem, ...]:
         return tuple(i for i in self.items if i.container == name)
@@ -327,8 +340,10 @@ def read_carried_items(
     """
     items: list[CarriedItem] = []
     skipped = 0
+    walked = 0
     seen: set[int] = set()
     for unit in _iter_carried_units(session):
+        walked += 1
         try:
             item = _read_carried(session, unit)
         except Exception:
@@ -360,7 +375,13 @@ def read_carried_items(
         elif held is None:
             skipped += 1
 
-    return CarriedItems(items=tuple(items), skipped=skipped)
+    return CarriedItems(
+        items=tuple(items),
+        skipped=skipped,
+        # At the cap, the chain may continue past where the walk stopped
+        # (a cycle also lands here — indistinguishable, equally untrusted).
+        truncated=walked >= MAX_CARRIED_ITEMS,
+    )
 
 
 # Deliberately absent: free_inventory_cells. Computing true grid occupancy
