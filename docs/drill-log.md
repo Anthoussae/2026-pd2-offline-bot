@@ -177,3 +177,8 @@ and have one fewer cell; new rows carry milestone/phase.
 | T85b | 1 | 2026-08-10 01:04 | M6 P4 | survey Akara's shop — read-only layout + hover pre-test | human calibration | PASS | stock: 2 potions, cols [9] rows [6, 7]; hover-read did NOT resolve a shop item — calibration will need geometry from known cells instead |
 | T85c | 1 | 2026-08-10 01:12 | M6 P4 | calibrate Akara's potion spots — hover healing, then mana | human calibration | PASS | healing @ px (729, 421) cell (9, 6); mana @ px (730, 463) cell (9, 7) -> shop_calibration.json |
 | T86 | 1 | 2026-08-10 01:26 | M6 P4 | prove the buy mechanic — right-click buys, belt-count verifies | supervised live | ABORTED | cancelled by request |
+| T87 | 1 | 2026-08-13 03:27 | M6 P5 | waypoint trip battery: town -> Black Marsh, leave, remake | unattended live | PASS | arrived area 6 verified; 8 commands, 10.9s in-game (one stray-panel recovery, 2 ESC, cleared); log 20260813-032722 |
+| T87 | 2 | 2026-08-13 03:27 | M6 P5 | waypoint trip battery: town -> Black Marsh, leave, remake | unattended live | PASS | arrived area 6 verified; 7 commands, 25.3s; log 20260813-032741 |
+| T87 | 3 | 2026-08-13 03:28 | M6 P5 | waypoint trip battery: town -> Black Marsh, leave, remake | unattended live | PASS | arrived area 6 verified; 7 commands, 25.0s; log 20260813-032813 |
+| T87 | 4 | 2026-08-13 03:28 | M6 P5 | waypoint trip battery: town -> Black Marsh, leave, remake | unattended live | PASS | arrived area 6 verified; 7 commands, 25.3s; log 20260813-032845 |
+| T87 | 5 | 2026-08-13 03:29 | M6 P5 | waypoint trip battery: town -> Black Marsh, leave, remake | unattended live | PASS | arrived area 6 verified; 7 commands, 25.3s; log 20260813-032918 |
