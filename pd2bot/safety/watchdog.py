@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import faulthandler
 import json
 import os
 import sys
@@ -89,6 +90,16 @@ LATCH_STALE_AFTER_S = 300.0
 THRESHOLD_GAP_PCT = 5.0
 
 DEFAULT_INTERVAL_S = 0.2
+# The freeze dead-man (2026-08-13): if the poll loop stops making passes
+# for this long, faulthandler writes every thread's stack to stderr —
+# from its own thread, so it works even while the main thread is stuck
+# inside a C call. Well above any survivable stall (the bot stands down
+# at 3 s anyway); the dump is diagnosis for the NEXT session, not
+# recovery for this one.
+FREEZE_DUMP_AFTER_S = 10.0
+# One recovered-but-slow pass is worth a line: it ate a slice of the 3 s
+# staleness budget and three of them in a row are a stand-down.
+STALL_SAY_AFTER_S = 1.0
 # Firing is verified, not assumed: if a blocking panel was open, ESC
 # closed THAT instead and the game is not paused at all. So press, look,
 # press again — bounded, because a client that will not pause is a
@@ -559,10 +570,35 @@ class Watchdog:
         """
         ticks = 0
         while not (until is not None and until()):
+            # The dead-man diagnostic for the freeze nobody has caught:
+            # three times now (2026-08-08 x2, 2026-08-13 mid-run) this
+            # process has gone quiet with NO error — no failed read, no
+            # failed write, no exception — and the only evidence was the
+            # bot standing down on a stale heartbeat minutes later.
+            # Re-arming faulthandler's timer every pass means a loop that
+            # STOPS PASSING gets its stack (all threads, even blocked in
+            # C) written to stderr after FREEZE_DUMP_AFTER_S, by
+            # faulthandler's own watchdog thread. Where it froze is the
+            # entire diagnosis, and nothing else can produce it.
+            try:
+                faulthandler.dump_traceback_later(
+                    FREEZE_DUMP_AFTER_S, exit=False
+                )
+            except Exception:  # noqa: BLE001 - diagnostics must not kill the layer
+                pass
+            pass_started = self._clock()
             try:
                 self.tick()
             except Exception as exc:  # noqa: BLE001 - see the docstring
                 self._blind(exc)
+            elapsed = self._clock() - pass_started
+            if elapsed > STALL_SAY_AFTER_S:
+                # A recovered stall: the loop lived, but one pass ate a
+                # meaningful slice of the bot's 3 s staleness budget.
+                self._say(
+                    f"STALL — one poll pass took {elapsed:.1f}s against a "
+                    f"{self.config.interval_s:.1f}s interval"
+                )
             ticks += 1
             # A periodic "still here" line. Twice now this process has
             # gone quiet mid-run with no error of any kind — no failed
@@ -578,13 +614,26 @@ class Watchdog:
                 # written for, wrong for a routine 30 s tick, and on
                 # 2026-08-08 the loop stopped dead immediately after the
                 # first one. Routine news does not get the siren.
+                # Wall-clock stamped: "the log ends at 1500 ticks" only
+                # dates the freeze if the reader can say WHEN 1500 ticks
+                # was (2026-08-13: it could not).
                 self._say(
                     f"still watching — {ticks} ticks, "
-                    f"{ticks * self.config.interval_s:.0f}s"
+                    f"{ticks * self.config.interval_s:.0f}s, "
+                    f"{time.strftime('%H:%M:%S', time.localtime(self._wall()))}"
                 )
             if self.stopped:
+                self._cancel_freeze_dump()
                 return
             self._sleep(self.config.interval_s)
+        self._cancel_freeze_dump()
+
+    @staticmethod
+    def _cancel_freeze_dump() -> None:
+        try:
+            faulthandler.cancel_dump_traceback_later()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # -- CLI -----------------------------------------------------------------------

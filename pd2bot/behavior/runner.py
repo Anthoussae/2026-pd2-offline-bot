@@ -276,3 +276,13 @@ class BehaviorRunner:
             # the moment this callback returns, and chat needs a game.
             if announce:
                 self._say(outcome, detail)
+            # The `run.end` event, on EVERY path. run-log.md documented it
+            # from day one and nothing ever emitted it — every run's event
+            # stream just stopped, and on 2026-08-13 that made a clean
+            # watchdog stand-down indistinguishable from a crash until the
+            # narrative log was cross-read. This is the one place that
+            # knows the outcome on all paths. `close` never raises (the
+            # log's rule 1), so the finally stays safe.
+            log = getattr(engine, "runlog", None)
+            if log is not None:
+                log.close(outcome=outcome, detail=detail)

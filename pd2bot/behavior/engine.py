@@ -360,6 +360,12 @@ class BehaviorEngine:
         return self._index >= len(self._states)
 
     @property
+    def runlog(self):
+        """The run event log — public so the runner can book `run.end`
+        with the outcome it alone knows on every exit path."""
+        return self._runlog
+
+    @property
     def step_names(self) -> list[str]:
         """The run this engine will execute, in order. For the operator."""
         return [state.name for state in self._states]
@@ -438,6 +444,10 @@ class BehaviorEngine:
         if self._watchdog_alive is not None and self._watchdog_alive():
             return
         self._narrate("the watchdog is not answering — standing down")
+        # On the record: the 2026-08-13 stand-down was invisible in the
+        # event stream (the narration lives in a different file), and the
+        # run's log simply STOPPED — indistinguishable from a crash.
+        self._runlog.event("watchdog.down")
         raise WatchdogDown(
             "the chicken watchdog is not running (no fresh heartbeat) and "
             "this run requires it — start it with "

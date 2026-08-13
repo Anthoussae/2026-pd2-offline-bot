@@ -284,11 +284,20 @@ class _PanelMixin:
         (2026-08-08): the client hit-tests sprites, so a click at an
         object's feet with an NPC pacing just down-screen of it opens her
         dialog instead. `ignore_kind` exempts the unit we MEAN to click.
+
+        THE MERC IS EXEMPT, on live evidence (2026-08-13, the first
+        `town.click_dodge` ever fired): it stood square on the stash for
+        the full wait — it follows the player, so it is near-permanently
+        adjacent to wherever we click — and the backstop click then
+        opened the stash straight through its sprite. A merc has no
+        dialog to intercept a click into, so it is not a blocker, and
+        waiting for it to "pace away" waits for something it never does.
         """
         snap = self.snapshot()
         return [
             ally for ally in snap.allies
             if ally.kind != ignore_kind
+            and ally.merc_kind is None
             and _inside_sprite(ally.position, point)
         ]
 

@@ -285,3 +285,43 @@ Method note, paid for again: the first diagnosis was drawn from code
 reading plus a post-cleanup probe; the operator's direct observation of
 the LIVE failure was the datum that broke it. When an operator report
 contradicts a tidy story, the report wins until the log says otherwise.
+
+## 2026-08-13 R245 game 1 (attempt 2): fixes all VERIFIED live; run
+## ended early by a watchdog freeze (unrelated, known, now instrumented)
+
+The relaunched game proved every fix in its first five minutes:
+
+- **Truncation fix**: `repair: 8 worn item(s) checked`, `restock: belt
+  at minimums, skipped` (the belt read its true 15/16), `stash: 492
+  items stashed` counted, 2 deposits, preamble done in 7 s.
+- **Misclick fix live-fired**: one `town.click_dodge` at the stash —
+  blocker kind 271 (the MERC standing on it), strategy wait, 4.1 s,
+  cleared false, backstop click opened the stash anyway. Finding: the
+  merc should be EXEMPT from the blocker check (it cannot intercept an
+  interact click — proven by this very event — and it follows the
+  player, so it is near-permanently adjacent); costs ~4 s per stash
+  visit until fixed.
+- **Order events under their real kinds live**: 1 `pickup.order_open`
+  (a worldstone shard at (5170, 5762)) + 14 `pickup.order_resight`;
+  the order held open while combat owned the ticks (correct priority).
+
+The run then ended at t=310 s mid-clearance (14 hostiles, two boss
+packs, hp 84%, fight in progress): **"the watchdog is not answering —
+standing down"**. The watchdog's own log shows it healthy through 300 s
+then silent with NO error — its process was still alive at teardown but
+had stopped heartbeating. This is the THIRD such freeze (2026-08-08 x2,
+per the watchdog's own docstring); the stand-down is the safety design
+working as intended. Instrumented for the next occurrence (nothing else
+can produce the diagnosis):
+
+- `faulthandler.dump_traceback_later` dead-man, re-armed every poll
+  pass: a frozen loop writes every thread's stack to the .err.log after
+  10 s, even while stuck inside a C call.
+- A STALL line for any recovered pass that took > 1 s; wall-clock
+  stamps on the still-watching lines.
+- `watchdog.down` run-log event at engine stand-down, and `run.end`
+  (documented since the log's birth, emitted by NOBODY until now) is
+  booked by the runner on every exit path with outcome + detail.
+
+Not proven yet (game ended before): pickup census with collections,
+cleanse-on-full live, order collect/close lifecycle. Next: relaunch.

@@ -937,9 +937,24 @@ def test_the_engine_refuses_to_tick_without_a_required_watchdog():
     silently does not exist."""
     from pd2bot.behavior.engine import WatchdogDown
 
+    events = []
+
+    class Log:
+        enabled = True
+
+        def event(self, kind, /, **fields):
+            events.append(kind)
+
+        def area(self, *args, **kwargs):
+            pass
+
     engine_, _ = engine(config=EngineConfig(require_watchdog=True))
+    engine_._runlog = Log()
     with pytest.raises(WatchdogDown, match="not running"):
         engine_.tick()
+    # On the record: the 2026-08-13 stand-down was invisible in the event
+    # stream and the run's log just STOPPED, exactly like a crash.
+    assert "watchdog.down" in events
 
 
 def test_a_required_watchdog_that_is_alive_is_no_obstacle():

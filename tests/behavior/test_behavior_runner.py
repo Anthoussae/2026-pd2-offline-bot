@@ -61,6 +61,35 @@ def test_idle_loop_halt_is_loop_halting_not_a_chicken():
     assert not issubclass(IdleLoopHalt, ChickenExit)
 
 
+class ClosableLog:
+    def __init__(self):
+        self.closed_with = None
+
+    def close(self, **fields):
+        self.closed_with = fields
+
+
+def test_the_runner_books_run_end_on_a_completed_run():
+    """run-log.md documented `run.end` from day one and nothing ever
+    emitted it — every run's event stream simply stopped, and on
+    2026-08-13 that made a clean watchdog stand-down look exactly like a
+    crash. The runner is the one place that knows the outcome on every
+    exit path."""
+    engine = ScriptedEngine(None)
+    engine.runlog = ClosableLog()
+    BehaviorRunner(lambda session: engine)(None)
+    assert engine.runlog.closed_with == {"outcome": "COMPLETE", "detail": ""}
+
+
+def test_the_runner_books_run_end_when_the_run_ends_early():
+    engine = ScriptedEngine(ChickenExit("the watchdog is not running"))
+    engine.runlog = ClosableLog()
+    with pytest.raises(ChickenExit):
+        BehaviorRunner(lambda session: engine)(None)
+    assert engine.runlog.closed_with["outcome"] == "CHICKEN"
+    assert "watchdog" in engine.runlog.closed_with["detail"]
+
+
 def test_the_run_announces_its_result_in_the_game():
     """R164: the operator watches the GAME, not the console.
 

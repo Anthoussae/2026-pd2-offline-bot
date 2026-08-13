@@ -2083,6 +2083,28 @@ def _dodge_log(step):
     return events
 
 
+def test_the_merc_is_never_treated_as_a_click_blocker(town):
+    """Live 2026-08-13, the first dodge ever fired: the MERC stood on the
+    stash for the full 4.1 s wait — it follows the player, so it is
+    near-permanently adjacent — and the backstop click then opened the
+    stash straight through its sprite. A merc has no dialog to
+    intercept; waiting for it to pace away waits for something it never
+    does."""
+    # The default fake merc at (5881, 5721) is far from the stash; park
+    # one right on it instead.
+    town.merc_alive = False
+    town.extra_allies.append(ally(271, (STASH_POS[0] + 3, STASH_POS[1] + 3)))
+    step = layer(town)
+    events = _dodge_log(step)
+
+    step.open_object_panel(offsets.OBJ_STASH, "the stash", offsets.UI_STASH)
+
+    assert offsets.UI_STASH in town.panels
+    assert [k for k, f in events if k == "town.click_dodge"] == [], (
+        "the merc must not trigger a dodge or a wait"
+    )
+
+
 def test_the_stash_click_dodges_a_bystanders_sprite_box(town):
     """The 2026-08-10 preamble killer: 'MISCLICK opened npc_menu', three
     identical attempts, TownError — 2 of 6 runs. The travel path got the

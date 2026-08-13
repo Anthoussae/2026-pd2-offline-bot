@@ -310,7 +310,19 @@ if a drill captured stdout.
   run step for this tick.
 - `refusal` — `where`, `error`, `detail`, `streak`: a send that did not
   land (`InputRefused`, `CastInFlight`, `NavigationError`).
-- `run.end` — the outcome.
+- `run.end` — `outcome` (COMPLETE / CHICKEN / IDLE BAIL / TOWN STEP
+  FAILED / FAILED / …), `detail`. Documented from day one, EMITTED only
+  since 2026-08-13: nothing ever called `close`, so every run's event
+  stream just stopped — and a clean watchdog stand-down was
+  indistinguishable from a crash until the narrative log was
+  cross-read. The runner books it on every exit path.
+- `watchdog.down` — the engine stood down because the required
+  watchdog's heartbeat went stale (`WatchdogDown`, a clean
+  ChickenExit-shaped leave). Distinct from `watchdog.fired`, which is
+  the watchdog ACTING; this is it going silent. First live occurrence
+  2026-08-13 (the watchdog froze at ~300 s with no error — the third
+  such freeze; `faulthandler` dead-man dumps now instrument the
+  watchdog loop for the next one).
 
 ## The rules the log obeys
 
