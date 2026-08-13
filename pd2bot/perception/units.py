@@ -452,6 +452,24 @@ def label_display_on(session: GameSession) -> bool | None:
         return None
 
 
+def default_tags_on(session: GameSession) -> bool | None:
+    """Are ground labels in the game's DEFAULT styling (the "F" toggle)?
+
+    Reads BH.dll's style flag (T91): 1 = loot-filter styling, 0 =
+    default names — semantics calibrated against the operator's stated
+    state at the probe. None = unreadable (BH.dll absent?) — callers
+    must treat that as 'unknown', never guess a direction.
+    """
+    try:
+        base = next(
+            m.base for m in session.modules()
+            if m.name == offsets.BH_LABEL_MODULE
+        )
+        return not session.u8(base + offsets.BH_FILTER_STYLE)
+    except Exception:
+        return None
+
+
 def hovered_item_id(session: GameSession) -> int | None:
     """The unit id of the ground item under the cursor, or None.
 

@@ -1,0 +1,18 @@
+# T90 — block C ONLY (DEFAULT TAGS), for finishing an interrupted
+# battery without re-paying for completed blocks. The 07:40 launch
+# banked complete A and B blocks; the watchdog stall ate C one second
+# into its first drop. Everything else identical to
+# t90-tagmode-battery.toml — see it for the full protocol notes.
+#
+# Tabulate afterwards:  python -m pd2bot.runlog <run-dir> --tagmode
+
+name = "t90-tagmode-battery-c"
+
+[[step]] # 5 rounds of block C (ALT on + F: the game's default name tags)
+name = "tagmode_battery"
+rounds = 5
+blocks = "C"
+round_seconds = 30
+
+[[step]] # run complete; the cycle takes it from here (leave, next game)
+name = "done"

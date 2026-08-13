@@ -50,10 +50,12 @@ PROJECT_STATE = Path("docs/project-state.md")
 # The in-chat keywords (M5 P6 R169). Deliberately a WHITELIST of exact
 # tokens, not parsing: acting on read chat is a command channel, and the
 # recorded decision (chatread's docstring, deferred 2026-07-31) was that
-# a command channel gets a whitelist or it gets nothing. These two are
-# the whole vocabulary, matched against the stripped, lowercased line,
-# and only ever consulted while a test is running or waiting to start.
-ABORT_WORDS = frozenset({"abort", "abort test"})
+# a command channel gets a whitelist or it gets nothing. This is the
+# whole vocabulary, matched against the stripped, lowercased line, and
+# only ever consulted while a test or run is live or waiting to start.
+# "abort the test" is the operator's own phrasing (R250) — RUNS consult
+# this set too now, via wiring.run_stop_channel.
+ABORT_WORDS = frozenset({"abort", "abort test", "abort the test"})
 OK_WORDS = frozenset({"ok", "ok!", "okay"})
 
 

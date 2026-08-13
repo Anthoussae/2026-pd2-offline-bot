@@ -197,6 +197,22 @@ def default_registry() -> StepRegistry:
     # validates against, and a survey run that lints here but is unknown
     # to the live registry would refuse to start in Hell.
     registry.register(StepSpec("survey"))
+    registry.register(
+        StepSpec(
+            "tagmode_battery",  # TEST KIT (R248/R250); must mirror build_registry
+            params=(
+                ParamSpec("rounds", int, required=False, default=5),
+                ParamSpec("blocks", str, required=False, default="ABC"),
+                ParamSpec("round_seconds", int, required=False, default=30),
+                ParamSpec("radius", int, required=False, default=30),
+                ParamSpec("min_wanted", int, required=False, default=2),
+                ParamSpec(
+                    "filter_initially_on", bool, required=False, default=False
+                ),
+                ParamSpec("confirm_seconds", int, required=False, default=6),
+            ),
+        )
+    )
     registry.register(StepSpec("done"))
     return registry
 

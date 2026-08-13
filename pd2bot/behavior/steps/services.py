@@ -338,6 +338,46 @@ class RunServices:
     # fires on the TRANSITION into the wanted set, so a rune lying on the
     # floor for thirty ticks is one event, not thirty.
     seen_drops: set[int] = field(default_factory=set)
+    # -- the tag-mode battery (R248, TEST KIT) ------------------------------
+    #
+    # Wired closures, every one None/unknown by default so sims, drills
+    # and every existing run are untouched. The battery step REFUSES to
+    # run without the ones it needs rather than improvising around them
+    # — a calibration that silently measured the wrong thing would be
+    # worse than one that refuses (the T72 lesson, applied to test kit).
+    #
+    # One inventory item ctrl+right-clicked to the floor, effect-verified
+    # (TownLayer.drop_item — stash must be CLOSED, inventory OPEN).
+    drop_item: Callable[[object], bool] | None = None
+    # The inventory panel, opened verified (TownLayer.press_inventory_open).
+    open_inventory: Callable[[], None] | None = None
+    # Carried items WITH sockets, for whitelist verdicts on what is about
+    # to be dropped — socket-conditioned keep rules cannot be judged from
+    # the cheap read (`carried`, with_sockets=False), the R132 lesson.
+    carried_with_sockets: Callable[[], CarriedItems] | None = None
+    # The ground-label display state (BH.dll's flag, T66): True/False, or
+    # None = unreadable. The battery refuses on None — the flag lives in
+    # the loot filter's own module, so unreadable means the modes under
+    # test do not exist in this client.
+    label_state: Callable[[], bool | None] | None = None
+    # One press of the character's real Show Items key (R247 bindings).
+    press_show_items: Callable[[], None] | None = None
+    # One press of the default-tags toggle ("F" — bound NOWHERE on disk,
+    # see the R248 plan's discovery; pressed blind until the T91 probe
+    # finds its state flag).
+    press_filter_toggle: Callable[[], None] | None = None
+    # The default-tags state, once T91 pins its flag. None = no reader
+    # wired — the battery then tracks parity blind and says so.
+    filter_state: Callable[[], bool | None] | None = None
+    # Flip the executor's label enforcement (see
+    # GameActionExecutor.enforce_label_display): mode 1 measures pickup
+    # with labels OFF, which the enforcing executor would sabotage one
+    # click in.
+    set_label_enforcement: Callable[[bool], None] | None = None
+    # Operator-facing chat line (Chat.say behind a closure that absorbs
+    # refusals). The battery announces every mode switch and the final
+    # reconciliation; None falls back to `alert`.
+    say: Callable[[str], None] | None = None
     # -- the countess endgame (M6 P4) --------------------------------------
     #
     # Judgement calls that belong to the step, not the run file — the run

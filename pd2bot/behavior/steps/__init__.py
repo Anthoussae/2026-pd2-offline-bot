@@ -30,6 +30,7 @@ from pd2bot.behavior.steps.pickup import _PickupMixin
 from pd2bot.behavior.steps.registry import build_registry
 from pd2bot.behavior.steps.services import RunServices
 from pd2bot.behavior.steps.survey import SurveyStep
+from pd2bot.behavior.steps.tagmode import TagModeBatteryStep
 from pd2bot.behavior.steps.traverse import TraverseStep
 from pd2bot.behavior.steps.util import _chebyshev, _route_leg
 
@@ -40,6 +41,7 @@ __all__ = [
     "PickupStep",
     "RunServices",
     "SurveyStep",
+    "TagModeBatteryStep",
     "TownPreambleStep",
     "TraverseStep",
     "WaypointStep",

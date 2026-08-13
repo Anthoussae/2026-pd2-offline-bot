@@ -15,6 +15,7 @@ bodies unchanged.
 | survey.py | survey: operator-steered atlas recording |
 | traverse.py | traverse: cross an area to its exit |
 | countess.py | clear_countess: the flagship kill |
+| tagmode.py | tagmode_battery: the R248 name-tag pickup calibration (TEST KIT) |
 | registry.py | step name -> class; unknown names fail at load |
 
 Import step classes and `build_registry` from `pd2bot.behavior.steps`.

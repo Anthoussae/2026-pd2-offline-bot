@@ -287,6 +287,18 @@ class GameActionExecutor(ActionLogging):
     # None = parking off (sims, drills that build the executor bare).
     park_skill_id: int | None = None
     park_grace_s: float = 2.0
+    # The label policy (T90, R254 — INVERTED from T63/T66): `_pick_up`
+    # presses Show Items whenever the label display provably reads ON,
+    # because pickup clicks land on SPRITES and the tags bury them: the
+    # tag-mode battery measured the same 18-item pile at 30/30 (100%,
+    # mean 12.3 s) with no tags against 3/30 (10%) under filter tags and
+    # 11/30 (36%) under default tags — every tagged round timed out. The
+    # old policy ("labels must be showing for the small classes to be
+    # clickable", T63) was falsified by its own measurement: rings, gems
+    # and amulet-class kinds went perfect with the labels off.
+    # False exists for exactly one caller — the tag-mode battery, which
+    # sets the display itself and must not be fought over the toggle.
+    enforce_label_display: bool = True
     trace: list[TraceEntry] = field(default_factory=list)
     # -- the run event log (the run-event-log plan, P3) ---------------------
     #
@@ -556,11 +568,14 @@ class GameActionExecutor(ActionLogging):
         the raw tile click is the honest fallback — labelled, so the
         trace shows which aim was actually used.
         """
-        # The label policy (T66): labels must be SHOWING for the small
-        # classes to be clickable at all, and the flag makes the toggle
-        # parity-safe — read, press only when provably off, re-read next
-        # attempt. Unknown (None) means do not touch the key.
-        if label_display_on(self.session) is False:
+        # The label policy (T90, R254): labels must be OFF for pickup —
+        # the tags bury the sprites (100% no-tags vs 10%/36% tagged, 15
+        # measured rounds). The flag makes the toggle parity-safe — read,
+        # press only when provably on, re-read next attempt. Unknown
+        # (None) means do not touch the key. The `enforce_label_display`
+        # gate belongs to the tag-mode battery alone; every real run
+        # leaves it True.
+        if self.enforce_label_display and label_display_on(self.session) is True:
             try:
                 # The character's real Show Items key (R247) — ALT unless
                 # rebound; keyfile-resolved by the wiring.

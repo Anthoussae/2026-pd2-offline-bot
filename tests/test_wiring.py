@@ -352,3 +352,45 @@ def test_a_navigator_built_without_a_monitor_still_walks(monkeypatch):
     nav = navigate.live_navigator(None, None, 2)
     assert nav._safety_poll is None
     nav._safety()  # the no-op path, exercised rather than assumed
+
+
+# -- the run abort channel (R250) -------------------------------------------------
+
+
+class _NoChat:
+    """A session no ChatListener can read: forces the file-only path."""
+
+
+def test_run_stop_channel_trips_on_the_cancel_file(tmp_path, monkeypatch):
+    from pd2bot import drill
+    from pd2bot.wiring import run_stop_channel
+
+    cancel = tmp_path / "drill-cancel"
+    monkeypatch.setattr(drill, "CANCEL_FILE", cancel)
+    stop = run_stop_channel(_NoChat())
+    assert stop() is False
+    cancel.write_text("cancel", encoding="utf-8")
+    assert stop() is True
+    cancel.unlink()
+    assert stop() is True, "an abort is sticky — abort means abort"
+
+
+def test_run_stop_channel_trips_on_chat_abort(tmp_path, monkeypatch):
+    from pd2bot import drill
+    from pd2bot.perception import chatread
+    from pd2bot.wiring import run_stop_channel
+
+    monkeypatch.setattr(drill, "CANCEL_FILE", tmp_path / "absent")
+
+    class FakeListener:
+        def __init__(self, session, **kw):
+            self.lines = ["hello there", "abort the test"]
+
+        def poll(self):
+            return self.lines.pop(0) if self.lines else None
+
+    monkeypatch.setattr(chatread, "ChatListener", FakeListener)
+    stop = run_stop_channel(_NoChat())
+    assert stop() is False, "ordinary chat is not an abort"
+    assert stop() is True, "the operator's own phrase must stop the run"
+    assert stop() is True, "and it is sticky"

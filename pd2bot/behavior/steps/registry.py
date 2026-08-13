@@ -16,6 +16,7 @@ from pd2bot.behavior.steps.clear import ClearRadiusStep, PickupStep
 from pd2bot.behavior.steps.countess import ClearCountessStep
 from pd2bot.behavior.steps.services import RunServices
 from pd2bot.behavior.steps.survey import SurveyStep
+from pd2bot.behavior.steps.tagmode import TagModeBatteryStep
 from pd2bot.behavior.steps.traverse import TraverseStep
 
 
@@ -138,6 +139,32 @@ def build_registry(services: RunServices) -> StepRegistry:
     )
     registry.register(
         StepSpec("survey", factory=lambda p: SurveyStep(services))
+    )
+    registry.register(
+        StepSpec(
+            "tagmode_battery",  # TEST KIT (R248/R250 tag-mode calibration)
+            params=(
+                ParamSpec("rounds", int, required=False, default=5),
+                ParamSpec("blocks", str, required=False, default="ABC"),
+                ParamSpec("round_seconds", int, required=False, default=30),
+                ParamSpec("radius", int, required=False, default=30),
+                ParamSpec("min_wanted", int, required=False, default=2),
+                ParamSpec(
+                    "filter_initially_on", bool, required=False, default=False
+                ),
+                ParamSpec("confirm_seconds", int, required=False, default=6),
+            ),
+            factory=lambda p: TagModeBatteryStep(
+                services,
+                rounds=p["rounds"],
+                blocks=p["blocks"],
+                round_seconds=p["round_seconds"],
+                radius=p["radius"],
+                min_wanted=p["min_wanted"],
+                filter_initially_on=p["filter_initially_on"],
+                confirm_seconds=p["confirm_seconds"],
+            ),
+        )
     )
     registry.register(StepSpec("done", factory=lambda p: DoneStep(services)))
     return registry

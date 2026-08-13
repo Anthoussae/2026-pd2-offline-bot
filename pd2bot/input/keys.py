@@ -55,11 +55,21 @@ VK_F7, VK_F8 = 0x76, 0x77
 VK_1, VK_2, VK_3, VK_4 = 0x31, 0x32, 0x33, 0x34
 VK_I = 0x49  # the inventory toggle's DEFAULT binding (see KeyBindings)
 # ALT — in PD2 a TOGGLE of the ground-item label display (user, 2026-08-03),
-# not vanilla's hold-to-show. Labels are the big click targets for pickup;
-# the toggle protocol is labels ON to pick, OFF to travel (T63). ALT is
-# also the inert keystroke window.py uses to satisfy Windows' foreground
-# rules — that use is OS plumbing, not a game binding, and never remaps.
+# not vanilla's hold-to-show. The pickup protocol keeps labels OFF (T90,
+# R254 — the tags bury the clickable sprites; this INVERTED T63's
+# labels-on-to-pick reading, falsified by the tag-mode battery's 15
+# measured rounds). ALT is also the inert keystroke window.py uses to
+# satisfy Windows' foreground rules — that use is OS plumbing, not a
+# game binding, and never remaps.
 VK_MENU = 0x12
+# "F" — the default-tags toggle the operator uses (R248): flips ground
+# labels between loot-filter styling and the game's default names. Bound
+# NOWHERE on disk (scanned: the character keyfile has no entry carrying
+# 0x46, BH.json's filter hotkeys are all "None", ProjectDiablo.cfg has no
+# F) — so it is presumed hardcoded in PD2's filter, pressing it cannot
+# collide with any game binding, and its state is unreadable until the
+# T91 probe pins a flag. Used only by the tag-mode battery.
+VK_F = 0x46
 
 # -- tier 2: fixed UI keys (not bindable in D2; constants of the client) -------
 

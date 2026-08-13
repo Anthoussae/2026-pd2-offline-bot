@@ -196,5 +196,5 @@ def test_declared_but_unimplemented_step_refuses_to_build():
 def test_default_registry_vocabulary():
     assert default_registry().names() == [
         "clear_countess", "clear_radius", "deplete_belt", "done", "pickup",
-        "survey", "town_preamble", "traverse", "waypoint",
-    ]  # deplete_belt is an R241 test fixture (belt-depletion for restock)
+        "survey", "tagmode_battery", "town_preamble", "traverse", "waypoint",
+    ]  # deplete_belt (R241) and tagmode_battery (R248) are test fixtures

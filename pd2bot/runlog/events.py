@@ -520,6 +520,137 @@ def pickup_report(events: list[dict]) -> list[str]:
     return lines
 
 
+_BLOCK_NAMES = {"A": "NO NAME TAGS", "B": "LOOT FILTER TAGS",
+                "C": "DEFAULT TAGS"}
+
+
+def tagmode_report(events: list[dict]) -> list[str]:
+    """The tag-mode battery table (R248/R250): accuracy and speed per mode.
+
+    Rounds are windowed by the battery's own `battery.round` boundary
+    events (stage test_start/test_end); the per-item evidence inside a
+    window is the ordinary item stream. Wantedness is judged by the
+    `wanted_kinds` list the round's test_start recorded — kind-based on
+    purpose, because ground unit ids churn. Absent boundaries are
+    reported as absent (a crash mid-round leaves an unclosed window);
+    nothing is defaulted to zero.
+    """
+    rounds: list[dict] = []
+    open_round: dict | None = None
+    for e in events:
+        kind = e.get("kind")
+        if kind == "battery.round" and e.get("stage") == "test_start":
+            open_round = {
+                "block": e.get("block"), "round_no": e.get("round_no"),
+                "mode": e.get("mode"),
+                "start_t": float(e.get("t", 0)),
+                "wanted_start": e.get("wanted_on_ground"),
+                "junk_start": e.get("junk_on_ground"),
+                "wanted_kinds": set(e.get("wanted_kinds") or []),
+                "collected_seen": 0, "junk_collected_seen": 0,
+                "attempts": 0, "abandoned": 0, "last_wanted_t": None,
+            }
+            rounds.append(open_round)
+        elif kind == "battery.round" and e.get("stage") == "test_end":
+            if open_round is not None:
+                open_round["elapsed_s"] = e.get("elapsed_s")
+                open_round["timed_out"] = e.get("timed_out")
+                open_round["collected"] = e.get("collected")
+                open_round["wanted_left"] = e.get("wanted_left")
+                open_round["junk_collected"] = e.get("junk_collected")
+                open_round = None
+        elif open_round is not None:
+            if kind == "item.collected":
+                if e.get("item_kind") in open_round["wanted_kinds"]:
+                    open_round["collected_seen"] += 1
+                    open_round["last_wanted_t"] = float(e.get("t", 0))
+                else:
+                    open_round["junk_collected_seen"] += 1
+            elif kind == "action.pickup_attempt":
+                open_round["attempts"] += 1
+            elif kind == "item.abandoned":
+                open_round["abandoned"] += 1
+    if not rounds:
+        return ["TAGMODE  no battery rounds in this log"]
+
+    lines = ["TAGMODE  per round"]
+    lines.append(
+        f"    {'round':<7}{'mode':<6}{'wanted':<8}{'got':<5}{'left':<6}"
+        f"{'time_s':<8}{'to_last':<9}{'junk+':<7}{'clicks':<8}{'gave up':<8}"
+    )
+    by_mode: dict = {}
+    for r in rounds:
+        complete = "elapsed_s" in r
+        label = f"{r['round_no']}{r['block']}"
+        to_last = (
+            f"{r['last_wanted_t'] - r['start_t']:.1f}"
+            if r["last_wanted_t"] is not None else "-"
+        )
+        time_s = f"{r['elapsed_s']:.1f}" if complete else "OPEN"
+        flag = " TIMEOUT" if complete and r.get("timed_out") else ""
+        got = r.get("collected")
+        got = r["collected_seen"] if got is None else got
+        junk = r.get("junk_collected")
+        junk = r["junk_collected_seen"] if junk is None else junk
+        lines.append(
+            f"    {label:<7}{str(r['mode']):<6}"
+            f"{str(r['wanted_start']):<8}{got:<5}"
+            f"{str(r.get('wanted_left', '?')):<6}{time_s:<8}{to_last:<9}"
+            f"{str(junk):<7}{r['attempts']:<8}{r['abandoned']:<8}{flag}"
+        )
+        if complete:
+            by_mode.setdefault((r["mode"], r["block"]), []).append(r)
+    lines.append("  per mode (complete rounds only)")
+    for mode, block in sorted(by_mode):
+        rows = by_mode[(mode, block)]
+        wanted = sum(r["wanted_start"] or 0 for r in rows)
+        got = sum(
+            r["collected"] if r.get("collected") is not None
+            else r["collected_seen"]
+            for r in rows
+        )
+        mean_t = sum(float(r["elapsed_s"]) for r in rows) / len(rows)
+        junk = sum(
+            r["junk_collected"]
+            if r.get("junk_collected") is not None
+            else r["junk_collected_seen"]
+            for r in rows
+        )
+        timeouts = sum(1 for r in rows if r.get("timed_out"))
+        pct = f"{100 * got // wanted}%" if wanted else "n/a"
+        name = _BLOCK_NAMES.get(block, "?")
+        lines.append(
+            f"    {block} ({name}): {len(rows)} round(s)  "
+            f"accuracy {got}/{wanted} ({pct})  "
+            f"mean time {mean_t:.1f}s  junk picked {junk}  "
+            f"timeouts {timeouts}"
+        )
+    consumed = [e for e in events if e.get("kind") == "battery.consumed"]
+    if consumed:
+        lines.append(
+            f"  CONSUMED BY SLIPPED CLICKS ({len(consumed)}): "
+            + "; ".join(
+                f"kind {e.get('item_kind')} in round "
+                f"{e.get('round_no')}{e.get('block')}"
+                for e in consumed
+            )
+        )
+    losses = [e for e in events if e.get("kind") == "battery.loss"]
+    for e in losses:
+        lines.append(
+            f"  LOSS  round {e.get('round_no')}{e.get('block')} "
+            f"missing {e.get('missing')}"
+        )
+    end = next(
+        (e for e in reversed(events) if e.get("kind") == "battery.end"), None
+    )
+    if end is None:
+        lines.append("  NOTE: no battery.end — the battery did not close")
+    elif not end.get("completed"):
+        lines.append(f"  NOTE: battery stopped early — {end.get('why')}")
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
     """`python -m pd2bot.runlog [run-dir] [--kind P] [--since S] [--raw]`"""
     import argparse
@@ -536,6 +667,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
     parser.add_argument(
         "--pickup", action="store_true",
         help="the pickup census: wanted vs collected, and why not",
+    )
+    parser.add_argument(
+        "--tagmode", action="store_true",
+        help="the tag-mode battery table (R248): accuracy/speed per mode",
     )
     args = parser.parse_args(argv)
 
@@ -554,6 +689,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
     print(f"# {run}", flush=True)
     if args.pickup:
         for line in pickup_report(events):
+            print(line, flush=True)
+        return 0
+    if args.tagmode:
+        for line in tagmode_report(events):
             print(line, flush=True)
         return 0
     if args.raw:

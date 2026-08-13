@@ -689,6 +689,13 @@ PLAYER_HOVER_ITEM = 0xE8
 # 1 = labels showing, 0 = hidden (semantics as read at T66's start).
 BH_LABEL_MODULE = "BH.dll"
 BH_LABEL_DISPLAY = 0x14D2CA
+# The label STYLE toggle ("F" — default names vs loot-filter styling),
+# found by T91 (2026-08-13): 116 modules diffed across four F presses,
+# exactly ONE byte alternated, 90 bytes below the display flag above.
+# Semantics calibrated against the operator's stated state at the probe
+# ("default mode is OFF" while the byte read 1): 1 = loot-filter
+# styling, 0 = the game's default names.
+BH_FILTER_STYLE = 0x14D1CC
 
 # Both live-verified by the T38 probe (64 and 72 charges respectively), and
 # 534 corroborated at R112 where the bot identified an item by accident.

@@ -504,3 +504,48 @@ def test_a_walker_that_returns_nothing_is_not_an_error(monkeypatch):
     executor.runlog = CapturingLog()
     executor.execute(MoveTo((150, 100)))
     assert walked == [(150, 100)]
+
+
+# -- the label policy and its one licensed exception (R254) ---------------------
+
+
+def test_pickup_presses_show_items_when_labels_read_on(monkeypatch):
+    """The standing behavior (T90/R254 — inverted from T63/T66): labels
+    provably ON -> one press of the character's Show Items key before
+    the click, because the tags bury the clickable sprites (the battery
+    measured 100% no-tags against 10%/36% tagged)."""
+    executor, gated, _, _ = make(monkeypatch)
+    monkeypatch.setattr(
+        "pd2bot.behavior.execute.label_display_on", lambda session: True
+    )
+    executor.execute(PickUpItem(50, (1002, 1000)))
+    assert executor.bindings.show_items in gated.pressed
+    assert gated.screen_clicks, "the pickup click itself must still happen"
+
+
+def test_pickup_leaves_labels_alone_when_already_off(monkeypatch):
+    """The policy state (off) already holds: no press, parity preserved."""
+    executor, gated, _, _ = make(monkeypatch)
+    monkeypatch.setattr(
+        "pd2bot.behavior.execute.label_display_on", lambda session: False
+    )
+    executor.execute(PickUpItem(50, (1002, 1000)))
+    assert executor.bindings.show_items not in gated.pressed
+
+
+def test_battery_knob_suspends_the_label_press(monkeypatch):
+    """`enforce_label_display=False` (the tag-mode battery's knob) leaves
+    the toggle alone even when labels provably read on — the battery
+    owns the display and must not be fought for it. The default is
+    True — the field exists for exactly one caller."""
+    executor, gated, _, _ = make(monkeypatch)
+    assert executor.enforce_label_display is True, (
+        "the default must stay the standing behavior"
+    )
+    monkeypatch.setattr(
+        "pd2bot.behavior.execute.label_display_on", lambda session: True
+    )
+    executor.enforce_label_display = False
+    executor.execute(PickUpItem(50, (1002, 1000)))
+    assert executor.bindings.show_items not in gated.pressed
+    assert gated.screen_clicks, "suspending the policy must not suppress the click"

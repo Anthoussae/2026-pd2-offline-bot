@@ -64,6 +64,7 @@ from pd2bot.perception.memory import GameSession
 from pd2bot.perception.player import read_player
 from pd2bot.perception.snapshot import Perception
 from pd2bot.perception.uistate import find_ui_array
+from pd2bot.perception.units import default_tags_on, label_display_on
 from pd2bot.perception.world import read_area, read_map_seed
 from pd2bot.pickit import Pickit, cleanse_keep, load_item_table, load_pickit
 from pd2bot.runlog import RunLog
@@ -490,6 +491,14 @@ class LiveBot:
                 print(f"  field {line}", flush=True)
             return dropped
 
+        # The battery's operator channel (R248): in-game chat. Refusals
+        # propagate — the step's `_say` catches them and falls back to
+        # `alert`, so a dropped announcement never ends a run.
+        battery_chat = Chat(session)
+
+        def battery_say(text: str) -> None:
+            battery_chat.say(text)
+
         # The survey service (R175/R176): frontier targets and coverage over
         # the shared atlas, behind closures so the step never learns what a
         # MapStore is. The target list is cached per (seed, area,
@@ -590,6 +599,27 @@ class LiveBot:
             ),
             runlog=runlog,
             frame=frame,
+            # The tag-mode battery's kit (R248, TEST KIT). Wired
+            # unconditionally — the closures are inert until the one run
+            # file that names the step is loaded, and a battery that
+            # discovers a missing service refuses at its first tick.
+            drop_item=self.town.drop_item,
+            open_inventory=self.town.press_inventory_open,
+            carried_with_sockets=lambda: read_carried_items(session),
+            label_state=lambda: label_display_on(session),
+            press_show_items=lambda: self.gated.press_key(
+                bindings.show_items
+            ),
+            # "F" is bound nowhere on disk (see input/keys.py at VK_F),
+            # but its state flag was pinned by T91 (offsets.BH_FILTER_STYLE)
+            # — so the press is blind and the STATE is read, same deal as
+            # Show Items.
+            press_filter_toggle=lambda: self.gated.press_key(keys.VK_F),
+            filter_state=lambda: default_tags_on(session),
+            set_label_enforcement=lambda on: setattr(
+                executor, "enforce_label_display", on
+            ),
+            say=battery_say,
         )
         registry = build_registry(services)
         run = load_run(self.paths.run, registry)
@@ -864,6 +894,49 @@ def describe(bot: LiveBot) -> list[str]:
     ]
 
 
+def run_stop_channel(session: GameSession) -> Callable[[], bool]:
+    """The operator's abort order, for RUNS (R250): the drill-cancel file,
+    or an abort word ("abort" / "abort the test") typed in game chat.
+
+    Drills have had both channels since R79/R95; runs had NEITHER —
+    `main()` never wired `should_stop`, so a real run's only stops were
+    the ESC kill switch and killing the process. Found 2026-08-13 when
+    the tag-mode battery wedged on a stash panel and the agent's abort
+    had no way in. The engine polls this at the top of every tick and
+    `safety_poll_for` raises on it from inside every walk, so an abort
+    lands within a tick wherever the run is.
+
+    Sticky once tripped, like the drill's: an abort means abort. Chat
+    reading is best-effort — the FILE is the channel that always works.
+    """
+    from pd2bot.drill import ABORT_WORDS, CANCEL_FILE
+    from pd2bot.perception.chatread import ChatListener
+
+    try:
+        listener: ChatListener | None = ChatListener(session)
+    except Exception:  # noqa: BLE001 - no chat read: file cancel only
+        listener = None
+    state = {"stop": False}
+
+    def should_stop() -> bool:
+        if state["stop"]:
+            return True
+        if CANCEL_FILE.exists():
+            state["stop"] = True
+            return True
+        if listener is not None:
+            try:
+                line = listener.poll()
+            except Exception:  # noqa: BLE001 - a torn read is not an abort
+                line = None
+            if line is not None and line.strip().lower() in ABORT_WORDS:
+                state["stop"] = True
+                return True
+        return False
+
+    return should_stop
+
+
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
     import argparse
     import sys
@@ -900,11 +973,22 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
 
     try:
         paths = BotPaths() if args.run is None else replace(BotPaths(), run=args.run)
+        session = GameSession()
+        # The run abort channel (R250): 'abort' in chat or the cancel
+        # file, honored mid-walk. A STALE cancel file must not kill the
+        # launch — same rule the drill harness applies on its first run.
+        from pd2bot.drill import CANCEL_FILE, clear_cancel
+
+        if CANCEL_FILE.exists():
+            clear_cancel()
+            print("note: cleared a stale drill-cancel file before launch")
         bot = build_bot(
+            session,
             paths=paths,
             chicken_life_pct=args.chicken,
             radius_override=args.radius,
             engine_config=EngineConfig(require_watchdog=args.require_watchdog),
+            should_stop=run_stop_channel(session),
         )
     except (GameNotRunning, NeedsAdministrator, WindowNotFound) as exc:
         print(exc, file=sys.stderr)

@@ -285,3 +285,17 @@ headings, noted in parentheses, say roughly where they fell).
 - R245 resolved (go; game 1 relaunched after the truncation + restock fixes) · 2026-08-13 02:28
 - R246 [verify] P5 census gate: review the batch and rule on mandatory_pickup · 2026-08-13 03:07
 - R247 [decision] Hotkey-config plan (md, P1-P4) - pre-approved with implementation authorization · 2026-08-13 04:42
+- R248 [inform] Specify the pickup-calibration detour (deferred R244 (b) folds in) · 2026-08-13 05:24
+- R248 resolved (three-mode name-tag pickup battery specified; review-edit-run authorized) · 2026-08-13 05:35
+- R249 [execute] Launch the tag-mode battery: T91 F-probe, then T90 (15 rounds) · 2026-08-13 06:12
+- R249 resolved (T91 PASS/flag wired; T90 launch 1 aborted: 1A clean 4/4 in 5.7s, then re-collect + stash-wedge defects; nothing lost) · 2026-08-13 07:07
+- R250 [execute] Relaunch the rebuilt tag-mode battery (operator redesign) · 2026-08-13 07:07
+- R250 resolved (go; 4 clean A-rounds 20/20, then the 4th watchdog silent-freeze ended it; dead-man race found+fixed) · 2026-08-13 07:20
+- R251 [execute] Relaunch the battery after the watchdog freeze (attempt 3) · 2026-08-13 07:20
+- R251 resolved (go; round 1A clean 6/6, then self-stop: a ctrl slip DRANK a potion mid-drop - detection right, severity wrong) · 2026-08-13 07:38
+- R252 [execute] Relaunch: operator-gathered rounds + loss-tolerant census (attempt 4) · 2026-08-13 07:38
+- R252 resolved (go; A+B complete - A 100% vs B 10%!; C eaten by stall #5, now REFRAMED as transient-with-recovery) · 2026-08-13 07:53
+- R253 [decision] Watchdog staleness grace (safety policy), then the C-only run · 2026-08-13 07:53
+- R253 resolved (OK go; grace shipped 1298 green; C-only run COMPLETE - battery done: A 100% / B 10% / C 36%) · 2026-08-13 08:25
+- R254 [verify] Rule on the tag-mode results: which mode becomes the standing pickup policy · 2026-08-13 08:25
+- R254 resolved (approved+inverted; field run COMPLETE, census 1/1 first-click; commit/review/push ordered) · 2026-08-13 08:45

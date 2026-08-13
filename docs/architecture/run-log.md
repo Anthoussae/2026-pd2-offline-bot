@@ -414,3 +414,63 @@ cleanse path's decision points now speak (`docs/plans/
   covered and the click waited for the pacer, `cleared` saying whether
   she moved before `aim_blocker_wait_s` ran out), `blocker_kind`,
   `blocker_position`, and the offsets involved.
+
+## Event kinds added by the tag-mode battery (2026-08-13, R248/R250 — TEST KIT)
+
+Emitted only by the `tagmode_battery` step (`runs/t90-tagmode-battery.toml`);
+tabulate with `python -m pd2bot.runlog <dir> --tagmode`. Rounds run in
+BLOCKS (the operator's R250 structure): 1A..5A no tags, 1B..5B loot
+filter tags, 1C..5C default tags.
+
+- `battery.begin` — the battery accepted its environment: `rounds`,
+  `round_seconds`, the droppable census (`droppable`, `whitelisted`,
+  `kept` — the cube and the two tomes), `wanted_kinds`,
+  `labels_initial`, `filter_on`, `filter_readable` (True since T91
+  pinned `offsets.BH_FILTER_STYLE`).
+- `battery.mode` — one block's mode set and flag-verified: `block`
+  (A/B/C), `mode` (1/2/3), `labels_on`, `filter_on`, `enforcement`
+  (False = the executor's label force-on is suspended, block A only).
+- `battery.round` — the round's phase boundaries, distinguished by
+  `stage`: `drop_end` (`dropped` — one pile at the feet), `test_start`
+  (`wanted_on_ground`, `junk_on_ground`, `wanted_kinds` — the
+  tabulator's window opener and wantedness key; kind-based because
+  ground unit ids churn), `test_end` (`elapsed_s`, `timed_out`,
+  `collected`, `wanted_left`, `junk_collected` — the announced score),
+  `gather_end` (`elapsed_s`, `reconciled`, `operator_assisted`). All
+  carry `block`/`round_no`/`mode`. The per-item evidence between
+  `test_start` and `test_end` is the ordinary item stream.
+- `battery.assist` — the between-round gather handed to the operator
+  (R251: it is THEIR job, immediately — the bot never collects between
+  rounds): `block`, `round_no`, `remaining`. The battery holds
+  hands-off until the floor clears, then says "resuming.".
+- `battery.consumed` — a drop left the inventory but never landed on
+  the floor (a slipped ctrl fires the bare right-click; launch 3 drank
+  a healing potion this way): `item_kind`, `block`, `round_no`. The
+  item is excluded from the census and the battery continues.
+- `battery.loss` — the floor read empty but the census (inventory +
+  belt) still did not reconcile: `missing`/`gained` kind counts.
+  Announced and RECORDED, never fatal (stackables merge on pickup,
+  which a count census reads as loss) — the battery continues; the
+  operator is present and `abort` is theirs.
+- `battery.end` — `completed` (False carries `why`), `rounds_done`.
+
+Same change set (R250): RUNS now honor the abort channel drills always
+had — `abort` / `abort the test` typed in game chat, or
+`tools\drill-cancel.ps1` — via `wiring.run_stop_channel`, polled every
+tick and from inside every walk.
+
+## Watchdog staleness grace (2026-08-13, R253 — operator-approved)
+
+The watchdog transiently stalls ~4–10 s and RECOVERS (five healthy
+runs died to instant declaration before the diagnosis; the T90 row 4
+teardown caught the recovery in the act). The engine now requires the
+heartbeat to read stale continuously for `watchdog_stale_grace_s`
+(15 s) before declaring the watchdog down. Track A (the in-process
+safety poll, ADR 2026-08-07) is untouched. New event kinds:
+
+- `watchdog.stale` — the first stale read; carries `grace_s`. The
+  transient stalls were invisible for five runs because nothing spoke
+  until the run was already being ended.
+- `watchdog.recovered` — the heartbeat came back inside the grace.
+- `watchdog.down` — staleness outlasted the grace (carries `stale_s`),
+  or no heartbeat channel is wired at all; the run stands down.

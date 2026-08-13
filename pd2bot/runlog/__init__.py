@@ -16,6 +16,7 @@ from pd2bot.runlog.events import (
     pickup_report,
     render,
     summarize,
+    tagmode_report,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "pickup_report",
     "render",
     "summarize",
+    "tagmode_report",
 ]
