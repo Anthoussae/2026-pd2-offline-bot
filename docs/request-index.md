@@ -284,3 +284,4 @@ headings, noted in parentheses, say roughly where they fell).
 - R245 [execute] Relaunch R244 game 1 after the restock over-buy fix · 2026-08-13 02:08
 - R245 resolved (go; game 1 relaunched after the truncation + restock fixes) · 2026-08-13 02:28
 - R246 [verify] P5 census gate: review the batch and rule on mandatory_pickup · 2026-08-13 03:07
+- R247 [decision] Hotkey-config plan (md, P1-P4) - pre-approved with implementation authorization · 2026-08-13 04:42
