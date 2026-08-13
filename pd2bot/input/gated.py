@@ -34,6 +34,34 @@ from pathlib import Path
 from time import monotonic as _monotonic
 
 from pd2bot import offsets
+
+# The VK codes moved to keys.py — THE keybinding registry (R247) — with
+# their provenance comments. Re-exported here so every existing
+# `from pd2bot.input.gated import VK_...` keeps working; this module is
+# back to owning only the SendInput plumbing, which is what its own
+# comment always said the split should be.
+from pd2bot.input.keys import (  # noqa: F401  (re-exports)
+    VK_1,
+    VK_2,
+    VK_3,
+    VK_4,
+    VK_CONTROL,
+    VK_DOWN,
+    VK_F1,
+    VK_F2,
+    VK_F3,
+    VK_F4,
+    VK_F5,
+    VK_F6,
+    VK_F7,
+    VK_F8,
+    VK_I,
+    VK_LCONTROL,
+    VK_MENU,
+    VK_RETURN,
+    VK_SHIFT,
+    VK_UP,
+)
 from pd2bot.input.screen import clickable, projection_for
 from pd2bot.input.window import GameWindow
 from pd2bot.perception import uistate
@@ -51,41 +79,6 @@ _KEY_UP = 0x0002
 # How long a watchdog-latch read is reused before looking again. `check()`
 # runs on every send; a stat per click buys nothing at this timescale.
 _LATCH_RECHECK_S = 0.5
-
-# Virtual-key codes the bot uses (Win32 VK_*). Kept here because this module
-# owns the SendInput plumbing; the *meaning* of a key (which skill, which
-# belt column) lives with the caller's config, not here.
-VK_SHIFT = 0x10
-# Ctrl+right-click drops an inventory item (R117). VK_CONTROL is the one
-# the client honours — verified live in T44, first variant, gem dropped
-# and found on the ground.
-#
-# VK_LCONTROL exists only as a documented alternative, and the story is
-# worth keeping: T43 concluded ctrl was being ignored, because the item
-# it dropped could not be found on the floor. That was wrong. The drop
-# had worked; T43 read the ground ONCE, immediately, and a just-dropped
-# item takes a moment to enter the unit table. The antidote it "lost" was
-# later found lying exactly where it fell.
-#
-# So the bug was in the instrument, not the game — the same shape as the
-# whole P3 calibration crisis (R86). A verification that polls would have
-# passed first time, and the speculative per-side keycode below was never
-# needed. Keep it for the day some other client really does read key
-# state per-side; do not reach for it before a poll-based test says so.
-VK_CONTROL = 0x11
-VK_LCONTROL = 0xA2
-VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6 = 0x70, 0x71, 0x72, 0x73, 0x74, 0x75
-VK_1, VK_2, VK_3, VK_4 = 0x31, 0x32, 0x33, 0x34
-# NPC dialogs are keyboard-navigable: arrows move the highlight, Enter
-# selects (user discovery, R104). Sent through PanelInput, never here — a
-# world-gated Enter is meaningless, and an ungated one chooses dialog
-# options by accident, which is the R89 defect.
-VK_UP, VK_DOWN, VK_RETURN = 0x26, 0x28, 0x0D
-VK_I = 0x49  # the inventory toggle (default binding)
-# ALT — in PD2 a TOGGLE of the ground-item label display (user, 2026-08-03),
-# not vanilla's hold-to-show. Labels are the big click targets for pickup;
-# the toggle protocol is labels ON to pick, OFF to travel (T63).
-VK_MENU = 0x12
 
 # Down/up spacing: a real click is never instantaneous, and the game samples
 # input per frame (25 fps sim); 60 ms was proven against the live client in M1

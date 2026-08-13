@@ -35,12 +35,11 @@ import time
 
 from pd2bot import offsets
 from pd2bot.input.gated import InputRefused, _send_char, _send_key
+from pd2bot.input.keys import VK_RETURN  # the one registry (R247)
 from pd2bot.input.window import GameWindow
 from pd2bot.perception import uistate
 from pd2bot.perception.memory import GameSession
 
-VK_RETURN = 0x0D
-VK_ESCAPE = 0x1B
 _KEY_UP = 0x0002
 
 _KEY_TAP_S = 0.04

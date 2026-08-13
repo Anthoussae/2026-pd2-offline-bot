@@ -44,11 +44,11 @@ from pd2bot.input.gated import (
     _send_mouse_flag,
     user32,
 )
+from pd2bot.input.keys import VK_ESCAPE  # the one registry (R247)
 from pd2bot.input.window import ClientRect, GameWindow
 from pd2bot.perception import oog, uistate
 from pd2bot.perception.memory import GameSession
 
-VK_ESCAPE = 0x1B
 _KEY_UP = 0x0002
 
 

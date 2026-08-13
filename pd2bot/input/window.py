@@ -21,7 +21,11 @@ user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
 _SW_RESTORE = 9  # ShowWindow: un-minimize without changing a normal window
-_VK_MENU = 0x12  # ALT: inert alone, which is why it is the keystroke used
+# ALT: inert alone, which is why it is the keystroke used to satisfy the
+# foreground rules. Imported from the registry (R247) so the code has
+# one home; the USE here is OS plumbing, not a game binding.
+from pd2bot.input.keys import VK_MENU as _VK_MENU  # noqa: E402
+
 _KEYEVENTF_KEYUP = 0x0002
 
 
