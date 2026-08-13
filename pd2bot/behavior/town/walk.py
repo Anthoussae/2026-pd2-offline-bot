@@ -35,6 +35,48 @@ class _WalkMixin:
         state = uistate.read_ui_state(self.session, self.panel._ui_array)
         return state.is_open(panel_id)
 
+    def _await_interact(
+        self, panel_id: int, timeout_s: float, stall_s: float = 2.0
+    ) -> bool:
+        """Wait for a clicked panel — giving up EARLY on a provable miss.
+
+        A landed interact click has exactly two futures: the panel opens
+        (close range), or the character WALKS toward the target first
+        (D2 walks you over, then interacts). So a character standing
+        still with nothing open is not "slow" — the click hit empty
+        ground, and every remaining second of the timeout is spent
+        waiting for a panel that can no longer arrive.
+
+        T87 caught the cost on the stack sampler: the waypoint's first
+        click misses from the spawn approach angle, and `_await` then
+        burned the full 15 s `npc_walk_timeout_s` — sized for
+        cross-town walks — while the character stood visibly idle 9
+        subtiles away, in every game of the battery. The operator
+        watched it and asked; the sampler answered. The full timeout
+        still bounds the genuine-journey case; only the standing-still
+        case exits early, and its answer (False) is exactly what the
+        caller's retry ladder wants next.
+        """
+        deadline = self._clock() + timeout_s
+        last_pos = None
+        still_since = None
+        while self._clock() < deadline:
+            self._check_stop()
+            if self._panel_open(panel_id):
+                return True
+            player = self._read_player(self.session)
+            pos = player.position if player is not None else None
+            if pos is not None and pos == last_pos:
+                if still_since is None:
+                    still_since = self._clock()
+                elif self._clock() - still_since >= stall_s:
+                    return False  # standing still, nothing open: a miss
+            else:
+                still_since = None  # walking (or unreadable): keep waiting
+                last_pos = pos
+            self._sleep(self.config.poll_s)
+        return False
+
     def _find_ally(self, kind: int) -> tuple[int, int] | None:
         snap = self.snapshot()
         for ally in snap.allies:

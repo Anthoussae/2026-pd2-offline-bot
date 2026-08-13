@@ -2043,6 +2043,25 @@ def test_clearing_stray_ui_keeps_the_panel_we_asked_for(town):
     assert offsets.UI_STASH in town.panels
 
 
+def test_a_missed_object_click_gives_up_early_when_standing_still(town):
+    """T87, the stack sampler's first catch: a missed waypoint click
+    burned the full 15 s panel timeout while the character stood
+    visibly idle — in every game, at every first-click miss, run after
+    run. A landed click either opens the panel or WALKS the character;
+    standing still with nothing open is a provable miss, and the retry
+    should get the remaining budget, not the wait."""
+    town.object_click_works = False
+    step = layer(town)
+    with pytest.raises(TownError):
+        step.open_object_panel(offsets.OBJ_STASH, "the stash", offsets.UI_STASH)
+    # Three attempts under the OLD behaviour cost 3 x 15 s = 45 s of
+    # fake clock; with the early miss detection each costs ~2 s.
+    assert step._clock() < 15.0, (
+        f"the attempts took {step._clock():.1f}s of fake clock — "
+        "the missed clicks are burning the full journey timeout again"
+    )
+
+
 def test_a_failed_object_panel_reports_every_attempt(town):
     """2026-08-01: two identical live failures the message could not explain.
 

@@ -434,8 +434,11 @@ class _PanelMixin:
             # boxes (the stash misclick, 2 of 6 preambles on 2026-08-10).
             offset, aim = self._unblocked_aim(name, clicked, aims, attempt)
             screen = self.gated.click_world(*aim)
-            landed = self._await(
-                lambda: self._panel_open(panel_id), self.config.npc_walk_timeout_s
+            # `_await_interact`, not `_await`: a missed click used to burn
+            # the full 15 s timeout standing still (T87, the sampler's
+            # first catch) — every run paid it at the town waypoint.
+            landed = self._await_interact(
+                panel_id, self.config.npc_walk_timeout_s
             )
             after = self._read_player(self.session)
             # What did we open, if not what we asked for? A panel that is
@@ -517,10 +520,11 @@ class _PanelMixin:
                     clicked = fresh
             self.gated.click_world(*clicked)
             # Clicking an NPC from a distance makes the character WALK to
-            # them first, so this wait covers a journey, not a frame.
-            if self._await(
-                lambda: self._panel_open(offsets.UI_NPCMENU),
-                self.config.npc_walk_timeout_s,
+            # them first, so this wait covers a journey, not a frame —
+            # and a character standing still with no dialog is a missed
+            # click, not a slow one (T87's lesson, same as the objects).
+            if self._await_interact(
+                offsets.UI_NPCMENU, self.config.npc_walk_timeout_s
             ):
                 self.runlog.event(
                     "npc.interact", npc=name, npc_kind=kind,
