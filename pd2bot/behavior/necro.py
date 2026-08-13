@@ -322,9 +322,12 @@ class NecroCombat:
         # field comments. The log carries them so a pattern across runs
         # can be noticed by a human, never so the bot can teach itself
         # that something is unkillable.
+        # `monster_kind`, never `kind`: the run log's envelope owns the
+        # "kind" key, and a field by that name used to clobber the event
+        # kind on write (the 2026-08-10 order-event lesson).
         self.note_write_off(
             unit_id=target.unit_id,
-            kind=target.kind,
+            monster_kind=target.kind,
             strikes=strikes,
             signature="no-damage" if mana_moved else "no-contact",
             hp=target.hp,

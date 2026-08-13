@@ -90,6 +90,47 @@ def test_the_budget_closes_the_order_loudly_once():
     assert b.next_order(now=7.0) is None
 
 
+def test_id_churn_rebinds_an_open_order_instead_of_duplicating():
+    """2026-08-10 pilots: one amethyst on one subtile carried unit ids
+    604, 661 and 764 across a run — the client re-registers a ground
+    item when its room unloads and reloads. Without the rebind that was
+    three orders, stale 'gone' closes, and a budget that reset on every
+    reload."""
+    b = book(budget=10.0)
+    b.sight(604, 685, (5232, 5663), now=0.0)
+    order = b.next_order(now=0.0)
+    b.service_tick(order, now=0.0)
+    b.service_tick(order, now=2.0)
+
+    assert b.sight(661, 685, (5232, 5663), now=3.0) is None  # not a new order
+    assert len(b.all_orders()) == 1
+    survivor = b.pending()[0]
+    assert survivor.unit_id == 661, "the order follows the item's new id"
+    assert survivor.active_s == 2.0, "the budget survived the churn"
+
+
+def test_id_churn_cannot_reopen_a_closed_order():
+    # The convergence rule extends across ids: a spent budget must not
+    # refill just because the room reloaded and the item re-registered.
+    b = book(budget=2.0)
+    b.sight(604, 685, (5232, 5663), now=0.0)
+    order = b.next_order(now=0.0)
+    for t in range(4):
+        b.service_tick(order, now=float(t))
+    assert b.next_order(now=5.0).state == CLOSED_BUDGET
+
+    assert b.sight(661, 685, (5232, 5663), now=6.0) is None
+    assert b.pending() == []
+
+
+def test_a_write_off_closes_like_a_spent_budget_and_only_once():
+    b = book()
+    b.sight(1, 700, (0, 0), now=0.0)
+    assert b.write_off(1).state == CLOSED_BUDGET
+    assert b.write_off(1) is None  # double-close reports nothing
+    assert b.pending() == []
+
+
 def test_the_next_order_gets_its_turn_after_a_write_off():
     b = book(budget=2.0)
     b.sight(1, 700, (0, 0), now=0.0)

@@ -62,6 +62,34 @@ class OrderBook:
             if not existing.closed:
                 existing.position = position
             return None
+        # Ground-item unit ids are NOT stable: the client re-registers an
+        # item when its room unloads and reloads (2026-08-10 pilots: one
+        # amethyst at one subtile carried ids 604, 661 and 764 across a
+        # run). An order for the same kind at the same position is very
+        # likely this item under an old id. Open: rebind it, so the
+        # budget survives the churn and the reap cannot close a live
+        # order over a stale id while a duplicate opens beside it.
+        # Closed as gone/budget: the convergence rule extends across ids
+        # — "gone" was probably the churn itself and a spent budget must
+        # not refill because the room reloaded. Closed as COLLECTED is
+        # different: that item is in the bag, so a new sighting on the
+        # same subtile is a genuinely new drop and books normally. (The
+        # remaining theoretical cost: a second identical item dropped on
+        # the exact subtile of a gone/budget close gets no order of its
+        # own — it still logs `item.dropped` and the ordinary in-radius
+        # pickup still collects it.)
+        twins = [
+            o for o in self._orders.values()
+            if o.kind == kind and tuple(o.position) == tuple(position)
+        ]
+        open_twin = next((o for o in twins if not o.closed), None)
+        if open_twin is not None:
+            del self._orders[open_twin.unit_id]
+            open_twin.unit_id = unit_id
+            self._orders[unit_id] = open_twin
+            return None  # a rebind is a re-sighting, not a new order
+        if any(o.state in (CLOSED_GONE, CLOSED_BUDGET) for o in twins):
+            return None  # closed stays closed, whatever the id says
         order = PickupOrder(unit_id, kind, position, created_at=now)
         self._orders[unit_id] = order
         return order
@@ -71,6 +99,14 @@ class OrderBook:
 
     def gone(self, unit_id: int) -> PickupOrder | None:
         return self._close(unit_id, CLOSED_GONE)
+
+    def write_off(self, unit_id: int) -> PickupOrder | None:
+        """Close an order whose pursuit is KNOWN futile (click budget
+        spent and the one post-cleanse retry failed). Same terminal
+        state as a budget expiry — the census trichotomy stays
+        collected/gone/budget — the caller's event carries the finer
+        reason."""
+        return self._close(unit_id, CLOSED_BUDGET)
 
     def _close(self, unit_id: int, state: str) -> PickupOrder | None:
         order = self._orders.get(unit_id)

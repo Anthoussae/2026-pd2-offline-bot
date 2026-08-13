@@ -2048,8 +2048,13 @@ def test_draw_order_is_stable_for_a_single_item():
 def test_a_non_potion_miss_in_a_pile_is_ambiguity_not_a_full_inventory(tmp_path):
     """P4's correctness fix: a rune that will not come up with items packed
     around it is a pile-ambiguity miss (the clicks hit a neighbour), NOT
-    the inventory being full — and it must NOT suppress every OTHER
-    non-potion pickup this game, which is what marking inventory-full did."""
+    proof the inventory is full — it must NOT suppress every OTHER
+    non-potion pickup this game, which is what marking inventory-full did.
+    But it DOES queue a cleanse now (2026-08-10 live): a genuinely full
+    inventory manifests as pile ambiguity whenever drops cluster — 88 of
+    that pilot's 89 write-offs took this branch, so the cleanse the full
+    grid needed never queued and the operator watched the bot click
+    forever with no room. A cleanse costs nothing when the grid is clean."""
     clock = Clock()
     log = _runlog(tmp_path, clock)
     alerts = []
@@ -2066,11 +2071,123 @@ def test_a_non_potion_miss_in_a_pile_is_ambiguity_not_a_full_inventory(tmp_path)
     step.collect(snap(pos=HOME, items=crowd), ctx, rune)
 
     assert not svc.inventory_full, "a pile miss must not blame the inventory"
-    assert not svc.cleanse_queued, "a pile miss is not a space problem — no cleanse"
+    assert svc.cleanse_queued, "a full grid can hide behind a pile — cleanse"
     assert 930 in svc.stuck, "this item is still written off"
     reason = _events(log, "item.abandoned")[0]["reason"]
     assert "pile ambiguity" in reason
     assert any("pile ambiguity" in a for a in alerts)
+    queued = _events(log, "inventory.cleanse_queued")
+    assert queued and queued[0]["reason"] == "pile-ambiguity write-off"
+
+
+def test_a_pile_miss_that_already_had_its_cleanse_retry_queues_nothing(tmp_path):
+    # The R173 guard extends to the pile path: a retry that cannot differ
+    # is not a retry, so an item that failed AFTER a cleanse-and-step-off
+    # must not queue another one.
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    step, svc, here, executor, ctx = sweeping(clock)
+    svc.runlog = log
+    rune = GroundItem(unit_id=933, kind=702, position=(1001, 1000), quality=RARE)
+    crowd = [
+        rune,
+        GroundItem(unit_id=934, kind=702, position=(1002, 1000), quality=RARE),
+    ]
+    svc.attempts[933] = svc.pickup_click_attempts
+    svc.cleanse_retried.add(933)
+
+    step.collect(snap(pos=HOME, items=crowd), ctx, rune)
+
+    assert not svc.cleanse_queued
+    assert _events(log, "inventory.cleanse_queued") == []
+
+
+def test_a_written_off_item_is_not_re_logged_every_tick(tmp_path):
+    """The 2026-08-10 pilot wrote 88 `item.abandoned` events for a handful
+    of items: `service_orders` targets the order's unit directly (no
+    stuck filter, unlike `wanted_items`), so every serviced tick
+    re-entered the spent-budget branch and re-logged the same write-off."""
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    step, svc, here, executor, ctx = sweeping(clock, runlog=log)
+    solo = GroundItem(unit_id=950, kind=702, position=(1001, 1000), quality=RARE)
+    svc.attempts[950] = svc.pickup_click_attempts
+
+    step.collect(snap(pos=HOME, items=[solo]), ctx, solo)  # the write-off
+    clock.advance(1.0)
+    acted = step.collect(snap(pos=HOME, items=[solo]), ctx, solo)  # stuck now
+
+    assert acted is False
+    assert len(_events(log, "item.abandoned")) == 1
+
+
+def test_the_full_inventory_mark_is_on_the_record(tmp_path):
+    # The 2026-08-10 diagnosis had to be made from the log's SILENCE;
+    # the suppression that costs a game's loot now says so in the stream.
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    step, svc, here, executor, ctx = sweeping(clock, runlog=log)
+    solo = GroundItem(unit_id=941, kind=702, position=(1001, 1000), quality=RARE)
+    svc.attempts[941] = svc.pickup_click_attempts
+
+    step.collect(snap(pos=HOME, items=[solo]), ctx, solo)
+
+    full = _events(log, "inventory.full")
+    assert len(full) == 1 and full[0]["unit_id"] == 941
+
+
+def test_service_orders_runs_a_queued_cleanse_without_inventory_full(tmp_path):
+    """The second half of the 2026-08-10 cleanse starvation: while orders
+    are being serviced the step's own maybe_cleanse call sits AFTER the
+    service_orders return, so the call inside service_orders is the only
+    one that can run — and it was gated on `inventory_full`, which the
+    pile-ambiguity path (the one that actually queues under a full grid)
+    never sets. The gate is gone; maybe_cleanse declines by itself when
+    nothing is queued."""
+    from pd2bot.behavior.steps.orders import OrderBook
+
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    step, svc, here, executor, ctx = sweeping(clock, runlog=log)
+    svc.order_book = OrderBook(budget_s=75.0)
+    # An order far away (no reap, and the return walk is not this tick's
+    # business), a queued cleanse, and the inventory NOT marked full.
+    svc.order_book.sight(50, 999, (1200, 1200), now=clock())
+    svc.cleanse_queued = True
+    svc.cleanse = lambda: 1
+    assert not svc.inventory_full
+
+    outcome = step.service_orders(snap(pos=HOME), ctx)
+
+    assert outcome is not None and "cleansing" in outcome.note
+    assert _events(log, "inventory.cleanse")
+    assert not svc.cleanse_queued
+
+
+def test_a_terminally_stuck_order_closes_instead_of_waiting_out_the_budget(
+    tmp_path,
+):
+    """An order whose unit is written off AND already had its one
+    post-cleanse retry is known futile — everything a cleanse can change
+    has been tried. The 2026-08-10 pilots stood in 'pickup pacing' for
+    the full 75 s budget per such item."""
+    from pd2bot.behavior.steps.orders import OrderBook
+
+    clock = Clock()
+    log = _runlog(tmp_path, clock)
+    step, svc, here, executor, ctx = sweeping(clock, runlog=log)
+    svc.order_book = OrderBook(budget_s=75.0)
+    svc.order_book.sight(60, 999, (1010, 1000), now=clock())
+    svc.stuck.add(60)
+    svc.cleanse_retried.add(60)
+    lying = GroundItem(unit_id=60, kind=999, position=(1010, 1000), quality=RARE)
+
+    outcome = step.service_orders(snap(pos=HOME, items=[lying]), ctx)
+
+    assert outcome is None, "the closed order must not claim the tick"
+    assert svc.order_book.pending() == []
+    gave = _events(log, "pickup.order_abandoned")
+    assert gave and "post-cleanse retry" in gave[0]["reason"]
 
 
 def test_a_non_potion_miss_alone_still_marks_the_inventory_full(tmp_path):

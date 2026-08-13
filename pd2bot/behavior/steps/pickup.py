@@ -95,11 +95,15 @@ class _PickupMixin:
             # whitelisted drops, 0 orders, full inventory).
             if book is not None and potion_type_of(item) is None:
                 opened = book.sight(item.unit_id, item.kind, item.position, now)
+                # `item_kind`, never `kind`: a field named "kind" used to
+                # clobber the EVENT kind in the record merge, which wrote
+                # every order event of the 2026-08-10 pilots with a number
+                # for a kind and made the whole order system look dead.
                 self.services.runlog.event(
                     "pickup.order_open" if opened is not None
                     else "pickup.order_resight",
                     unit_id=item.unit_id,
-                    kind=item.kind,
+                    item_kind=item.kind,
                     item=self._logged_name(item.kind),
                     position=list(item.position),
                 )
@@ -203,7 +207,7 @@ class _PickupMixin:
                     self.services.runlog.event(
                         "pickup.order_collected",
                         unit_id=unit_id,
-                        kind=kind,
+                        item_kind=kind,
                         active_s=round(closed.active_s, 1),
                     )
             frame = self.services.frame() if self.services.frame else None
@@ -447,6 +451,14 @@ class _PickupMixin:
         player = snap.player
         if player is None:
             return False
+        if item.unit_id in self.services.stuck:
+            # Already written off. The clearance never gets here (its
+            # `wanted_items` filters stuck ids) but `service_orders`
+            # targets the order's unit directly — and re-entering the
+            # spent-budget branch below re-logged the SAME write-off
+            # every serviced tick (2026-08-10 pilot: 88 `item.abandoned`
+            # events for a handful of items).
+            return False
         distance = _chebyshev(item.position, player.position)
         if distance > self.services.pickup_reach:
             # The R189 budget: a walk that SUCCEEDS without getting closer
@@ -523,17 +535,26 @@ class _PickupMixin:
                 return False
             if near > 0:
                 # PILE AMBIGUITY (P4): a neighbour in reach almost certainly
-                # ate the clicks, so this is NOT the inventory being full —
+                # ate the clicks, so this is NOT proof the inventory is full —
                 # and marking it full would abandon every OTHER non-potion
                 # item this game for a single missed rune in a pile. Write
-                # THIS item off and keep going; no cleanse (junk on the floor
-                # is not junk in the grid).
+                # THIS item off and keep going. But queue a CLEANSE: the
+                # 2026-08-10 pilot proved a genuinely full inventory
+                # manifests AS pile ambiguity whenever drops cluster (88 of
+                # 89 write-offs took this branch, so the cleanse the full
+                # grid needed never queued — the operator watched it). A
+                # cleanse is cheap when the grid has no junk (drops 0,
+                # leaves no pile), and `cleanse_retried` still caps it at
+                # one retry per item, which is what kept R173 from looping.
+                if item.unit_id not in self.services.cleanse_retried:
+                    self._queue_cleanse("pile-ambiguity write-off", item)
                 self.services.alert(
                     f"pickup: item kind {item.kind} at {item.position} would "
                     f"not come up after {self.services.pickup_click_attempts} "
                     f"attempts with {near} item(s) packed within 2 subtiles — "
                     "pile ambiguity, the clicks likely landed on a neighbour. "
-                    "Leaving that one; still collecting the rest."
+                    "Leaving that one; still collecting the rest. A cleanse "
+                    "is queued in case a full inventory is the real cause."
                 )
                 return False
             # No neighbour, nothing moved: aim failure for this item class OR
@@ -550,7 +571,7 @@ class _PickupMixin:
             # differed in everything a cleanse can change, so re-queueing one
             # is how the R173 loop span forever.
             if item.unit_id not in self.services.cleanse_retried:
-                self.services.cleanse_queued = True
+                self._queue_cleanse("no-neighbour write-off", item)
             return False
         if attempts == 0:
             # Log the DECISION, not just the click (R144). "The bot picked up
@@ -678,6 +699,32 @@ class _PickupMixin:
         self.services.clear_panels()
         return True
 
+    def _queue_cleanse(self, reason: str, item: GroundItem) -> None:
+        """Set the cleanse flag, and say so in the event stream — once per
+        transition, not per tick. The 2026-08-10 gap was only diagnosable
+        by reading source against the log's SILENCE; queue/defer/run each
+        get an event now so the next such question is answered by the log.
+        """
+        if not self.services.cleanse_queued:
+            self.services.runlog.event(
+                "inventory.cleanse_queued",
+                reason=reason, unit_id=item.unit_id,
+                item=self._logged_name(item.kind),
+            )
+        self.services.cleanse_queued = True
+
+    def _note_cleanse_deferred(self, reason: str | None) -> None:
+        """Record why a QUEUED cleanse did not run this tick — once per
+        streak of the same reason (hostiles linger for many ticks and the
+        event would otherwise be tick spam). `None` resets the streak."""
+        if reason == self.services.cleanse_deferred_reason:
+            return
+        self.services.cleanse_deferred_reason = reason
+        if reason is not None:
+            self.services.runlog.event(
+                "inventory.cleanse_deferred", reason=reason
+            )
+
     def _desired_nearby(
         self, snap: GameSnapshot, origin: tuple[int, int], radius: int
     ) -> list[GroundItem]:
@@ -780,11 +827,16 @@ class _PickupMixin:
             return False
 
         if not services.cleanse_queued or services.cleanse is None:
+            if services.cleanse_queued and services.cleanse is None:
+                self._note_cleanse_deferred("no cleanse service wired")
             return False
         if any(
             _chebyshev(m.position, origin) <= services.cleanse_safe_radius
             for m in snap.live_monsters
         ):
+            self._note_cleanse_deferred(
+                f"hostile within {services.cleanse_safe_radius}"
+            )
             return False
 
         # 2 — never drop junk beside something we intend to click.
@@ -811,6 +863,7 @@ class _PickupMixin:
 
         walk_done()
         services.cleanse_queued = False
+        self._note_cleanse_deferred(None)
         dropped = services.cleanse()
         frame = self.services.frame() if self.services.frame else None
         self.services.runlog.event(
@@ -838,6 +891,11 @@ class _PickupMixin:
         if self.services.inventory_full:
             return
         self.services.inventory_full = True
+        self.services.runlog.event(
+            "inventory.full",
+            unit_id=item.unit_id, item=self._logged_name(item.kind),
+            position=list(item.position),
+        )
         self.services.alert(
             f"INVENTORY FULL: item kind {item.kind} at {item.position} would "
             f"not come up after {self.services.pickup_click_attempts} attempts. "
@@ -883,7 +941,7 @@ class _PickupMixin:
                 book.gone(order.unit_id)
                 self.services.runlog.event(
                     "pickup.order_gone",
-                    unit_id=order.unit_id, kind=order.kind,
+                    unit_id=order.unit_id, item_kind=order.kind,
                     position=list(order.position),
                     active_s=round(order.active_s, 1),
                 )
@@ -894,9 +952,10 @@ class _PickupMixin:
         if order.state == "budget":
             self.services.runlog.event(
                 "pickup.order_abandoned",
-                unit_id=order.unit_id, kind=order.kind,
+                unit_id=order.unit_id, item_kind=order.kind,
                 position=list(order.position),
                 active_s=round(order.active_s, 1),
+                reason="active budget spent",
             )
             self.services.alert(
                 f"pickup order written off after {order.active_s:.0f}s: "
@@ -904,11 +963,35 @@ class _PickupMixin:
             )
             return None  # re-decide next tick; the next order gets its turn
 
+        # An order whose unit is written off AND already had its one
+        # post-cleanse retry is KNOWN futile: everything a cleanse can
+        # change has been tried. Waiting out the active budget on it was
+        # a standing character doing nothing for up to 75 s per item
+        # (the 2026-08-10 pilots spent whole stretches in that pose).
+        if (
+            order.unit_id in self.services.stuck
+            and order.unit_id in self.services.cleanse_retried
+        ):
+            book.write_off(order.unit_id)
+            self.services.runlog.event(
+                "pickup.order_abandoned",
+                unit_id=order.unit_id, item_kind=order.kind,
+                position=list(order.position),
+                active_s=round(order.active_s, 1),
+                reason="click budget spent; the post-cleanse retry failed",
+            )
+            return None  # the next order gets its turn next tick
+
         book.service_tick(order, now)
 
-        # Inventory full: the cleanse is the unblock, and its own hygiene
-        # already walks AWAY from wanted items before dropping junk.
-        if self.services.inventory_full and self.maybe_cleanse(snap, ctx):
+        # The cleanse is the unblock for a wedged pickup, and its own
+        # hygiene already walks AWAY from wanted items before dropping
+        # junk. NOT gated on `inventory_full`: the pile-ambiguity path
+        # queues a cleanse without ever marking the inventory full, and
+        # while orders are being serviced this is the only call site
+        # that can run it (the step's own maybe_cleanse sits after the
+        # service_orders return — the 2026-08-10 starvation).
+        if self.maybe_cleanse(snap, ctx):
             return StepOutcome(
                 done=False, acted=True,
                 note=f"order {order.unit_id}: cleansing to make room",

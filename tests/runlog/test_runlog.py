@@ -76,6 +76,21 @@ def test_every_event_carries_seq_both_clocks_and_the_area(tmp_path):
     assert "T" in events[0]["at"]
 
 
+def test_a_field_named_kind_cannot_clobber_the_event_kind(tmp_path):
+    """THE 2026-08-10 pilot bug: every pickup.order_* event was written
+    with an item-kind NUMBER as its event kind, because the record merge
+    let a field called "kind" overwrite the envelope's. Kind-filtered
+    readers saw no order events at all, and a working order system was
+    misread live as never booking. The envelope's identity keys are
+    inviolable; a colliding field is preserved under field_<name>."""
+    log, _ = make_log(tmp_path)
+    log.event("pickup.order_open", unit_id=604, kind=685, position=[5232, 5663])
+    events = load(log.directory)
+    assert events[0]["kind"] == "pickup.order_open"
+    assert events[0]["field_kind"] == 685  # renamed, never dropped
+    assert events[0]["unit_id"] == 604
+
+
 def test_the_area_stamp_follows_the_last_transition(tmp_path):
     log, _ = make_log(tmp_path)
     log.area(6, "Black Marsh")

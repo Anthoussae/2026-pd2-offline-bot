@@ -187,6 +187,18 @@ class RunLog:
         has a kind. Found the moment `npc.interact` tried to record the
         NPC's kind and collided with the parameter name.
 
+        The positional-only signature is NOT enough on its own: a field
+        literally named "kind" used to survive the call and then clobber
+        the envelope's event kind in the record merge, which is how every
+        `pickup.order_*` event of the 2026-08-10 pilot batch was written
+        with an item-kind NUMBER as its event kind — invisible to every
+        kind-filtered reader, and misread live as "orders never booked".
+        The envelope's identity keys (seq, at, t, kind) are therefore
+        inviolable: a colliding field is preserved under `field_<name>`
+        rather than dropped (rule: never lose what an emitter said) —
+        but emitters should name such fields properly (`item_kind`,
+        `npc_kind`, `monster_kind`) so the rename never fires.
+
         `kind` is a dotted namespace — `action.move`, `item.dropped`,
         `step.decision` — so a reader can filter by prefix. Unknown
         fields are allowed on purpose: an emitter that learns something
@@ -206,6 +218,9 @@ class RunLog:
         if self._area is not None:
             record["area"] = self._area
             record["area_name"] = self._area_name
+        for key in ("seq", "at", "t", "kind"):
+            if key in fields:
+                fields[f"field_{key}"] = fields.pop(key)
         record.update(fields)
         try:
             with open(self.path, "a", encoding="utf-8") as fh:

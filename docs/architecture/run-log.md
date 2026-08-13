@@ -196,7 +196,12 @@ say what you left.
 ### `combat.write_off`
 
 A target that strikes have provably achieved nothing against:
-`unit_id`, `kind`, `strikes`, `hp`, `signature`.
+`unit_id`, `monster_kind`, `strikes`, `hp`, `signature`.
+
+(`monster_kind` was `kind` until 2026-08-13, when the field was found
+clobbering the event kind on disk — see "the envelope's identity keys"
+below. Logs written before that date carry these events with the
+monster's kind NUMBER as the event kind.)
 
 ### `nav.failed`
 
@@ -240,10 +245,19 @@ HP from the snapshot taken before the block. See
 `docs/reviews/2026-08-07-chicken-starvation-death/`.
 
 The field is `verdict`, **not** `kind`: the writer merges fields over an
-envelope that already owns `kind`, so a field by that name would rename
-the event out of the log it exists to appear in. The positional-only
-`kind` parameter stops the collision being silent at the call; it does
-not stop this one.
+envelope that already owns `kind`, so a field by that name used to
+rename the event out of the log it exists to appear in. This paragraph
+predicted the exact bug that then shipped anyway: every
+`pickup.order_*` event of the 2026-08-10 pilot batch carried
+`kind=<item kind>` and was written with a NUMBER as its event kind,
+invisible to every kind-filtered reader — a working order system was
+misread live as never booking. Since 2026-08-13 the envelope's identity
+keys (`seq`, `at`, `t`, `kind`) are inviolable: a colliding field is
+preserved under `field_<name>` instead of clobbering. Emitters still
+name such fields properly (`item_kind`, `npc_kind`, `monster_kind`) so
+the rename never fires; the offline test fake goes further and FAILS on
+a collision, because the fake's tolerance is how this one stayed
+invisible through seven green tests.
 
 ### `watchdog.fired`
 
@@ -344,10 +358,34 @@ honest `kind <n>` fallback, and add the kind to the table above.
   character is beyond `[route] stray_subtiles` from the area's recorded
   line; emitted on the crossing and ~5 s heartbeats while out, with
   `returning` saying whether the posture policy allowed walking back.
-- `pickup.order_open` / `pickup.order_collected` / `pickup.order_gone`
-  / `pickup.order_abandoned` — the mandatory-pickup lifecycle (pilot
-  flag `mandatory_pickup` in a run file): every wanted non-potion drop
-  is booked, and every order ends in exactly one of the three closes,
-  with its accumulated ACTIVE pursuit seconds. The census reads these.
+- `pickup.order_open` / `pickup.order_resight` / `pickup.order_collected`
+  / `pickup.order_gone` / `pickup.order_abandoned` — the mandatory-pickup
+  lifecycle (pilot flag `mandatory_pickup` in a run file): every wanted
+  non-potion drop is booked (`item_kind`, `item`, `unit_id`, `position`),
+  and every order ends in exactly one of the three closes, with its
+  accumulated ACTIVE pursuit seconds. `order_abandoned` carries `reason`:
+  `"active budget spent"`, or `"click budget spent; the post-cleanse
+  retry failed"` for an order closed early because everything a cleanse
+  can change was already tried. Ground-item unit ids are NOT stable
+  across room unload/reload (2026-08-10: one amethyst carried three ids
+  in one run); the book rebinds an open order to the item's new id at
+  the same kind+position — logged as a resight — and a CLOSED order
+  stays closed whatever the id says.
 - `town.restock` — (arrives with the live-gated Akara chore) potions
   bought per type, with gold before/after.
+
+## Event kinds added by the cleanse-starvation fix (2026-08-13)
+
+The 2026-08-10 diagnosis had to be made from the log's silence; the
+cleanse path's decision points now speak (`docs/plans/
+2026-08-09-combat-logistics/notes.md` carries the full story):
+
+- `inventory.full` — `_mark_inventory_full` suppressed non-potion
+  pickups for the rest of the game: `unit_id`, `item`, `position` of the
+  item whose failed pickup triggered it.
+- `inventory.cleanse_queued` — the cleanse flag went up (once per
+  transition, not per tick): `reason` (`"pile-ambiguity write-off"` /
+  `"no-neighbour write-off"`), `unit_id`, `item`.
+- `inventory.cleanse_deferred` — a QUEUED cleanse did not run this tick:
+  `reason` (hostiles in radius, or no cleanse service wired). Once per
+  streak of the same reason, so a lingering fight is one event.

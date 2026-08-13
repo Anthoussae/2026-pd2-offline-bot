@@ -30,6 +30,15 @@ class EventLog(NullRunLog):
         self.events = []
 
     def event(self, kind, /, **fields):
+        # Tripwire (2026-08-10): the REAL log's record merge means a field
+        # named after an envelope key would clobber it on disk. This fake
+        # kept (kind, fields) apart, so seven order tests passed while
+        # every live order event was written with an item-kind NUMBER as
+        # its event kind. Fail the test the real log cannot fail.
+        assert not {"seq", "at", "t", "kind"} & fields.keys(), (
+            f"event field collides with the envelope: {sorted(fields)} — "
+            "name it item_kind/npc_kind/monster_kind instead"
+        )
         self.events.append((kind, fields))
 
 

@@ -222,6 +222,11 @@ class RunServices:
     # again, so it is final for this game: re-queueing another cleanse for
     # it is the retry-that-cannot-differ this codebase keeps refusing.
     cleanse_retried: set[int] = field(default_factory=set)
+    # The reason the last tick's QUEUED cleanse did not run, so the
+    # deferral event fires once per streak instead of once per tick
+    # (hostiles linger for many ticks). None = not currently deferred.
+    # Telemetry only — never read for a decision.
+    cleanse_deferred_reason: str | None = None
     # Hygiene-walk patience (review 2026-08-02, issue 001). The walk-away
     # and step-off walks are the "acted but achieved nothing" shape the
     # survey's fight gate had: a walk clamped at a wall ARRIVES (honest
