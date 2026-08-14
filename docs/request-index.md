@@ -299,3 +299,5 @@ headings, noted in parentheses, say roughly where they fell).
 - R253 resolved (OK go; grace shipped 1298 green; C-only run COMPLETE - battery done: A 100% / B 10% / C 36%) · 2026-08-13 08:25
 - R254 [verify] Rule on the tag-mode results: which mode becomes the standing pickup policy · 2026-08-13 08:25
 - R254 resolved (approved+inverted; field run COMPLETE, census 1/1 first-click; commit/review/push ordered) · 2026-08-13 08:45
+- R255 [decision] Approve the human-run recorder design (human-vs-bot Cold Plains) · 2026-08-13 18:15
+- R255 resolved (go; recording COMPLETE T92: human 58s vs bot 481s (8.3x); culprit = clear_radius locomotion ~330s of the 401s CP gap) · 2026-08-13 19:28

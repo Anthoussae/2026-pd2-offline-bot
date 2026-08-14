@@ -399,3 +399,37 @@ Still open, low priority: the waypoint's first click misses
 systematically from the south-west approach (the (0,0) aim lands off
 the sprite); a measured aim offset for that angle would save the
 remaining ~2.8 s. The T83 drill generalises to measure it.
+
+## 2026-08-13 evening — the human-vs-bot detour (R255/T92)
+
+The operator played a Cold Plains run while a NEW read-only recorder
+watched (`pd2bot/observe.py`: perception-only, no input class imported,
+4 Hz samples into a standard run-log dir; ends itself on save-and-exit).
+A NEW reducer (`pd2bot/runlog/compare.py`) folds both log dialects
+(`tick` / `observe.sample`) into per-area phase tables. 16 tests, 1315
+green. Logs: human `20260813-192249-human-coldplains` vs bot baseline
+`20260813-083614-cold-plains` — same character, build, and gear, so the
+diff is pure piloting.
+
+**Result (human trimmed to first movement): ~58 s vs 481 s — 8.3×.**
+
+| Cold Plains        | human | bot   |
+|--------------------|-------|-------|
+| duration           | 53 s  | 454 s |
+| route              | 611 st| 1728 st |
+| ground speed       | 16.5 st/s | 6.0 st/s |
+| idle (spans ≥2 s)  | 16 s (1) | 178 s (26, max 47 s) |
+| combat exposure    | 40 s  | 388 s |
+| pickups observed   | 5     | 1     |
+
+**Main culprit: `clear_radius` locomotion.** Every bot idle span sits in
+that step; the 47 s one is two back-to-back ~21 s ticks each ending
+`nav.failed: no path from (5216,5717) to (5218,5709)` — 42 s to not
+cross 8 subtiles (the T71 oscillation family, now with an event on the
+give-up path). The stop-start leg pattern holds effective speed to a
+third of what the same character does under a human hand. Rough
+decomposition of the 401 s Cold Plains gap: ~170 s stop-start pacing,
+~160 s idle stalls, ~65 s longer route. Caveats: human patrol-ring
+coverage not verified equal to the bot's; the bot's town phase has only
+3 tick samples (blocking town loops), so town rows are duration-only.
+Speed-pass decisions deferred; this detour only names the target.
