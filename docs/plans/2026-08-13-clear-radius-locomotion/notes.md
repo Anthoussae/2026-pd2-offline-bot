@@ -232,3 +232,15 @@ floods, walk-into-pack, seam leak, 13s repeat-click). The residual is
 ~40 diffuse ~2s blocked walks per run - each a different spot/target,
 consistent with click-movement vs unit collision as a mechanic, not a
 single bug. Targets (<180s / <45s) not met by roughly 1.5-2x.
+
+Battery continued (R262 tuning, walk-budget revert bd0cde4):
+
+| run | config | CP | CP idle | ticks>4s (CP) | stuck walks | note |
+|---|---|---|---|---|---|---|
+| 7 (235331) | = 6b config | 215s | 71s | 0 | 24 / 50s | operator-watched; wandering window decomposed (chase-abandon-retrace + blocked ring point) -> R262 |
+| 8 (001358) | +R262 all three | FAILED 19s | - | - | - | the 1s walk budget broke town approaches (NPC-nudge exits need end-of-call time); REVERTED same hour |
+| 9 (001607) | chase gate + ring2 + 2s budget | **178s PASS** | 62s | **0 PASS** | 30 / 62s | first clean sub-180 run; route 884st (lowest; chase gate working); no whitelisted drops rolled; hp min 1163 |
+
+Run 9 = the current config's first acceptance pass on 2 of 3 targets
+(CP <180 PASS, ticks PASS, idle 62 vs 45 MISS). Formal three-pass
+acceptance would need runs 10-11 consecutive under this config.

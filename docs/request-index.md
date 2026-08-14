@@ -315,3 +315,4 @@ headings, noted in parentheses, say roughly where they fell).
 - R261 resolved (approved; bucketed stall family + shake-first shipped, 1343 green; battery resumes run 6, operator spectating) · 2026-08-13 22:24
 - R261 progressed (runs 6b 277s/88s + 7 215s/71s; census 1/1, 0 junk; wandering window explained -> R262 tuning ordered) · 2026-08-14 00:02
 - R262 [decision] Speed tuning: chase gate, faster ring give-up, 1s walk budget · 2026-08-14 00:05
+- R262 amended (1s walk budget REVERTED - run 8 died in town: budget expired before the walk's graceful blocked-by-NPC exits; chase gate + ring give-up stay) · 2026-08-14 00:20
