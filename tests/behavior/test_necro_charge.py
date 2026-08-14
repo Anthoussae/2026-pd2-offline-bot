@@ -126,3 +126,26 @@ def test_skirmish_never_walk_in_attacks():
     target = monster(1, (1010, 1000))  # 10 away: skirmish dashes, never clicks
     action = combat.engage(snap(monsters=[target]))
     assert not isinstance(action, AttackUnit)
+
+
+# -- the seam gate (R260) ------------------------------------------------------
+
+
+def test_a_hostile_across_the_area_border_is_not_engaged():
+    """Battery run 3: the walk-in attack chased a border pack into Blood
+    Moor for 202 s. A monster standing in another area is not a target,
+    whatever the posture."""
+    from pd2bot.perception.world import Area
+
+    combat, clock = charge_combat()
+    # A tight area whose right edge is at x=1005; the monster stands past it.
+    tight = Area(level_no=3, position=(190, 190), size=(11, 20))
+    outside = monster(1, (1010, 1000))  # inside engage_radius, outside area
+    inside = monster(2, (1002, 1000))
+    scene = snap(monsters=[outside])
+    scene = type(scene)(**{**scene.__dict__, "area": tight})
+    assert combat.engage(scene) is None
+    # The moment one crosses to us, it is a target again.
+    both = type(scene)(**{**scene.__dict__, "monsters": (inside, outside)})
+    action = combat.engage(both)
+    assert isinstance(action, AttackUnit) and action.unit_id == 2

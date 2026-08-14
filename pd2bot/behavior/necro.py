@@ -287,6 +287,16 @@ class NecroCombat:
             for m in snap.live_monsters
             if _chebyshev(m.position, origin) <= self.config.engage_radius
             and self._worth_striking(m)
+            # The seam gate (R260): a hostile standing in ANOTHER area is
+            # not engaged — battery run 3's walk-in attack chased a
+            # border pack into Blood Moor and spent 202 s there, because
+            # the client's attack-pathing crosses a seam as happily as
+            # any walk. The ring points have refused the seam since
+            # R189 c; the fights needed the same rule. A cross-border
+            # monster becomes engageable the moment it crosses to us; an
+            # unreadable area (mid-load) filters nothing — honest
+            # fallback, engaging is the safe default.
+            and (snap.area is None or snap.area.contains(m.position))
         ]
 
     # -- the futile-strike write-off -------------------------------------------

@@ -187,6 +187,12 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
         in_radius = [
             m for m in snap.live_monsters
             if _chebyshev(m.position, centre) <= self.radius and self._reachable(m)
+            # The seam gate (R260), the step's half: the closing path
+            # below walks toward whatever this list holds, so a monster
+            # across the area border must not count toward the clearance
+            # either — one-sided gating would leave the step closing on
+            # monsters the combat module refuses to fight.
+            and (snap.area is None or snap.area.contains(m.position))
         ]
         if in_radius:
             self._empty_since = None
