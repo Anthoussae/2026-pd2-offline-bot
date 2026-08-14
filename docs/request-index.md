@@ -301,3 +301,8 @@ headings, noted in parentheses, say roughly where they fell).
 - R254 resolved (approved+inverted; field run COMPLETE, census 1/1 first-click; commit/review/push ordered) · 2026-08-13 08:45
 - R255 [decision] Approve the human-run recorder design (human-vs-bot Cold Plains) · 2026-08-13 18:15
 - R255 resolved (go; recording COMPLETE T92: human 58s vs bot 481s (8.3x); culprit = clear_radius locomotion ~330s of the 401s CP gap) · 2026-08-13 19:28
+- R256 [decision] Locomotion speed-pass plan: discovery questions + phase shape · 2026-08-13 19:36
+- R256 resolved (Q1-3 yes; QA: BERSERK becomes the default posture henceforth, skirmish shelved; QB: CP<180s, 0 ticks>4s, idle<45s) · 2026-08-13 19:42
+- R257 [decision] Approve the locomotion-pass phase table (md, 5 phases) · 2026-08-13 19:44
+- R257 resolved (lgtm; plan.md + phases 01-05 written) · 2026-08-13 19:48
+- R258 [execute] P4 live acceptance battery: confirm presence and say go · 2026-08-13 20:56

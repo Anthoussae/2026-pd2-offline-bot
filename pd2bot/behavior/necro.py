@@ -173,6 +173,15 @@ class NecroCombat:
     # set_posture refuses everything but leaving things alone.
     postures: dict[str, CombatConfig] = field(default_factory=dict)
     posture: str = "cautious"
+    # The posture the module STARTS in (R256 QA, 2026-08-13): the
+    # operator ruled berserk the standing default ("not just the
+    # fastest, but the safest too — best defense is a good offense"),
+    # and the class config carries that ruling here. None = start in
+    # the base config exactly as before, which is what every sim and
+    # drill that builds a bare NecroCombat gets. Run steps that name a
+    # posture still override per step (`ClearRadiusStep.posture`), same
+    # as always — this only changes where the module BEGINS.
+    default_posture: str | None = None
     # Bookkeeping.
     _last_strike: dict[int, float] = field(default_factory=dict)
     # -- the futile-strike write-off (T72/T74, 2026-08-06) -----------------
@@ -231,6 +240,13 @@ class NecroCombat:
     _last_wall_cast: float | None = None
 
     # -- postures (M6 P3) -------------------------------------------------------
+
+    def __post_init__(self) -> None:
+        # Applied through `set_posture` so an unknown name is exactly as
+        # loud here as it would be from a run step — though the class
+        # config loader already refuses one before a module ever exists.
+        if self.default_posture is not None:
+            self.set_posture(self.default_posture)
 
     def set_posture(self, name: str) -> None:
         """Swap the active config for a named preset, mid-run safe.

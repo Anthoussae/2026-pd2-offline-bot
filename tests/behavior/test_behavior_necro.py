@@ -805,3 +805,49 @@ def test_the_write_off_expires_when_the_health_finally_moves():
         is_champion=False, is_boss=False, is_minion=False,
     )
     assert combat._worth_striking(hurt), "the write-off never expired"
+
+
+# -- the default posture (R256 QA, R257 P3) ------------------------------------
+
+
+def test_a_default_posture_is_applied_at_construction():
+    from dataclasses import replace as dc_replace
+
+    base = CombatConfig()
+    berserk = dc_replace(base, style="charge", restrike_s=0.5)
+    necro = NecroCombat(
+        config=base,
+        postures={"cautious": base, "berserk": berserk},
+        default_posture="berserk",
+    )
+    assert necro.posture == "berserk"
+    assert necro.config.style == "charge"
+
+
+def test_a_step_posture_still_overrides_the_default():
+    from dataclasses import replace as dc_replace
+
+    base = CombatConfig()
+    berserk = dc_replace(base, style="charge")
+    brisk = dc_replace(base, engage_radius=12, linger=False)
+    necro = NecroCombat(
+        config=base,
+        postures={"cautious": base, "berserk": berserk, "brisk": brisk},
+        default_posture="berserk",
+    )
+    necro.set_posture("brisk")  # what ClearRadiusStep does on its first tick
+    assert necro.posture == "brisk"
+    assert necro.config.engage_radius == 12
+
+
+def test_an_unknown_default_posture_is_loud_at_construction():
+    import pytest as _pytest
+
+    with _pytest.raises(KeyError, match="bezerk"):
+        NecroCombat(postures={"cautious": CombatConfig()}, default_posture="bezerk")
+
+
+def test_no_default_posture_means_the_base_config_unchanged():
+    necro, _ = make()
+    assert necro.posture == "cautious"
+    assert necro.config.style == "skirmish"

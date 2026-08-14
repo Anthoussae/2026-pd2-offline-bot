@@ -203,3 +203,34 @@ def test_a_posture_cannot_override_unknown_or_forbidden_keys(tmp_path):
     text = necro_text() + "\n[combat.postures.swift]\npark_grace_s = 9.0\n"
     with pytest.raises(ConfigError, match="unknown key"):
         load_class_config(write(tmp_path, text))
+
+
+# -- the default posture (R256 QA, R257 P3) ------------------------------------
+
+
+def test_the_shipped_config_defaults_to_berserk():
+    config = load_class_config(NECRO)
+    assert config.default_posture == "berserk"
+    assert "berserk" in config.postures
+
+
+def test_absent_default_posture_means_the_cautious_base(tmp_path):
+    text = necro_text().replace('default_posture = "berserk"', "")
+    config = load_class_config(write(tmp_path, text))
+    assert config.default_posture is None
+
+
+def test_unknown_default_posture_refuses_at_load(tmp_path):
+    text = necro_text().replace(
+        'default_posture = "berserk"', 'default_posture = "bezerk"'
+    )
+    with pytest.raises(ConfigError, match="bezerk"):
+        load_class_config(write(tmp_path, text))
+
+
+def test_default_posture_must_be_a_string(tmp_path):
+    text = necro_text().replace(
+        'default_posture = "berserk"', "default_posture = 3"
+    )
+    with pytest.raises(ConfigError, match="expected a string"):
+        load_class_config(write(tmp_path, text))

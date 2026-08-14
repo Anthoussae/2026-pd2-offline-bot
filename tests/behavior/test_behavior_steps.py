@@ -694,9 +694,9 @@ def test_route_leg_walks_around_the_wall_not_into_the_pocket():
     route = [(1000, 1020), (1040, 1020), target]
     svc = services(clock, route_to=lambda t: route)
     leg = _route_leg(svc, HOME, target)
-    assert leg == (1000, 1012)  # toward the first corner, capped at patrol_step
+    assert leg == (1000, 1020)  # toward the first corner, capped at patrol_step
     # The old bearing hop is what we must NOT get:
-    assert leg != (1012, 1000)
+    assert leg != (1020, 1000)
 
 
 def test_route_leg_without_a_service_is_the_bearing_hop():
@@ -704,7 +704,7 @@ def test_route_leg_without_a_service_is_the_bearing_hop():
 
     svc = services(Clock())
     assert svc.route_to is None
-    assert _route_leg(svc, HOME, (1040, 1000)) == (1012, 1000)
+    assert _route_leg(svc, HOME, (1040, 1000)) == (1020, 1000)
 
 
 def test_route_leg_skips_waypoints_already_underfoot():
@@ -712,7 +712,7 @@ def test_route_leg_skips_waypoints_already_underfoot():
 
     route = [(1001, 1000), (1040, 1000)]
     svc = services(Clock(), route_to=lambda t: route)
-    assert _route_leg(svc, HOME, (1040, 1000)) == (1012, 1000)
+    assert _route_leg(svc, HOME, (1040, 1000)) == (1020, 1000)
 
 
 def test_patrol_walks_the_routes_answer_not_the_bearing():
@@ -723,7 +723,7 @@ def test_patrol_walks_the_routes_answer_not_the_bearing():
     )
     step.step(snap(pos=here["pos"]), ctx)
     first_move = next(a for a in executor.actions if isinstance(a, MoveTo))
-    assert first_move.target == (1000, 1012)  # toward the corner, not the ring
+    assert first_move.target == (1000, 1020)  # toward the corner, not the ring
 
 
 def test_patrol_writes_off_a_routeless_point_after_two_asks():

@@ -74,9 +74,50 @@ class OverlayGrid:
         )
 
 
-class SearchLimitExceeded(RuntimeError):
-    """A* touched more cells than the cap — target likely unreachable in a
-    huge open area; treat as no-path rather than hanging."""
+# --- the node budget (R257 P2) ------------------------------------------------
+#
+# A* with no binding cap answers "no path" only after flooding every
+# reachable cell, and on the explored-map atlas that is not a corner
+# case, it is a measured 20.15-second stall: 2026-08-13, Cold Plains,
+# two cells eight subtiles apart in different connected components of
+# the atlas (the real connection ran through unrecorded ground, which
+# is blocked by design), replayed offline against a 3 ms healthy
+# control. Two of those floods back to back — the two-strike no-route
+# rule asks twice — froze a live run for 47 s (T92; the run log's
+# `nav.plan` event now prices every plan).
+#
+# The old guard (SearchLimitExceeded at 200k expansions) never bound —
+# the flood exhausted the component first — and RAISED, which no
+# production caller caught: had it ever fired, it would have crashed
+# the tick as a raw RuntimeError instead of reading as "no route". So
+# the budget both binds and answers in the vocabulary callers already
+# speak: None, the same no-route answer they confirm with a second ask
+# and then write off with expiry-on-movement (clear.py `_no_route`,
+# patrol.py `_route_denied`). A budget-exhausted None against a
+# genuinely reachable far target is therefore recoverable by design —
+# and the floor below makes it rare.
+#
+# The shape: scaled by the square of the crow-flies distance, so a
+# nearby goal fails in milliseconds and a cross-area path still gets
+# room; floored WELL above any real path this project has recorded
+# (the 481 s baseline run's largest plan was 331 cells, and a real
+# 25-cell path expanded only 68 nodes on the same atlas — expansions
+# run a small multiple of path length); capped so the true worst case
+# is bounded whatever the distance. Empirical prices on the real
+# atlas, measured 2026-08-13 at ~10k expansions/s: the floor answers
+# the replayed flood in 0.059 s, the cap in ~2.4 s — versus 20.15 s
+# unbounded. The cap is sized to keep even a worst-case plan inside
+# the R256 QB bar of "no tick over 4 s", with margin for the tick's
+# other work.
+BUDGET_FLOOR = 2_000
+BUDGET_CAP = 25_000
+BUDGET_PER_SUBTILE_SQ = 30
+
+
+def default_node_budget(start: Point, goal: Point) -> int:
+    """How many expansions a search from `start` to `goal` deserves."""
+    d = max(abs(start[0] - goal[0]), abs(start[1] - goal[1]))
+    return min(BUDGET_CAP, max(BUDGET_FLOOR, BUDGET_PER_SUBTILE_SQ * d * d))
 
 
 def _octile(a: Point, b: Point) -> int:
@@ -94,16 +135,34 @@ def astar(
     grid: Grid,
     start: Point,
     goal: Point,
-    max_expansions: int = 200_000,
+    max_expansions: int | None = None,
+    stats: dict | None = None,
 ) -> list[Point] | None:
     """Shortest walkable path from start to goal inclusive, or None.
 
     `start` is not required to be walkable (the player can stand on a cell
     the mask dislikes — doorways, floor clutter); `goal` is.
+
+    `max_expansions` None = `default_node_budget(start, goal)`; a search
+    that exhausts its budget returns None — the same honest no-route
+    answer an exhausted open set gives (see the budget comment above).
+    `stats`, when supplied, is filled with `expanded`, `budget` and
+    `budget_exhausted` — how the `nav.plan` event tells a real "no
+    path" from a budget stop.
     """
+    budget = default_node_budget(start, goal) if max_expansions is None else max_expansions
+
+    def note(expanded: int, exhausted: bool) -> None:
+        if stats is not None:
+            stats["expanded"] = expanded
+            stats["budget"] = budget
+            stats["budget_exhausted"] = exhausted
+
     if not grid.is_walkable(*goal):
+        note(0, False)
         return None
     if start == goal:
+        note(0, False)
         return [start]
 
     open_heap: list[tuple[int, int, Point]] = [(_octile(start, goal), 0, start)]
@@ -121,13 +180,13 @@ def astar(
                 current = came_from[current]
                 path.append(current)
             path.reverse()
+            note(expanded, False)
             return path
 
         expanded += 1
-        if expanded > max_expansions:
-            raise SearchLimitExceeded(
-                f"gave up after {max_expansions} expansions from {start} toward {goal}"
-            )
+        if expanded > budget:
+            note(expanded, True)
+            return None
 
         cx, cy = current
         for dx, dy in _NEIGHBOURS:
@@ -147,6 +206,7 @@ def astar(
                 heapq.heappush(
                     open_heap, (new_cost + _octile(neighbour, goal), new_cost, neighbour)
                 )
+    note(expanded, False)
     return None
 
 

@@ -160,6 +160,12 @@ class ClassConfig:
     # present and always IS `combat` — the base numbers are the cautious
     # posture by definition, so it cannot be redefined.
     postures: dict[str, CombatConfig] = field(default_factory=dict)
+    # The posture the combat module starts every game in (R256 QA,
+    # 2026-08-13: berserk, by operator ruling). None = the base
+    # [combat] numbers, exactly the pre-R256 behavior. Validated at
+    # load against the loaded posture names, so a typo refuses before a
+    # game is created around it.
+    default_posture: str | None = None
 
     @property
     def revive_target(self) -> int:
@@ -383,7 +389,8 @@ def load_class_config(path: str | Path) -> ClassConfig:
         combat_raw,
         set(_COMBAT_NUMBERS)
         | set(_COMBAT_BOOLS)
-        | {"desecrate_skill", "revive_skill", "postures", "style"},
+        | {"desecrate_skill", "revive_skill", "postures", "style",
+           "default_posture"},
         f"{where}.combat",
     )
     combat_numbers = {
@@ -454,6 +461,21 @@ def load_class_config(path: str | Path) -> ClassConfig:
             overrides[key] = value
         postures[posture_name] = replace(combat, **overrides)
 
+    # [combat] default_posture (R256 QA): which posture the module
+    # STARTS in. Optional; absent = the cautious base, the pre-R256
+    # behavior. Validated against the names just loaded, because a
+    # default that only failed at module construction would fail after
+    # a Hell game already exists around it.
+    default_posture = combat_raw.get("default_posture")
+    if default_posture is not None:
+        if not isinstance(default_posture, str):
+            raise ConfigError(f"{where}.combat.default_posture: expected a string")
+        if default_posture not in postures:
+            raise ConfigError(
+                f"{where}.combat.default_posture: {default_posture!r} is not "
+                f"a loaded posture (loaded: {', '.join(sorted(postures))})"
+            )
+
     # [route] — optional; absent means the defaults (leash still works,
     # it just uses the stock numbers).
     route_raw = data.get("route", {})
@@ -476,5 +498,6 @@ def load_class_config(path: str | Path) -> ClassConfig:
         combat=combat,
         chicken_life_pct=chicken_life_pct,
         postures=postures,
+        default_posture=default_posture,
         route=route,
     )

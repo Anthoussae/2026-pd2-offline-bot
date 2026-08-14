@@ -122,6 +122,7 @@ def town_config_for(class_config: ClassConfig, base: TownConfig | None = None) -
 
 def route_service(
     navigator,
+    on_plan: Callable[..., None] | None = None,
 ) -> Callable[[tuple[int, int]], list[tuple[int, int]] | None]:
     """`route_to(target)` for RunServices (R181): the same A* the
     navigator walks with, exposed READ-ONLY so steps can ask "is there a
@@ -148,16 +149,36 @@ def route_service(
             return cache["route"]
         # The grid is assembled only on a cache MISS: stitching live
         # collision over the atlas is the expensive half of a plan.
+        plan_started = time.monotonic()
         try:
             grid = navigator.grid()
         except Exception:
             return [target]
         route: list[tuple[int, int]] | None = None
         goal = nearest_walkable(grid, *target)
+        search_stats: dict = {}
         if goal is not None:
-            path = astar(grid, start, goal)
+            path = astar(grid, start, goal, stats=search_stats)
             if path is not None:
                 route = simplify(grid, path)
+        # Plan-cost telemetry (T92): the same instrument the navigator's
+        # walks carry, because this astar is the same worst case — a
+        # 20 s flood here would hide inside a step's tick just as well.
+        if on_plan is not None:
+            try:
+                on_plan(
+                    source="route_service", start=start,
+                    goal=goal, target=target,
+                    duration_s=round(time.monotonic() - plan_started, 3),
+                    outcome=(
+                        "path" if route is not None
+                        else ("no_path" if goal is not None else "no_walkable_cell")
+                    ),
+                    **({"waypoints": len(route)} if route is not None else {}),
+                    **search_stats,
+                )
+            except Exception:  # noqa: BLE001 - measurement never breaks a route
+                pass
         if route is not None:
             # None is deliberately NOT cached (T55 run 1): a torn live
             # collision read walled the origin in for ~a second and five
@@ -301,6 +322,11 @@ class LiveBot:
     # points it at the fresh run's narrator. build_bot wires the closure;
     # engine_factory swaps the target.
     narrate_ref: dict = field(default_factory=lambda: {"fn": None})
+    # The nav.plan emitter and its per-run runlog holder (T92): the
+    # navigator holds the closure for the session; each engine build
+    # repoints the holder at the fresh run's log, `narrate_ref`-style.
+    plan_sink: dict = field(default_factory=lambda: {"runlog": None})
+    on_plan: Callable[..., None] | None = None
     _engines: list[BehaviorEngine] = field(default_factory=list)
     # Every run log opened this session, newest last — so a drill can name
     # the file it just produced instead of the operator hunting for it.
@@ -381,6 +407,8 @@ class LiveBot:
         # it cannot be constructed per run — repoint its log instead, the
         # same treatment `narrate_ref` gets for the town layer.
         self.monitor.runlog = runlog
+        # The nav.plan emitter reads this holder per event (T92).
+        self.plan_sink["runlog"] = runlog
         # The town layer is session-scoped too (its cleanse baseline must
         # be), so it takes the same treatment. The waypoint layer reads
         # the log through it rather than holding a second reference —
@@ -402,6 +430,10 @@ class LiveBot:
             # The named presets (M6 P3): run steps select per step, the
             # module swaps configs, bookkeeping survives the swap.
             postures=self.class_config.postures,
+            # Where the module STARTS (R256 QA): berserk by standing
+            # operator ruling, carried by the class config so every run
+            # inherits it without run-file edits.
+            default_posture=self.class_config.default_posture,
         )
         # Futile-strike write-offs reach the run log (T72/T74). Recorded
         # rather than acted on across runs, deliberately: the "immune"
@@ -587,7 +619,7 @@ class LiveBot:
             # refused until it closes.
             clear_panels=clear_panels_tracked,
             narrate=narrator.narrate,
-            route_to=route_service(self.navigator),
+            route_to=route_service(self.navigator, on_plan=self.on_plan),
             # The route leash (R241): recorded lines live beside the
             # atlas, keyed the same way; missing line = no leash.
             route_line_for=line_service(
@@ -769,9 +801,22 @@ def build_bot(
         ),
     )
 
+    # The nav.plan emitter (T92). The navigator is SESSION-scoped and the
+    # run log is PER-RUN, so the closure reads a holder that each engine
+    # build repoints — the same treatment `monitor.runlog` gets. Checking
+    # `enabled` first is the NullRunLog discipline: nothing is gathered
+    # for an event nobody will write.
+    plan_sink: dict = {"runlog": None}
+
+    def note_plan(**fields) -> None:
+        runlog = plan_sink["runlog"]
+        if runlog is not None and getattr(runlog, "enabled", False):
+            runlog.event("nav.plan", **fields)
+
     navigator = live_navigator(
         session, store, difficulty,
         safety_poll=safety_poll_for(monitor, should_stop),
+        on_plan=note_plan,
     )
     perception = Perception(session)
     baseline = SessionBaseline(session)
@@ -829,6 +874,8 @@ def build_bot(
         should_stop=should_stop,
         radius_override=radius_override,
         narrate_ref=narrate_ref,
+        plan_sink=plan_sink,
+        on_plan=note_plan,
     )
 
 
@@ -881,6 +928,12 @@ def describe(bot: LiveBot) -> list[str]:
             if "survey" in steps
             else []
         ),
+        # The standing default posture (R256 QA) — printed because it
+        # changes how every fight opens, and a pre-flight that said
+        # nothing about it would leave "which stance is this?" to be
+        # discovered from the game's behaviour.
+        f"posture    {bot.class_config.default_posture or 'cautious (base)'}"
+        " (default; run steps may override per step)",
         f"pickit     {len(bot.pickit.rules)} rules, "
         f"{len(bot.pickit.pending_names)} pending name(s)",
         f"cleanse    {'ENABLED' if bot.cleanse_enabled else 'disabled (pending names)'}",

@@ -89,6 +89,10 @@ def test_strayed_walks_back_to_the_line_when_clear():
 def test_stray_events_are_paced_not_per_tick():
     clock = Clock()
     step, world, executor, log, tick, _ = leashed(clock)
+    # Deeper than the shared STRAY_POS: at 20-subtile legs (R257 P3) a
+    # 40-subtile stray is back on the line in two ticks, and the test
+    # needs the character still OUT when the ~5 s heartbeat comes due.
+    world["pos"] = (940, 1060)
     tick()
     clock.advance(0.5)
     tick()

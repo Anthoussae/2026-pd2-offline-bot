@@ -108,7 +108,7 @@ class DyingMonitor:
 
 def navigator(
     world, sim, fake_input, grid_provider=None, avoid=None, audit=None,
-    safety_poll=None, walk_budget_s=None,
+    safety_poll=None, walk_budget_s=None, on_plan=None,
 ):
     # `walk_budget_s=None` (no cap) is the default HERE, not in
     # production: most of these tests predate the cap and exercise the
@@ -125,6 +125,7 @@ def navigator(
         audit=audit,
         safety_poll=safety_poll,
         walk_budget_s=walk_budget_s,
+        on_plan=on_plan,
     )
 
 
@@ -1030,3 +1031,58 @@ def test_the_refusal_reason_survives_into_the_error():
     nav = navigator(world, sim, fake, walk_budget_s=2.0)
     with pytest.raises(NavigationError, match="esc_menu"):
         nav.walk_to((20, 0))
+
+
+# -- plan-cost telemetry (R257 P1) ---------------------------------------------
+
+
+class WalledGrid:
+    """A bounded box split in two by a solid wall column at x == 10."""
+
+    def is_walkable(self, x: int, y: int) -> bool:
+        return -5 <= x <= 30 and -5 <= y <= 30 and x != 10
+
+    def is_known(self, x: int, y: int) -> bool:
+        return True
+
+
+def test_on_plan_reports_a_successful_plan():
+    world = World()
+    sim = Sim(world)
+    plans = []
+    nav = navigator(world, sim, FakeInput(world), on_plan=lambda **f: plans.append(f))
+    nav.walk_to((20, 0))
+    assert len(plans) >= 1
+    first = plans[0]
+    assert first["outcome"] == "path"
+    assert first["source"] == "walk"
+    assert first["target"] == (20, 0)
+    assert first["path_cells"] >= 20
+    assert first["waypoints"] >= 2
+    assert first["duration_s"] >= 0
+
+
+def test_on_plan_reports_no_path_before_the_error():
+    world = World()
+    sim = Sim(world)
+    plans = []
+    nav = navigator(
+        world, sim, FakeInput(world),
+        grid_provider=lambda: WalledGrid(),
+        on_plan=lambda **f: plans.append(f),
+    )
+    with pytest.raises(NavigationError):
+        nav.walk_to((20, 0))  # the wall at x=10 separates start from goal
+    assert plans[-1]["outcome"] == "no_path"
+    assert plans[-1]["goal"] == (20, 0)
+
+
+def test_a_raising_on_plan_callback_never_breaks_the_walk():
+    world = World()
+    sim = Sim(world)
+
+    def broken(**fields):
+        raise RuntimeError("measurement must not wound the walk")
+
+    result = navigator(world, sim, FakeInput(world), on_plan=broken).walk_to((20, 0))
+    assert abs(result.arrived_at[0] - 20) <= 3

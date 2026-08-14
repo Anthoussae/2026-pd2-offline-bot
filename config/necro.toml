@@ -255,6 +255,18 @@ retreat_group_radius = 8
 desecrate_skill = "desecrate"
 revive_skill = "revive"
 
+# The posture every game STARTS in (R256 QA, operator ruling 2026-08-13):
+# "switch the bot's default combat behavior to Berserk, henceforth. We
+# may shelve the skirmish stance entirely; for the foreseeable future,
+# please set Berserk as the default posture. I'm fairly convinced that
+# it's not just the fastest, but the safest too (best defense is a good
+# offense)." Measured basis: T92 — the skirmish beat's retreat-dash
+# cycle dominated the 8.3x human-vs-bot gap (combat exposure 388 s of
+# 454). The cautious base and the skirmish beat above stay DEFINED —
+# run steps may still name any posture per step — but nothing selects
+# them by default anymore. Remove this line to fall back to cautious.
+default_posture = "berserk"
+
 # Named combat postures (M6 P3, R212 Q5): override tables over the
 # [combat] numbers above. "cautious" is the base itself and cannot be
 # redefined. Run steps select a posture per step (runs/countess.toml:

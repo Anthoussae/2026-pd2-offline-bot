@@ -124,9 +124,15 @@ class RunServices:
     patrol_ring: float = 0.66
     # Subtiles per leg. `walk_to` BLOCKS until arrival (navigate.py), so a
     # leg is time the reflex ladder is not being consulted — the same
-    # reason `NecroCombat._dash_target` caps a dash at 8. A little longer
-    # than a dash because nothing is being fought yet.
-    patrol_step: int = 12
+    # reason `NecroCombat._dash_target` caps a dash at 8. Longer than a
+    # dash because nothing is being fought yet. Was 12; raised to 20 in
+    # the R257 locomotion pass: the ladder's look is already bounded by
+    # the navigator's 2 s walk budget (WALK_BUDGET_SECONDS), and at the
+    # character's measured ~16.5 st/s (T92) a 20-subtile leg completes
+    # inside it — while the 12-cap made the ladder's protection
+    # redundant AND paid a standing-still tick boundary every 12
+    # subtiles, half of the measured 6.0-vs-16.5 st/s deficit.
+    patrol_step: int = 20
     patrol_reach: int = 6  # close enough to call a point visited
     # Legs WITHOUT GETTING CLOSER before giving up on a point, so a point
     # we can walk toward but never reach cannot hold the run open forever.

@@ -1,11 +1,11 @@
 """A*, path simplification, and the walkability helpers — all pure."""
 
-import pytest
-
 from pd2bot.nav.pathing import (
+    BUDGET_CAP,
+    BUDGET_FLOOR,
     OverlayGrid,
-    SearchLimitExceeded,
     astar,
+    default_node_budget,
     line_walkable,
     nearest_walkable,
     simplify,
@@ -95,12 +95,67 @@ def test_no_corner_cutting():
     assert astar(grid, (0, 0), (1, 1)) is None
 
 
-def test_search_limit():
-    with pytest.raises(SearchLimitExceeded):
-        # Goal behind a solid wall row: A* must exhaust the whole open field
-        # before it could conclude "no path", and the cap fires first.
-        big = MapGrid("\n".join(["." * 300] * 300 + ["#" * 300, "." * 300]))
-        astar(big, (0, 0), (150, 301), max_expansions=1000)
+def test_budget_exhaustion_answers_none_not_an_exception():
+    """The R257 P2 semantics: an exhausted budget is the same honest
+    no-route answer an exhausted open set gives. The old cap RAISED —
+    and nothing in production caught it, so had it ever bound, a walk
+    would have crashed the tick instead of writing off a target."""
+    # Goal behind a solid wall row: A* must exhaust the whole open field
+    # before it could conclude "no path", and the budget fires first.
+    big = MapGrid("\n".join(["." * 300] * 300 + ["#" * 300, "." * 300]))
+    stats: dict = {}
+    assert astar(big, (0, 0), (150, 301), max_expansions=1000, stats=stats) is None
+    assert stats["budget_exhausted"] is True
+    assert stats["expanded"] > 1000
+
+
+def test_the_default_budget_binds_a_disconnected_flood_quickly():
+    """The 2026-08-13 stall shape: two walkable regions, a nearby goal in
+    the other one, a large open field to flood. Unbounded, this is the
+    20.15 s answer; the distance-scaled default must answer in well
+    under 100 ms."""
+    import time
+
+    # 300x300 open field, a full wall column, a thin far strip: ~90k
+    # cells reachable from the start, goal 8 subtiles away behind the wall.
+    art = ["." * 300 + "#" + "." * 5 for _ in range(300)]
+    big = MapGrid("\n".join(art))
+    start, goal = (296, 150), (304, 150)
+    stats: dict = {}
+    began = time.perf_counter()
+    result = astar(big, start, goal, stats=stats)
+    took = time.perf_counter() - began
+    assert result is None
+    assert stats["budget_exhausted"] is True
+    assert stats["budget"] == default_node_budget(start, goal) == BUDGET_FLOOR
+    assert took < 0.1, f"budgeted no-path took {took:.3f}s"
+
+
+def test_a_long_real_path_is_found_under_the_default_budget():
+    """The budget must never take away a path that exists: a snake
+    corridor several hundred cells long still resolves."""
+    # 5 corridors of 100, connected at alternating ends: path ~500 cells.
+    rows = []
+    for corridor in range(5):
+        rows.append("." * 100)
+        if corridor < 4:
+            connector = ("." + "#" * 99) if corridor % 2 else ("#" * 99 + ".")
+            rows.append(connector)
+    snake = MapGrid("\n".join(rows))
+    start, goal = (0, 0), (99, 8)
+    stats: dict = {}
+    path = astar(snake, start, goal, stats=stats)
+    assert path is not None
+    assert len(path) > 400
+    assert stats["budget_exhausted"] is False
+
+
+def test_default_budget_shape():
+    assert default_node_budget((0, 0), (0, 0)) == BUDGET_FLOOR
+    assert default_node_budget((0, 0), (8, 0)) == BUDGET_FLOOR
+    assert default_node_budget((0, 0), (1000, 1000)) == BUDGET_CAP
+    mid = default_node_budget((0, 0), (20, 0))
+    assert BUDGET_FLOOR < mid < BUDGET_CAP
 
 
 def test_line_walkable():

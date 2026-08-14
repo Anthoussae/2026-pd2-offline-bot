@@ -280,6 +280,7 @@ class Navigator:
         audit: Callable[[Point, Point | None, int], None] | None = None,
         safety_poll: Callable[[], None] | None = None,
         walk_budget_s: float | None = WALK_BUDGET_SECONDS,
+        on_plan: Callable[..., None] | None = None,
     ) -> None:
         self._position = position_reader
         self._input = gated_input
@@ -322,6 +323,17 @@ class Navigator:
         # keeps nothing), so every nudge line this class has ever written
         # has gone nowhere outside the navdemo CLI.
         self._audit = audit
+        # Called with keyword fields after every PLAN — the
+        # `nearest_walkable` + `astar` + `simplify` block — whatever its
+        # outcome. PURE MEASUREMENT, same contract as `audit`: it changes
+        # no decision and must never wound the walk it measures. It
+        # exists because of 2026-08-13's 47 s stall: two ~21 s A* floods
+        # were visible only as tick durations with nothing inside them
+        # (`nav.failed` reports the walk's verdict, not the plan's
+        # price), and the T92 human-vs-bot comparison had to be invented
+        # to even locate them. See docs/architecture/run-log.md,
+        # `nav.plan`.
+        self._on_plan = on_plan
         # The destination of the walk in flight, so `_safe_click_point`
         # can tell a hazard we are deliberately approaching from one we
         # merely happen to pass. Set per walk_to, cleared after.
@@ -362,6 +374,15 @@ class Navigator:
         if position is None:
             raise NavigationError("player position unreadable — left the game?")
         return position
+
+    def _note_plan(self, **fields) -> None:
+        """Report one plan's cost to whoever is measuring. Never raises."""
+        if self._on_plan is None:
+            return
+        try:
+            self._on_plan(**fields)
+        except Exception:  # noqa: BLE001 - measurement must never break a walk
+            pass
 
     def _safety(self) -> None:
         """Ask the watcher whether the character must stop right now.
@@ -713,6 +734,7 @@ class Navigator:
         failures = 0
         best_remaining: float | None = None
         while True:
+            plan_started = self._clock()
             grid = self._grid_provider()
             start = self.position()
             goal = nearest_walkable(grid, *target)
@@ -720,6 +742,11 @@ class Navigator:
                 # "No walkable cell" has two very different causes, and the
                 # caller needs to know which: solid wall, or terra incognita.
                 known = grid.is_known(*target)
+                self._note_plan(
+                    source="walk", start=start, goal=None, target=target,
+                    duration_s=round(self._clock() - plan_started, 3),
+                    outcome="no_walkable_cell",
+                )
                 raise NavigationError(
                     f"no walkable cell near {target}: "
                     + (
@@ -729,11 +756,23 @@ class Navigator:
                         "(unknown ground is treated as blocked on purpose)"
                     )
                 )
-            path = astar(grid, start, goal)
+            search_stats: dict = {}
+            path = astar(grid, start, goal, stats=search_stats)
             if path is None:
+                self._note_plan(
+                    source="walk", start=start, goal=goal, target=target,
+                    duration_s=round(self._clock() - plan_started, 3),
+                    outcome="no_path", **search_stats,
+                )
                 raise NavigationError(f"no path from {start} to {goal}")
             waypoints = simplify(grid, path)
             result.waypoints = len(waypoints)
+            self._note_plan(
+                source="walk", start=start, goal=goal, target=target,
+                duration_s=round(self._clock() - plan_started, 3),
+                outcome="path", path_cells=len(path), waypoints=len(waypoints),
+                **search_stats,
+            )
             result.log.append(f"planned {len(path)} cells -> {len(waypoints)} waypoints")
 
             arrived = True
@@ -908,6 +947,7 @@ def live_navigator(
     store,
     difficulty: int = 2,
     safety_poll: Callable[[], None] | None = None,
+    on_plan: Callable[..., None] | None = None,
 ) -> Navigator:
     """Wire the navigator to the live game: positions from memory, clicks
     through the gate, and on every (re-)plan the explored-map atlas under
@@ -1083,6 +1123,9 @@ def live_navigator(
         # passes the real one (see `wiring.build_bot`), and a walk with
         # nothing watching is still capped.
         safety_poll=safety_poll,
+        # Plan-cost telemetry (T92): None for the CLI and drills, the run
+        # log's emitter in production — same wiring story as safety_poll.
+        on_plan=on_plan,
     )
 
 

@@ -223,6 +223,21 @@ arriving or by giving up: `target`, `arrived_at`, `seconds`, `short_by`,
 `clicks`, `replans`. Emitted by the executor, which is the only place a
 `WalkResult` exists.
 
+### `nav.plan`
+
+One pathfinding attempt and its **price**: `source` (`walk` from the
+navigator's plan cycle, `route_service` from the steps' read-only route
+asks), `start`, `goal`, `target`, `duration_s`, `outcome` (`path` /
+`no_path` / `no_walkable_cell`), and on success `path_cells` and
+`waypoints`. Added 2026-08-13 (R257 P1) after the T92 human-vs-bot
+comparison exposed a 47 s stall that was two unbounded A* floods —
+~21 s each, visible only as tick durations with nothing inside them:
+`nav.failed` reports a walk's verdict, never the plan's cost, so the
+most expensive thing a tick can do was the one thing the log could not
+see. Once the search is budgeted (R257 P2) the event also carries
+`nodes` and `budget_exhausted`, which is how a genuine "no path" is
+told apart from a budget stop.
+
 A capped leg is not a failure and by itself not even a problem — the
 step re-checks distance and asks again, which is what "capped legs" has
 always meant here. But it is otherwise **invisible**: a short walk and a
