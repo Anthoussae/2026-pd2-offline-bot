@@ -2856,3 +2856,45 @@ def test_endless_capped_legs_give_up_rather_than_spin(town):
     town_layer._clock = lambda: clock["now"]
     with pytest.raises(TownError, match="capped legs"):
         town_layer._walk_all_the_way((5922, 5714))
+
+
+# -- the two-axis aim ladder + interact telemetry (2026-08-14) -----------------
+
+
+def test_the_aim_ladder_probes_both_screen_axes_within_the_attempts():
+    """The stash flake, diagnosed: every old offset had dx == dy, which
+    projects to pure screen-y - three retries drew three points on one
+    vertical line. The attempts must probe sideways too."""
+    from pd2bot.behavior.town.config import TownConfig
+
+    config = TownConfig()
+    tried = config.object_aim_offsets[: 1 + config.interact_retries]
+    assert (0, 0) == tried[0], "the tile itself stays first"
+    assert any(dx == -dy and dx > 0 for dx, dy in tried), "no right-screen probe"
+    assert any(dx == -dy and dx < 0 for dx, dy in tried), "no left-screen probe"
+    assert any(dx == dy and (dx, dy) != (0, 0) for dx, dy in tried), (
+        "no up/down-screen probe"
+    )
+
+
+def test_each_attempt_prefers_a_distinct_aim(town):
+    step = layer(town)
+    aims = step.config.object_aim_offsets
+    seen = set()
+    for attempt in range(1 + step.config.interact_retries):
+        offset, _ = step._unblocked_aim("x", STASH_POS, aims, attempt)
+        seen.add(offset)
+    assert len(seen) == 1 + step.config.interact_retries, (
+        f"attempts repeated an aim: {sorted(seen)}"
+    )
+
+
+def test_a_successful_open_is_one_town_interact_event(town):
+    step = layer(town)
+    events = _dodge_log(step)
+    step.open_object_panel(offsets.OBJ_STASH, "the stash", offsets.UI_STASH)
+    interacts = [f for k, f in events if k == "town.interact"]
+    assert len(interacts) == 1
+    assert interacts[0]["opened"] is True
+    assert interacts[0]["what"] == "the stash"
+    assert interacts[0]["aim_offset"] == [0, 0]

@@ -196,8 +196,20 @@ class TownConfig:
     # retries is not a retry. The first entry MUST be (0, 0): the tile
     # itself is right far more often than not, and this is a fallback
     # ladder, not a correction.
+    #
+    # The ladder must vary BOTH screen axes (2026-08-14, the stash
+    # flake's diagnosis). The original offsets all had dx == dy, which
+    # the projection maps to pure screen-y — so three retries drew
+    # three points on ONE vertical line, and when the sprite's
+    # clickable body happened to lie off that line the ladder could
+    # never find it (runs 20260813-231456 and 20260814-002708: three
+    # correctly-projected clicks each, all "no panel", all on the tall
+    # axis — the same one-axis blindness `_unblocked_aim`'s docstring
+    # had already called out for the bystander dodge). dx == -dy moves
+    # purely SIDEWAYS (±40 px per 1,-1), so attempts now probe
+    # feet -> up-screen -> right -> left before repeating the axis.
     object_aim_offsets: tuple[tuple[int, int], ...] = (
-        (0, 0), (-1, -1), (1, 1), (-2, -2),
+        (0, 0), (-1, -1), (1, -1), (-1, 1), (1, 1), (-2, -2),
     )
     # How long a deliberate interact click may wait for a bystander NPC
     # to pace out of the aim's sprite box (T83's screen-space rule,
@@ -220,7 +232,12 @@ class TownConfig:
     # nothing (R80). Let it settle, then click, then retry if needed.
     panel_settle_s: float = 0.6
     panel_click_retries: int = 2
-    interact_retries: int = 2
+    # Was 2 (three attempts). 3 since 2026-08-14, with the two-axis aim
+    # ladder above: three attempts only ever probed feet/up/right, so
+    # the left-side probe existed in the ladder and never fired. Four
+    # attempts cover all four directions; the extra attempt costs time
+    # only in the failure case it exists to rescue.
+    interact_retries: int = 3
     transfer_attempts: int = 2  # shift-clicks per item before StashFull
     verify_timeout_s: float = 3.0
     # Warn once per session when this many items are stashed across both

@@ -223,6 +223,15 @@ arriving or by giving up: `target`, `arrived_at`, `seconds`, `short_by`,
 `clicks`, `replans`. Emitted by the executor, which is the only place a
 `WalkResult` exists.
 
+### `town.interact`
+
+One deliberate object/panel interact attempt (the stash, a waypoint):
+`what`, `attempt`, `from_position`, `distance`, `aim_offset`,
+`clicked` (world), `click_screen`, `opened`. Added 2026-08-14 after
+the stash-flake diagnosis had to be reconstructed from a TownError
+string in a console buffer — the run log carried nothing for a failed
+open. Emitted per attempt, success or not.
+
 ### `nav.plan`
 
 One pathfinding attempt and its **price**: `source` (`walk` from the

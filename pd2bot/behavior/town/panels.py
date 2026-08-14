@@ -461,6 +461,21 @@ class _PanelMixin:
                 f"{'OPENED' if landed else 'no panel'}{stray}, "
                 f"ended {after.position if after else '?'}"
             )
+            # On the record per attempt (2026-08-14): the two stash-flake
+            # runs were invisible to the run log — the whole diagnosis
+            # lived in a TownError string in a console buffer. An event
+            # per attempt makes the next flake a query, not an archaeology.
+            self.runlog.event(
+                "town.interact",
+                what=name,
+                attempt=attempt + 1,
+                from_position=list(before.position) if before else None,
+                distance=distance,
+                aim_offset=list(offset),
+                clicked=list(aim),
+                click_screen=list(screen) if screen else None,
+                opened=landed,
+            )
             if landed:
                 return clicked
         raise TownError(
