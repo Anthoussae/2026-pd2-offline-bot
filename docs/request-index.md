@@ -312,3 +312,4 @@ headings, noted in parentheses, say roughly where they fell).
 - R260 [decision] Combat must not chase across the area seam · 2026-08-13 21:52
 - R260 resolved (approved; seam gate in _hostiles + clear in_radius, 1340 green; acceptance series restarts) · 2026-08-13 21:58
 - R261 [verify] P4 gate: judge the battery, rule on the swing-contention fix · 2026-08-13 22:08
+- R261 resolved (approved; bucketed stall family + shake-first shipped, 1343 green; battery resumes run 6, operator spectating) · 2026-08-13 22:24

@@ -218,3 +218,17 @@ continuously (105-199 attacks/run), a move-click landing mid-swing
 no-ops exactly like the known CastInFlight contention
 (performance-notes, T70), and nothing guards walks against SWING
 animations. Un-fixed cost: 50-85s/run of idle plus route inflation.
+
+Battery continued (post-R261 fix, commit 0c27971):
+
+| run | config | CP | CP idle | ticks>4s (CP) | stuck walks | note |
+|---|---|---|---|---|---|---|
+| 6 (231456) | +stall bucket/shake | - | - | - | - | TOWN FLAKE: stash panel refused 3x (known pre-existing intermittent, R244 era); CP never ran |
+| 6b (231651) | same | 277s | 88s | 0 | 42 / 86s | COMPLETE; max idle span 9.5s; 3 unreachable write-offs (bucketed ladder working); shake-first did NOT cut the stuck total - the 42 blocks are DIFFUSE (scattered one-off targets, families rarely accumulate to the shake threshold) |
+
+Where this leaves the numbers: the config is stable at ~230-280s CP /
+~85-100s idle across runs 2, 4, 6b. Every NAMED family is dead (A*
+floods, walk-into-pack, seam leak, 13s repeat-click). The residual is
+~40 diffuse ~2s blocked walks per run - each a different spot/target,
+consistent with click-movement vs unit collision as a mechanic, not a
+single bug. Targets (<180s / <45s) not met by roughly 1.5-2x.
