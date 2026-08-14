@@ -1086,3 +1086,49 @@ def test_a_raising_on_plan_callback_never_breaks_the_walk():
 
     result = navigator(world, sim, FakeInput(world), on_plan=broken).walk_to((20, 0))
     assert abs(result.arrived_at[0] - 20) <= 3
+
+
+# -- the stall-family bucket and shake-first (R261) ----------------------------
+
+
+def test_jittering_targets_still_accumulate_the_stall_ladder():
+    """Battery runs 4-5: a body-blocked dash retargeted a subtile each
+    tick as the monster shifted, the exact-goal ladder reset every time,
+    and the doomed click repeated for 13 s. Jitter within the bucket is
+    the SAME attempt and must still reach the give-up."""
+    world = World(wall_x=5)  # reality never lets the walk progress
+    sim = Sim(world)
+    fake = FakeInput(world)
+    nav = navigator(world, sim, fake, walk_budget_s=2.0)
+    jitter = [(30, 0), (31, 0), (30, 1), (31, 1), (30, 0), (31, 0), (30, 1)]
+    with pytest.raises(NavigationError, match="capped attempts"):
+        for target in jitter:
+            nav.walk_to(target)
+
+
+def test_a_genuinely_new_target_resets_the_ladder():
+    world = World(wall_x=5)
+    sim = Sim(world)
+    nav = navigator(world, sim, FakeInput(world), walk_budget_s=2.0)
+    for _ in range(3):
+        nav.walk_to((30, 0))  # capped, no progress: ladder climbs
+    world.wall_x = None  # the far target is genuinely walkable
+    result = nav.walk_to((0, 30))  # > STALL_GOAL_BUCKET away: fresh attempt
+    assert abs(result.arrived_at[1] - 30) <= 3
+
+
+def test_the_second_stalled_attempt_shakes_loose_before_clicking():
+    world = World(wall_x=5)
+    sim = Sim(world)
+    fake = FakeInput(world)
+    nav = navigator(world, sim, fake, walk_budget_s=2.0)
+    nav.walk_to((30, 0))  # attempt 1: walks 0 -> 5, then the wall (progress)
+    nav.walk_to((30, 0))  # attempt 2: zero progress — NOW it is known useless
+    before = len(fake.clicks)
+    nav.walk_to((30, 0))  # attempt 3 must sidestep first
+    third_attempt = fake.clicks[before:]
+    assert third_attempt, "no clicks in the third attempt"
+    first_click = third_attempt[0]
+    # A sidestep is NOT aimed at the goal line (y=0 toward +x): it points
+    # off-axis, and the log says why.
+    assert first_click[1] != 0, f"first click {first_click} repeated the doomed line"

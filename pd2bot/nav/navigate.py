@@ -152,6 +152,15 @@ PROGRESS_RESET = 3.0  # subtiles closer to the goal that make a cycle "progress"
 # direction is the one already proven not to work.
 SHAKE_DISTANCE = 6
 SHAKE_ANGLES = (90, -90, 135, -135, 45, -45, 180)
+# Two walk targets this close are THE SAME ATTEMPT for the cross-call
+# stall ladder (R261). The ladder used to key on the exact goal, and
+# combat targets jitter a subtile per tick as the monster shifts — so
+# a body-blocked dash "changed goals" every tick, the counter reset
+# every tick, and the identical doomed 2 s click repeated for 13 s
+# with no escalation ever firing (battery run 4, t+114.7; run 5 paid
+# 85 s across 41 such walks). 4 subtiles: bigger than target jitter,
+# far smaller than a genuine retarget.
+STALL_GOAL_BUCKET = 4
 
 
 class NavigationError(RuntimeError):
@@ -708,8 +717,15 @@ class Navigator:
 
     def walk_to(self, target: Point) -> WalkResult:
         self._goal = target
-        if target != self._stall_goal:
-            # A new destination is a fresh attempt, whatever the last one did.
+        if self._stall_goal is None or (
+            _distance(target, self._stall_goal) > STALL_GOAL_BUCKET
+        ):
+            # A genuinely new destination is a fresh attempt, whatever the
+            # last one did. A target that merely JITTERED (the monster
+            # shifted a subtile) is the same attempt — see
+            # STALL_GOAL_BUCKET. The anchor deliberately stays at the
+            # family's FIRST target rather than trailing the jitter, so
+            # slow drift cannot walk the bucket window along with it.
             self._stall_goal, self._stall_count, self._stall_best = target, 0, None
         self._deadline = (
             None if self._walk_budget_s is None
@@ -730,6 +746,17 @@ class Navigator:
         result = WalkResult(
             target=target, arrived_at=(0, 0), duration_seconds=0.0, waypoints=0
         )
+
+        # The last capped attempt at this same (bucketed) goal gained
+        # NOTHING, so repeating its click unchanged is not a retry —
+        # this codebase's own rule. Step aside FIRST, before spending
+        # this call's budget on the identical doomed click. Whatever is
+        # eating the click — a swing animation, unit collision, an
+        # interaction — a sidestep changes the approach angle and the
+        # next plan routes from the new spot (the R163 remedy, applied
+        # one attempt earlier than the give-up path applies it).
+        if self._stall_count >= 1:
+            self._shake_loose(self.position(), target, result)
 
         failures = 0
         best_remaining: float | None = None
