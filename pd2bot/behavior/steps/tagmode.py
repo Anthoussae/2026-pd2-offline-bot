@@ -191,6 +191,7 @@ class TagModeBatteryStep(_PickupMixin):
         s.attempts.clear()
         s.last_try.clear()
         s.stuck.clear()
+        s.stuck_unreachable.clear()
         s.pending_pickup.clear()
         s.collect_closest.clear()
         s.collect_stalls.clear()

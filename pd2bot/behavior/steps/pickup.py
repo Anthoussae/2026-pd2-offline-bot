@@ -474,6 +474,9 @@ class _PickupMixin:
                 self.services.collect_stalls[item.unit_id] = stalls
                 if stalls >= self.services.pickup_attempts:
                     self.services.stuck.add(item.unit_id)
+                    # Reachability, not clicks (R264): a cleanse cannot
+                    # fix this, so an ORDER on it must close now.
+                    self.services.stuck_unreachable.add(item.unit_id)
                     self.services.log(
                         f"pickup: item {item.unit_id} at {item.position} "
                         f"written off — {stalls} walks got no closer than "
@@ -491,8 +494,23 @@ class _PickupMixin:
                     return True
             if not self.send(ctx, MoveTo(item.position)):
                 # Unreachable ground: give up on this item rather than the
-                # game, the same way the patrol gives up on a point.
+                # game, the same way the patrol gives up on a point. SAY
+                # SO (R264): this was the one write-off path with no
+                # event, and the Countess run paid for the silence — the
+                # ruby went stuck invisibly and its open order paced
+                # against the write-off until the wait-cap killed the
+                # run. Every conclusion goes on the record.
                 self.services.stuck.add(item.unit_id)
+                self.services.stuck_unreachable.add(item.unit_id)
+                self.services.narrate(
+                    f"pickup: gave up on the item at {item.position} "
+                    "(the walk to it failed)"
+                )
+                self.services.runlog.event(
+                    "item.abandoned", unit_id=item.unit_id,
+                    item=self._logged_name(item.kind),
+                    reason="the walk to it failed",
+                )
             return True
         if (
             now - self.services.last_try.get(item.unit_id, -1e9)
@@ -963,14 +981,26 @@ class _PickupMixin:
             )
             return None  # re-decide next tick; the next order gets its turn
 
-        # An order whose unit is written off AND already had its one
-        # post-cleanse retry is KNOWN futile: everything a cleanse can
-        # change has been tried. Waiting out the active budget on it was
-        # a standing character doing nothing for up to 75 s per item
-        # (the 2026-08-10 pilots spent whole stretches in that pose).
-        if (
-            order.unit_id in self.services.stuck
-            and order.unit_id in self.services.cleanse_retried
+        # An order whose unit is written off is KNOWN futile in two
+        # shapes, and both must CLOSE the order rather than hold it open
+        # (R264 — the Countess ruby deadlock: an open order on a stuck
+        # unit can neither retry, `collect` refuses stuck ids, nor
+        # finish, so it declared "pickup pacing" waits until the
+        # engine's wait-cap killed the run):
+        #
+        #   - click-budget stuckness, AFTER its one post-cleanse retry —
+        #     everything a cleanse can change has been tried. (Waiting
+        #     out the active budget on these was the 2026-08-10 pose.)
+        #   - REACHABILITY stuckness (`stuck_unreachable`: the walk
+        #     failed, or walks kept arriving short) — immediately; no
+        #     cleanse changes the ground between here and there.
+        #
+        # A fresh sighting of the same kind still opens a NEW order
+        # through the ordinary id-churn machinery; closing concedes this
+        # attempt, not the item class.
+        unreachable = order.unit_id in self.services.stuck_unreachable
+        if order.unit_id in self.services.stuck and (
+            unreachable or order.unit_id in self.services.cleanse_retried
         ):
             book.write_off(order.unit_id)
             self.services.runlog.event(
@@ -978,7 +1008,16 @@ class _PickupMixin:
                 unit_id=order.unit_id, item_kind=order.kind,
                 position=list(order.position),
                 active_s=round(order.active_s, 1),
-                reason="click budget spent; the post-cleanse retry failed",
+                reason=(
+                    "the walk to it failed"
+                    if unreachable
+                    else "click budget spent; the post-cleanse retry failed"
+                ),
+            )
+            self.services.alert(
+                f"pickup order written off after {order.active_s:.0f}s: "
+                f"kind {order.kind} at {order.position} — "
+                + ("unreachable" if unreachable else "clicks spent")
             )
             return None  # the next order gets its turn next tick
 

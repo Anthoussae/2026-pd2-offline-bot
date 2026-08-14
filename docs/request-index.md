@@ -319,3 +319,6 @@ headings, noted in parentheses, say roughly where they fell).
 - R262 resolved (validated: runs 9-10 CP 178/149 PASS; 11b 246 with by-design sighting re-walk) · 2026-08-14 00:55
 - R261 resolved (operator: "Looked pretty good"; "accept and close" - P4 accepted at revised idle, P5 closeout run) · 2026-08-14 01:02
 - R246 resolved (promote: mandatory_pickup armed in countess.toml; every census since the batch perfect; P5 gate CLOSED) · 2026-08-14 01:35
+- M6 P5 R263 [execute] The fresh Countess run under the merged improvements (go pre-given: "client is ready whenever you are") · 2026-08-14 02:05
+- M6 P5 R263 resolved (LEFT EARLY 457s: descent CRUSHED baseline (C5 at ~365s vs ~543); census 2/2; ruby order deadlocked vs a silent stuck write-off -> R264) · 2026-08-14 03:56
+- M6 P5 R264 [decision] Orders must reconcile with write-offs (the ruby deadlock) · 2026-08-14 03:56

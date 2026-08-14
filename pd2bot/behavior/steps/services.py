@@ -91,6 +91,16 @@ class RunServices:
     attempts: dict[int, int] = field(default_factory=dict)
     last_try: dict[int, float] = field(default_factory=dict)
     stuck: set[int] = field(default_factory=set)
+    # The subset of `stuck` written off for REACHABILITY (the walk to
+    # the item failed, or walks kept arriving short) rather than for a
+    # spent click budget. The distinction is what order reconciliation
+    # needs (R264, the Countess ruby deadlock): click-budget stuckness
+    # can be unblocked by a cleanse, so its orders wait for the
+    # post-cleanse retry — reachability stuckness cannot, and an order
+    # holding out for a cleanse that changes nothing was an infinite
+    # declared wait, ended only by the engine's wait-cap killing the
+    # run 10 subtiles from a flawless ruby.
+    stuck_unreachable: set[int] = field(default_factory=set)
     # The inventory cleanse (R117). `cleanse` is the procedure itself
     # (TownLayer.cleanse_inventory behind a closure at wiring time; the
     # sim scripts its own); None means unavailable — which it IS while the
