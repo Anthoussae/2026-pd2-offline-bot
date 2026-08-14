@@ -542,19 +542,35 @@ class TagModeBatteryStep(_PickupMixin):
                 1 for g in ground
                 if s.pickit.decide(g, s.carried())[0] == "skip"
             )
+            # Boundary honesty (tagmode review, issue 002): a click sent
+            # just before the cap whose item leaves the ground one tick
+            # LATER is not a miss — it is still RESOLVING, and scoring
+            # it as `wanted_left` biased every timed-out round (only
+            # they can end with clicks in flight). Reported as its own
+            # count rather than folded into either side; the census
+            # reconciliation was always immune (the item lands in the
+            # inventory and counts there).
+            resolving = sum(
+                1 for g in ground
+                if g.unit_id in s.pending_pickup
+                and s.pickit.decide(g, s.carried())[0] != "skip"
+            )
             got = self._wanted_start - wanted_left
+            wanted_left -= resolving
             junk_got = max(self._junk_start - junk_left, 0)
             block, mode, _ = self._block()
             self._say(
                 f"round {self._round_label()} score: {got}/"
                 f"{self._wanted_start} whitelisted, {junk_got} unwanted, "
                 f"{elapsed:.1f}s"
+                + (f", {resolving} click(s) still resolving" if resolving else "")
             )
             s.runlog.event(
                 "battery.round", stage="test_end",
                 block=block, round_no=self._round, mode=mode,
                 elapsed_s=round(elapsed, 2), timed_out=timed_out,
                 collected=got, wanted_left=wanted_left,
+                resolving=resolving,
                 junk_collected=junk_got,
             )
             self._reset_pickup_bookkeeping()

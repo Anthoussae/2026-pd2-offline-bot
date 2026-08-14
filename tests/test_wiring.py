@@ -394,3 +394,41 @@ def test_run_stop_channel_trips_on_chat_abort(tmp_path, monkeypatch):
     assert stop() is False, "ordinary chat is not an abort"
     assert stop() is True, "the operator's own phrase must stop the run"
     assert stop() is True, "and it is sticky"
+
+
+def test_a_bot_say_cannot_displace_an_unread_abort(tmp_path, monkeypatch):
+    """Tagmode review issue 001: the client keeps ONE chat line. The
+    operator types abort; if the bot says anything before the next poll,
+    the abort is overwritten unread. `registered_say` polls FIRST (the
+    stop is sticky once seen) and registers its text with the listener
+    so a bot line is never read back as human."""
+    from pd2bot import drill
+    from pd2bot.perception import chatread
+    from pd2bot.wiring import registered_say, run_stop_channel
+
+    monkeypatch.setattr(drill, "CANCEL_FILE", tmp_path / "absent")
+
+    class OneLineBuffer:
+        def __init__(self, session, **kw):
+            self.line = "abort the test"  # typed, not yet polled
+            self.remembered = []
+
+        def poll(self):
+            line, self.line = self.line, None
+            return line
+
+        def remember(self, text):
+            self.remembered.append(text)
+
+    monkeypatch.setattr(chatread, "ChatListener", OneLineBuffer)
+    stop = run_stop_channel(_NoChat())
+    said = []
+    speak = registered_say(said.append, stop)
+
+    speak("round 1A score: 4/4")  # the bot speaks BEFORE any poll ran
+
+    assert stop() is True, "the typed abort survived the bot's own say"
+    assert said == ["round 1A score: 4/4"]
+    assert stop.listener.remembered == ["round 1A score: 4/4"], (
+        "the say must register itself so it is never read back as human"
+    )

@@ -525,11 +525,17 @@ class LiveBot:
 
         # The battery's operator channel (R248): in-game chat. Refusals
         # propagate — the step's `_say` catches them and falls back to
-        # `alert`, so a dropped announcement never ends a run.
-        battery_chat = Chat(session)
-
-        def battery_say(text: str) -> None:
-            battery_chat.say(text)
+        # `alert`, so a dropped announcement never ends a run. The
+        # inventory allowance (tagmode review, issue 003): the battery
+        # announces a consumed item MID-DROP, with the inventory open,
+        # and R243's guard silently downgraded exactly the message the
+        # operator most wants in the moment ("a potion was drunk") to
+        # the console. The inventory grid has no Enter-activated
+        # default, so the allowance costs one inert Enter at worst —
+        # the same analysis that opened the shop grid for T85.
+        # `registered_say` (issue 001): abort-safe, echo-safe.
+        battery_chat = Chat(session, allow_panels={offsets.UI_INVENTORY})
+        battery_say = registered_say(battery_chat.say, self.should_stop)
 
         # The survey service (R175/R176): frontier targets and coverage over
         # the shared atlas, behind closures so the step never learns what a
@@ -709,8 +715,13 @@ class LiveBot:
         # The operator watches the GAME, not the console (R164). A run that
         # simply stops leaves them guessing whether it is thinking, stuck,
         # or done — the same reason drills have announced themselves in
-        # chat since R95.
-        return BehaviorRunner(factory, announce=Chat(self.session).say)
+        # chat since R95. `registered_say` (tagmode review, issue 001):
+        # between-game announcements share the same one-line buffer as a
+        # typed abort, and must neither eat one nor echo back as human.
+        return BehaviorRunner(
+            factory,
+            announce=registered_say(Chat(self.session).say, self.should_stop),
+        )
 
     def cycle(self) -> GameCycle:
         return GameCycle(self.session, MenuInput(self.session))
@@ -987,7 +998,39 @@ def run_stop_channel(session: GameSession) -> Callable[[], bool]:
                 return True
         return False
 
+    # The listener rides the closure (tagmode review, issue 001): run-side
+    # says must be able to register themselves with it (`remember`) so a
+    # bot line is never read back as human — and `registered_say` polls
+    # the channel BEFORE speaking, so a typed abort sitting in the
+    # client's ONE-line buffer is captured into the sticky state before
+    # the bot's own message overwrites it.
+    should_stop.listener = listener
     return should_stop
+
+
+def registered_say(
+    say: Callable[[str], None], should_stop: Callable[[], bool] | None
+) -> Callable[[str], None]:
+    """A chat `say` that cannot eat an abort or echo back as human.
+
+    The client keeps ONE chat line. Before this wrapper (tagmode review,
+    issue 001), a run-side announcement could land between the operator
+    typing "abort" and the next `should_stop` poll — overwriting the
+    abort unread — and every run-side line was invisible to the
+    listener's own-echo filter (the `[claude]` prefix is partyline's,
+    not Chat's). So: poll first (the abort is sticky once seen),
+    register the text second, speak last.
+    """
+    listener = getattr(should_stop, "listener", None)
+
+    def speak(text: str) -> None:
+        if should_stop is not None:
+            should_stop()
+        if listener is not None:
+            listener.remember(text)
+        say(text)
+
+    return speak
 
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only

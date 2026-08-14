@@ -5,6 +5,48 @@ markers (`🔶 M<m> P<p> R<n>`) and Drill Kit test headers read their M/P
 from here — update it at every milestone or phase transition, in the
 same commit as the transition itself.
 
+## State as of 2026-08-14 (the combat-logistics close)
+
+- **Milestone:** M6 — Countess flagship.
+- **Phase:** P5 — the acceptance battery (the Countess run itself),
+  resuming with everything below merged in.
+- **Counters:** next request **R263**; next test id **T94**;
+  instruction log current through R262.
+
+**The combat-logistics workstream is CLOSED and merged** (plan
+`docs/archive/plans/2026-08-09-combat-logistics/`): config trio, route
+leash, postures + berserk, Akara restock, mandatory pickup — the order
+book PROMOTED to the Countess run by the R246 census gate. It closed
+carrying three operator detours, each with its own archive:
+
+1. **Hotkey config** (R247): bindings read from the client's .key file.
+2. **Tag-mode pickup calibration** (R248–R254, T90/T91): NO NAME TAGS
+   is the standing pickup policy — 30/30 vs 10%/36% — and the
+   executor's label enforcement was inverted by its own measurement.
+   Standing kit: the chat abort channel for RUNS, the watchdog 15 s
+   staleness grace, per-drop floor confirmation.
+3. **The locomotion speed pass** (R255–R262, T92/T93, plan
+   `docs/archive/plans/2026-08-13-clear-radius-locomotion/`): Cold
+   Plains 454 s → ~150–180 s typical. Bounded A* (ADR
+   2026-08-14-bounded-pathfinding), **berserk as the standing default
+   posture** (R256 QA), walk-in attacks (R259), the area seam gate
+   (R260), locomotion telemetry (`nav.plan`, `runlog.locomotion`,
+   `runlog.compare`) and the HUMAN benchmark method (`pd2bot.observe`
+   — T92: the operator's own 53 s Cold Plains as the standing bar).
+
+**Next on the M6 mainline:** a fresh Countess run under everything
+above (old baselines: 930 s warm / 796 s seek — see
+`performance-notes.md` for the re-price), then the P5 acceptance
+battery per `docs/plans/2026-08-03-m6-countess/p5-preflight.md`.
+Low-priority knowns: the stash-open fix's base-rate watch
+(two-axis aim ladder, 2026-08-14), waypoint SW-approach aim (T83),
+ring 537 stash-deposit retry, `field_at` → `cast_at` rename, the
+watchdog transient-stall root cause (mitigated by the 15 s grace).
+
+Everything below this line is the historical record.
+
+---
+
 > ## ✅ HALT LIFTED 2026-08-07 — the chicken can no longer be starved
 >
 > The M6 P5 acceptance run died on 2026-08-07 because a blocking

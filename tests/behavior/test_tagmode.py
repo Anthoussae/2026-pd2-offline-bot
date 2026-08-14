@@ -493,7 +493,11 @@ def test_a_consumed_drop_is_excluded_from_the_census():
     assert all(f["reconciled"] for f in ends)
 
 
-def test_timed_out_round_reports_what_is_left():
+def test_timed_out_round_reports_a_click_in_flight_as_resolving():
+    """Tagmode review issue 002: a click sent before the cap whose item
+    is still on the ground at the boundary is not a miss — it is
+    RESOLVING, and the old scoring biased every timed-out round (only
+    they can end with clicks in flight)."""
     world = loaded_world()
     clock = Clock()
     svc = battery_services(world, clock)
@@ -513,8 +517,9 @@ def test_timed_out_round_reports_what_is_left():
     ends = svc.runlog.of("battery.round", stage="test_end")
     assert len(ends) == 1
     assert ends[0]["timed_out"] is True
-    assert ends[0]["wanted_left"] == 1
     assert ends[0]["collected"] == 0
+    assert ends[0]["resolving"] == 1, "the in-flight click must be named"
+    assert ends[0]["wanted_left"] == 0, "a resolving click is not a miss"
 
 
 def test_wired_filter_reader_is_settled_not_double_pressed():

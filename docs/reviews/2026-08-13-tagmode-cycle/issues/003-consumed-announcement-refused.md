@@ -33,3 +33,7 @@ shape; the inventory panel has no Enter-activated default).
 
 A unit test asserting the consumed message reaches `say` (not just
 `alert`) when the slip happens with the inventory open.
+
+## Resolution
+
+RESOLVED 2026-08-14 (P6 closeout): the battery chat is `Chat(allow_panels={UI_INVENTORY})` - the R243 opt-in, T85 shape; the inventory grid has no Enter-activated default. The consumed announcement now reaches game chat mid-drop.

@@ -557,6 +557,7 @@ def tagmode_report(events: list[dict]) -> list[str]:
                 open_round["timed_out"] = e.get("timed_out")
                 open_round["collected"] = e.get("collected")
                 open_round["wanted_left"] = e.get("wanted_left")
+                open_round["resolving"] = e.get("resolving")
                 open_round["junk_collected"] = e.get("junk_collected")
                 open_round = None
         elif open_round is not None:
@@ -588,6 +589,8 @@ def tagmode_report(events: list[dict]) -> list[str]:
         )
         time_s = f"{r['elapsed_s']:.1f}" if complete else "OPEN"
         flag = " TIMEOUT" if complete and r.get("timed_out") else ""
+        if r.get("resolving"):
+            flag += f" +{r['resolving']} resolving"
         got = r.get("collected")
         got = r["collected_seen"] if got is None else got
         junk = r.get("junk_collected")

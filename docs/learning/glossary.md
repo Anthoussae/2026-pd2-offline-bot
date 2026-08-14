@@ -664,3 +664,52 @@ character occupies about one tile of ground but is drawn tall, so a
 click well clear of their feet in world terms can still land on their
 body on screen. *(First seen: 2026-08-08, classification and coordinate
 spaces.)*
+
+**baseline** — a recorded "before" measurement, kept permanently, so a
+later change is judged against evidence instead of memory. This
+project's speed pass kept every run's numbers and compared each change
+against both the original bot run and the human benchmark. *(First
+seen: 2026-08-14, measuring before fixing.)*
+
+**benchmark** — a reference standard you measure toward, often a
+known-good implementation of the same task. Here: a human playing the
+bot's exact Cold Plains job (53 s) while a read-only recorder watched,
+making every difference attributable to *how* the bot plays. *(First
+seen: 2026-08-14, measuring before fixing.)*
+
+**budget (computational)** — an explicit cap on what a piece of work
+may spend (time, memory, search steps) before it must return with
+whatever answer it has. Converts "rarely, catastrophically slow" into
+"occasionally, cheaply wrong in a recoverable way" — the shape behind
+timeouts everywhere in production software. Our A* search may expand a
+distance-scaled number of squares before answering "no route". *(First
+seen: 2026-08-14, measuring before fixing.)*
+
+**premature optimization** — changing code for speed before measuring
+where the time actually goes. One of the industry's most-quoted sins,
+because careful reasoning about performance is wrong often enough that
+measurement is the only arbiter; this cycle's two same-night reverts
+are the case study. *(First seen: 2026-08-14, measuring before
+fixing.)*
+
+**revert** — undoing a change, as a first-class engineering act rather
+than an admission of failure. A healthy revert records WHY (ours carry
+the measurement that falsified the change, in a comment at the scene)
+so the dead end is documented and nobody retries it blind. *(First
+seen: 2026-08-14, measuring before fixing.)*
+
+**telemetry** — the running program continuously writing down what it
+does, so behavior is observable after the fact without a debugger
+attached. Sibling of *instrumentation* (the act of adding such
+measurement) and *observability* (the property of having enough of
+it). Our run event log, `nav.plan` costs, and the locomotion report
+are all telemetry. *(First seen: 2026-08-14, measuring before
+fixing.)*
+
+**worst case** — an algorithm's cost on the most unfavorable input,
+which can be thousands of times its typical cost. Engineering for the
+worst case (budgets, timeouts, caps) is different work from making the
+typical case fast, and production code needs both. A* asked for a
+route that does not exist must flood everything reachable to prove
+"no" — 20 seconds against a 3 ms typical ask, until it was budgeted.
+*(First seen: 2026-08-14, measuring before fixing.)*

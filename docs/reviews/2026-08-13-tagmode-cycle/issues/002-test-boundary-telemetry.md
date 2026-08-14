@@ -37,3 +37,7 @@ tabulator can report it honestly instead of as a miss.
 A unit test staging a pickup click on the final test tick with the
 item leaving ground one tick later — the score should count it (or
 report it as `resolving`), not as `wanted_left`.
+
+## Resolution
+
+RESOLVED 2026-08-14 (P6 closeout): test_end now counts wanted items with a pending click as `resolving` (own event field + tabulator flag), not `wanted_left`. Validated by test_timed_out_round_reports_a_click_in_flight_as_resolving.

@@ -45,3 +45,7 @@ human line. Prefer the first: it also fixes the echo hazard.
 
 A unit test where the fake buffer receives "abort" followed by a bot
 say before the next poll — `should_stop()` must still return True.
+
+## Resolution
+
+RESOLVED 2026-08-14 (P6 closeout): `wiring.registered_say` wraps every run-side say - polls the abort channel FIRST (sticky once seen), registers the text with the listener (`remember`), then speaks. Both hazards closed; validated by test_a_bot_say_cannot_displace_an_unread_abort.
