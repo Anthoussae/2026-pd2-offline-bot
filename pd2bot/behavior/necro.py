@@ -79,6 +79,16 @@ class CombatConfig:
     # How far a small idle step moves. Deliberately much shorter than
     # `retreat_subtiles`: this is drift, not a withdrawal.
     reposition_subtiles: int = 4
+    # How far out the CHARGE style attacks directly instead of dashing
+    # (R259, operator-approved mid-battery). The T92 battery's run 1
+    # measured the alternative: 88 manual dash-clicks burned their full
+    # 2 s walk budget ≥6 subtiles short — 183 s of one run — because
+    # move-clicks cannot path through monster collision, while an
+    # attack-click walks the character in around bodies via the
+    # client's own pathing (what a human does). 16 stays inside the
+    # nearest screen edge (T50: 19-38 subtiles), so the target sprite
+    # is always clickable. Skirmish keeps melee_range strikes only.
+    charge_attack_range: int = 16
     # How far a ground-targeted cast stays away from a clickable OBJECT.
     # Larger than the 2 used for units because an object's sprite is
     # larger than a monster's, and because the cost is asymmetric: a cast
@@ -614,7 +624,15 @@ class NecroCombat:
             return self._reposition(origin, hostiles)
 
         distance = _chebyshev(target.position, origin)
-        if distance > self.config.melee_range:
+        # Charge strikes AT RANGE (R259): the attack-click walks the
+        # character in through the client's own unit-aware pathing, so
+        # the dash below — a manual move-click that monster collision
+        # simply stops (run 1's 88 blocked walks) — is reserved for
+        # targets beyond clickable range.
+        strike_range = (
+            self.config.charge_attack_range if charge else self.config.melee_range
+        )
+        if distance > strike_range:
             # Do not walk into a pack without the wall up (user protocol):
             # three revives BEFORE approaching, and desecrate makes its own
             # corpses so there is never a reason to go in short-handed. The
@@ -662,7 +680,14 @@ class NecroCombat:
             )
             >= group
         ))
-        return AttackUnit(target.unit_id, target.position)
+        # Walk-in only when there is ground to cover: inside melee range
+        # the in-place strike is the proven mechanism, and dropping SHIFT
+        # there would buy nothing.
+        return AttackUnit(
+            target.unit_id,
+            target.position,
+            walk_in=charge and distance > self.config.melee_range,
+        )
 
     # -- desecrate -> revive maintenance (R47.4) --------------------------------
 

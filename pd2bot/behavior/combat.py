@@ -241,6 +241,7 @@ _COMBAT_NUMBERS: dict[str, type] = {
     "engage_radius": int,
     "melee_range": int,
     "dash_step": int,
+    "charge_attack_range": int,
     "retreat_subtiles": int,
     "reposition_subtiles": int,
     "object_clearance": int,

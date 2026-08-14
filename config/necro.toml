@@ -163,6 +163,14 @@ armor_in_town = true
 engage_radius = 40
 melee_range = 3
 dash_step = 8
+# How far out the CHARGE style (berserk) attacks directly instead of
+# dashing (R259, 2026-08-13): an attack-click walks the character in
+# via the client's own unit-aware pathing — manual move-clicks cannot
+# push through monster collision (run 1 of the T92 battery: 88 blocked
+# dashes, 183 s). 16 stays inside the nearest screen edge (T50: 19-38).
+# Only styles with style = "charge" read this; skirmish strikes at
+# melee_range as always.
+charge_attack_range = 16
 # How far back out of the pack after each strike.
 retreat_subtiles = 12
 # Poison does the killing, so a struck monster is already dying: prefer

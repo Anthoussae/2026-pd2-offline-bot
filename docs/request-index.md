@@ -306,3 +306,6 @@ headings, noted in parentheses, say roughly where they fell).
 - R257 [decision] Approve the locomotion-pass phase table (md, 5 phases) · 2026-08-13 19:44
 - R257 resolved (lgtm; plan.md + phases 01-05 written) · 2026-08-13 19:48
 - R258 [execute] P4 live acceptance battery: confirm presence and say go · 2026-08-13 20:56
+- R258 resolved (commit+go; P1-P3 at 13d0c6b; run 1: floods GONE but CP 473s/idle 162s MISS - 88 blocked dashes = 183s -> R259) · 2026-08-13 21:28
+- R259 [decision] Charge should attack at range, not walk-then-stab · 2026-08-13 21:26
+- R259 resolved (approved; walk-in AttackUnit + charge_attack_range 16 shipped, 1339 green; battery resumes) · 2026-08-13 21:32

@@ -102,10 +102,21 @@ class MoveTo:
 @dataclass(frozen=True)
 class AttackUnit:
     """Left-click a monster: the necro's whole offense (R47 — the left
-    skill is permanently Poison Strike and never switches)."""
+    skill is permanently Poison Strike and never switches).
+
+    `walk_in` False = SHIFT held, attack in place — the skirmish rule,
+    where a bare click out of melee range would walk the character into
+    the pack. `walk_in` True (R259, the charge style) drops SHIFT and
+    WANTS that walk: the client paths the character to the target
+    around bodies natively and swings on arrival — the human mechanism,
+    and the answer to the T92 battery's blocked dashes (88 capped walks
+    burning 183 s against monster collision that manual move-clicks
+    cannot push through).
+    """
 
     unit_id: int
     position: tuple[int, int]
+    walk_in: bool = False
 
 
 @dataclass(frozen=True)

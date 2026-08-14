@@ -87,3 +87,42 @@ def test_the_shipped_berserk_posture_is_the_charge_package():
     # The base posture stays skirmish with NO armor override.
     assert config.combat.style == "skirmish"
     assert config.combat.armor_recast_below_pct is None
+
+
+# -- attack at range (R259) ----------------------------------------------------
+
+
+def test_charge_attacks_at_range_with_a_walk_in_click():
+    """Beyond melee but inside charge_attack_range: the strike IS the
+    approach — a bare (no-SHIFT) click the client paths in around unit
+    collision, instead of the manual dash that run 1 measured being
+    body-blocked 88 times for 183 s."""
+    combat, clock = charge_combat()
+    target = monster(1, (1010, 1000))  # 10 away: past melee (3), inside 16
+    action = combat.engage(snap(monsters=[target]))
+    assert isinstance(action, AttackUnit)
+    assert action.walk_in is True
+
+
+def test_charge_within_melee_strikes_in_place():
+    combat, clock = charge_combat()
+    action = combat.engage(snap(monsters=[monster(1, (1002, 1000))]))
+    assert isinstance(action, AttackUnit)
+    assert action.walk_in is False
+
+
+def test_charge_beyond_click_range_still_dashes():
+    combat, clock = charge_combat()
+    target = monster(1, (1030, 1000))  # 30 away: beyond charge_attack_range
+    action = combat.engage(snap(monsters=[target]))
+    assert isinstance(action, MoveTo)
+    assert action.toward == 1
+
+
+def test_skirmish_never_walk_in_attacks():
+    from tests.behavior.test_behavior_necro import make as make_skirmish
+
+    combat, clock = make_skirmish()
+    target = monster(1, (1010, 1000))  # 10 away: skirmish dashes, never clicks
+    action = combat.engage(snap(monsters=[target]))
+    assert not isinstance(action, AttackUnit)

@@ -207,7 +207,7 @@ class ActionLogging:
             elif isinstance(action, AttackUnit):
                 log.event(
                     "action.attack", unit_id=action.unit_id,
-                    target=place(action.position),
+                    target=place(action.position), walk_in=action.walk_in,
                 )
             elif isinstance(action, CastAtPoint):
                 log.event(
@@ -525,9 +525,19 @@ class GameActionExecutor(ActionLogging):
 
         if isinstance(action, AttackUnit):
             # SHIFT held: attack in place. A bare left-click on a monster out
-            # of melee range walks us into the pack instead of striking.
-            self.gated.click_world(*action.position, stand_still=True)
-            self._record(action, f"unit {action.unit_id} at {action.position}")
+            # of melee range walks us into the pack instead of striking —
+            # which is exactly the hazard for skirmish and exactly the POINT
+            # for charge (R259): `walk_in` drops SHIFT so the client paths
+            # the character to the target around unit collision and swings
+            # on arrival, the approach manual move-clicks cannot make.
+            self.gated.click_world(
+                *action.position, stand_still=not action.walk_in
+            )
+            self._record(
+                action,
+                f"unit {action.unit_id} at {action.position}"
+                + (" (walk-in)" if action.walk_in else ""),
+            )
             return
 
         if isinstance(action, InteractObject):
