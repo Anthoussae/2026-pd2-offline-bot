@@ -95,3 +95,27 @@ Present to the operator, as one `verify` request:
 Three consecutive clean runs under one configuration meeting all three
 targets, the record in notes.md, and the operator's gate verdict
 requested (the verdict itself may arrive after this phase's work ends).
+
+## Implementation Result
+
+Status: done (accepted at revised terms, R261/R262)
+Completed: 2026-08-14
+Commit: pending
+
+- Eleven launches 2026-08-13/14 (full table in notes.md). Structural
+  fixes shipped mid-battery by operator approval: walk-in attacks
+  (R259, 55add38), the seam gate (R260, 23a27aa), stall bucket +
+  shake-first (R261, 0c27971), chase gate + ring give-up 2 (R262,
+  17c1274). Falsified and reverted: dash_step 16, the 1 s walk budget
+  (bd0cde4, with a do-not-lower warning).
+- Final level: CP ~150-250 s (149/178 passes; 246 incl. a by-design
+  78 s sighting re-walk), idle 48-95 s, ZERO CP ticks > 4 s in every
+  run since P2, census 5/5 whitelisted / 0 junk, hp min 1009/1335,
+  monitor silent throughout.
+- Verdict: operator-accepted and closed ("Looked pretty good" from the
+  chair; "accept and close") — CP and slow-tick targets met at typical
+  rolls, the idle target (45 s) not met and characterized (diffuse
+  ~2 s click-vs-unit-collision blocks; future work).
+- Deviations: formal three-consecutive-pass not achieved (149/178
+  passes, then variance); two town stash flakes (runs 6, 11) spun off
+  as their own task.

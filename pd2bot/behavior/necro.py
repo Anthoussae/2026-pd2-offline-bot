@@ -1,32 +1,44 @@
-"""The poison dagger necromancer: the user's own skirmish pattern, encoded.
+"""The poison dagger necromancer's combat module: two styles, one ladder.
 
-R47.2, in the user's description: *on contact, wait briefly for the revives
-to engage, dash in, left-click the monster, run back out of danger, recast
-bone armor if low, repeat until the pack is dead.* That is what this module
-implements — encoded, not invented. Where a number was not given (how far
-"in" a dash is, how long "briefly" lasts) it is a commented config default
-in `config/necro.toml`, never a literal in here.
+**The standing default is BERSERK** (the charge style; R256 QA, operator
+ruling 2026-08-13): attack the nearest strikeable hostile — at range via
+a walk-in click the client paths itself (R259) — no dash-out, no waiting
+for the wall. The T92 human-vs-bot battery measured why: the operator
+cleared the same field 8× faster with the same character, and the
+skirmish beat's retreat-dash cycle was the dominant cost. The reflex
+ladder (potions, armor, escapes) owns survival above either style, and
+that is the safety argument in the operator's words: "not just the
+fastest, but the safest too — best defense is a good offense."
 
-Three things about this class shape the code:
+**The skirmish style stays implemented and selectable** (per-step
+posture, or an un-set `default_posture`). It is R47.2 in the user's own
+description: *on contact, wait briefly for the revives to engage, dash
+in, left-click the monster, run back out of danger, recast bone armor if
+low, repeat until the pack is dead* — encoded, not invented. Where a
+number was not given it is a commented config default in
+`config/necro.toml`, never a literal in here.
+
+Three things about this class still shape both styles:
 
 **Offense never switches skills.** The left skill is permanently Poison
-Strike (R47.1), so an attack is a plain left-click on the monster — with
-SHIFT, so it strikes rather than walking into the pack. The right-hand
-skills are utility only, and every one of them goes through a verified
-switch in the executor.
+Strike (R47.1), so an attack is a plain left-click on the monster. For
+skirmish that click holds SHIFT (strike in place, never wander into the
+pack); charge DROPS SHIFT beyond melee range on purpose — the walk-in
+is the point (`actions.AttackUnit.walk_in`). The right-hand skills are
+utility only, and every one goes through a verified switch in the
+executor.
 
 **Poison does the killing, not the dagger.** So re-stabbing one monster
-until it drops is wasted time: a struck monster is already dying. Target
-selection therefore prefers monsters that have not been struck, and only
-re-strikes one after `restrike_s` if it somehow survived the poison.
+until it drops is wasted time: a struck monster is already dying.
+Skirmish prefers never-struck targets; charge takes the nearest off
+cooldown; both hold `restrike_s` on a poisoned survivor.
 
 **Standing still is what kills this character** (R47.9, user danger
-assessment: groups stun-lock). Hence the retreat after every strike, and
-hence the dash being taken in SHORT HOPS rather than one long walk: a
-blocking `walk_to` into a pack is time the reflex ladder is not being
-consulted, and the ladder is the thing keeping the character alive. Each
-hop is at most `dash_step` subtiles, so the engine gets a tick — and the
-ladder a look — between them.
+assessment: groups stun-lock). Skirmish answers with the post-strike
+retreat and short dash hops; charge answers with perpetual forward
+motion and the ladder's precedence — each manual hop is still at most
+`dash_step` subtiles, so the engine gets a tick, and the ladder a look,
+between them.
 
 The module decides only; it returns declarative actions and never sends.
 """

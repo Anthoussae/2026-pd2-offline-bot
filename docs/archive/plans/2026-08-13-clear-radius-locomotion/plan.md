@@ -2,10 +2,12 @@
 kind: plan
 size: md
 depth: implementation
-status: active
+status: done
+completed: 2026-08-14
+commit: pending
 repo: 2026-pd2-offline-bot
 created: 2026-08-13
-adr: possible
+adr: accepted (docs/adr/2026-08-14-bounded-pathfinding.md)
 ---
 
 # clear_radius locomotion speed pass

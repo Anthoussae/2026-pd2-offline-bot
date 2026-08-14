@@ -280,6 +280,18 @@ bot moves, and "cautious" cannot be redefined because it *is* the base
   the post-strike retreat group-conditioned — an isolated enemy is
   struck without the back-out, a closing group still triggers the full
   retreat (the user's own definition); `restrike_s` drops to 0.5.
+- **berserk** (the charge style, R241; **the standing DEFAULT since
+  R256 QA**, operator ruling 2026-08-13): always attack the nearest
+  strikeable hostile — at range via a walk-in click the client paths
+  itself (R259, `AttackUnit.walk_in`) — no dash-out, no waiting for
+  the wall; armor recast tightened to 60%; the reflex ladder owns
+  survival. `default_posture = "berserk"` in `[combat]` applies it at
+  module construction, so every run inherits it with no run-file
+  edits; a step naming a posture still overrides per step. The T92
+  battery is the measured basis (Cold Plains 454 s → ~150-180 s across
+  the R257 pass), and combat never engages a hostile standing in
+  another area (the R260 seam gate — run 3 chased a border pack into
+  Blood Moor for 202 s before it existed).
 
 Two companion defaults landed with the postures (both user notes,
 2026-08-03):

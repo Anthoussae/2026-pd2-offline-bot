@@ -155,6 +155,19 @@ width and the game wall-slides where pointsized math would clip).
 cap keeps every hop clickable on screen. `OverlayGrid` merges the
 generated base with live patches (live wins where known).
 
+**The search is budgeted** (R257 P2, ADR
+`2026-08-14-bounded-pathfinding`): production callers give A* a
+distance-scaled node budget (floor 2 000, cap 25 000 expansions), and a
+search that exhausts it returns None — the same honest no-route answer
+an exhausted open set gives, which callers already confirm with a
+second ask and then write off with expiry-on-movement. The measurement
+that forced it: two atlas cells eight subtiles apart but in different
+connected components (the real link ran through unrecorded ground) made
+unbounded A* flood every recorded cell for **20.15 s per ask**, twice
+back to back — a 47 s live freeze that the budget answers in 0.057 s.
+Every plan's price is on the record as a `nav.plan` run-log event
+(duration, nodes, outcome, `budget_exhausted`).
+
 `nav/navigate.py` follows waypoints with gated clicks and watches the
 player's actual position. The escalation ladder when position stops
 changing: re-click → re-plan from where we really are (fresh grids) →

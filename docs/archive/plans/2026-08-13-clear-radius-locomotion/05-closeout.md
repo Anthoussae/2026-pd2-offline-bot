@@ -73,3 +73,23 @@ commit + /yona-review + /yona-push at cycle end — ask, don't assume).
 
 Docs updated and consistent with measured reality, ADR decided with
 reasoning recorded either way, cleanup grep clean, notes.md closed out.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-08-14
+Commit: pending
+
+- performance-notes.md re-priced (what-bought-what table + Countess
+  implications); navigation.md documents the search budget;
+  behavior.md documents the berserk default + seam gate; run-log.md
+  already carried nav.plan (P1); necro.py module docstring rewritten
+  (berserk is the standing default, skirmish preserved and selectable).
+- ADR CREATED: docs/adr/2026-08-14-bounded-pathfinding.md (accepted) —
+  the budget-exhausted-is-honest-no-route contract met the bar; the
+  berserk default is config + an operator ruling in the instruction
+  log, no ADR.
+- Cleanup grep clean (one hit = an accurate knob comment). The teach
+  step is deliberately deferred to the combat-logistics P6 closeout,
+  which MUST cover this detour too (bounded search, postures/berserk,
+  the human-benchmark method, the walk-in mechanism).

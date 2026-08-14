@@ -244,3 +244,19 @@ Battery continued (R262 tuning, walk-budget revert bd0cde4):
 Run 9 = the current config's first acceptance pass on 2 of 3 targets
 (CP <180 PASS, ticks PASS, idle 62 vs 45 MISS). Formal three-pass
 acceptance would need runs 10-11 consecutive under this config.
+
+Formal acceptance attempt (config frozen at bd0cde4):
+
+| run | CP | CP idle | ticks>4s (CP) | census | note |
+|---|---|---|---|---|---|
+| 9 (001607) | 178s PASS | 62s miss | 0 PASS | no drops rolled | |
+| 10 (002319) | 149s PASS | 48s miss (by 3) | 0 PASS | 2/2, 0 junk | best run of the night |
+| 11 (002708) | - | - | - | - | TOWN STASH FLAKE #2 -> spun off as its own task |
+| 11b (002834) | 246s miss | 95s miss | 0 PASS | 2/2, 0 junk | pickup step re-walked 4 ring points (78s) to account for sightings - correctness by design (T3/R186), and the run's clear itself was ~168s |
+
+Formal three-consecutive-pass NOT achieved: CP 149-246s across the
+trio, idle 48-95s. Variance sources now characterized: monster
+density, drop luck, and the sighting-accounting ring re-walk (which
+is correctness, not waste). Zero slow ticks in CP in EVERY run since
+P2 - that target is simply solved. hp minimum across all 11 launches:
+1009/1335.

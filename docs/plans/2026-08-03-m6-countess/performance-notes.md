@@ -254,3 +254,35 @@ so a walk that burned 35 s and failed produces **no run-log event at
 all** — the four expensive ticks are visible only as tick durations
 with nothing inside them. That gap should be closed before the cause
 is theorised about.
+
+## The locomotion pass, re-priced (2026-08-13/14, R255-R262)
+
+The T92 human-vs-bot comparison (same character, build, gear) put a
+hard number on the gap - the operator cleared Cold Plains in 53 s
+against the bot`s 454 s - and the R257 pass closed most of it. Final
+level, measured over the acceptance runs: **Cold Plains ~150-250 s
+(typical ~150-180), idle 48-95 s, zero ticks over 4 s in every run
+since bounded A***. What bought what, per the locomotion report
+(`python -m pd2bot.runlog.locomotion`):
+
+| fix | what it killed | evidence |
+|---|---|---|
+| bounded A* (ADR 2026-08-14) | the 21 s no-path floods (47 s/run) | 20.15 s -> 0.057 s replayed |
+| berserk default + walk-in attacks (R256/R259) | the strike-retreat cycle AND the walk-into-pack freeze (88 blocked dashes, 183 s in one run) | run 1 vs 2: CP 473 -> 219 s |
+| seam gate (R260) | cross-border chases (202 s in Blood Moor) | run 3 |
+| stall-family bucket + shake-first (R261) | the 13 s repeat-click stalls | max idle span 13.8 -> ~7 s |
+| chase gate + ring give-up 2 (R262) | cross-field marches at off-screen packs; 7 s blocked-ring dwells | route 1316 -> 857-884 st |
+
+Falsified along the way, kept on the record: dash_step 16 (no effect,
+reverted), the 1 s walk budget (broke town NPC approaches - the
+walk`s graceful blocked-by-avoidance exits need end-of-call time; DO
+NOT lower it, the constant carries the warning).
+
+**Countess implications**: the descent inherits all five fixes; the
+brisk/aggressive per-step postures still override berserk where the
+run file says so. The residual worth chasing later: ~30-40 diffuse
+~2 s blocked walks per run (click-movement vs unit collision as a
+mechanic) - the "continuous movement" redesign on the locomotion
+plan`s future-work list - plus the town preamble`s own slow ticks
+(13-37 s) and the intermittent stash-open failure (two kills on
+2026-08-14, spun off as its own task).
