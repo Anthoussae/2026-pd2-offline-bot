@@ -322,3 +322,6 @@ headings, noted in parentheses, say roughly where they fell).
 - M6 P5 R263 [execute] The fresh Countess run under the merged improvements (go pre-given: "client is ready whenever you are") · 2026-08-14 02:05
 - M6 P5 R263 resolved (LEFT EARLY 457s: descent CRUSHED baseline (C5 at ~365s vs ~543); census 2/2; ruby order deadlocked vs a silent stuck write-off -> R264) · 2026-08-14 03:56
 - M6 P5 R264 [decision] Orders must reconcile with write-offs (the ruby deadlock) · 2026-08-14 03:56
+- M6 P5 R264 resolved (approved; evented write-offs + unreachable-order closure, regression test, 1350 green; Countess relaunched) · 2026-08-14 04:05
+- M6 P5 R265 [execute] Top up HP (potion or Akara), then go: relaunch the Countess run around the latent heal-walk defect · 2026-08-14 04:24
+- M6 P5 R265 resolved (go; RUN 3 CLEAN [CVRL] 521.6s, COUNTESS DOWN - 44% faster than baseline; census 1/1; caveat: her perfect diamond dropped at t+516 and the sweep ended without consulting the order book) · 2026-08-14 04:45
