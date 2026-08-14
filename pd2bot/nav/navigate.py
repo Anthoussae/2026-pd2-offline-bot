@@ -129,10 +129,16 @@ MAX_FAILURES = 5  # consecutive no-progress plan cycles before giving up
 # it interrupts within its own interval. What the cap buys is the tick
 # loop itself: the reflex ladder (potions, bone armor), the abort
 # channel, and the never-idle checks all live between ticks too, and in
-# a pack those seconds are the ones that matter. 2 s because a leg worth
-# having makes visible progress inside it, and returning short is
-# already the normal outcome here — every caller re-checks distance.
-WALK_BUDGET_SECONDS = 2.0
+# a pack those seconds are the ones that matter. Was 2.0; halved to 1.0
+# in the R262 speed tuning (operator order): the T92 battery showed a
+# blocked walk pays its FULL budget before the caller can re-decide, so
+# the budget is also the price of every dead click — 24-42 of them per
+# run. A leg still makes visible progress inside 1 s, and the character
+# keeps walking to the last click while the next tick thinks. One known
+# trade, accepted: the in-call re-click (STUCK_SECONDS 1.5) no longer
+# fires inside a single call — but every fresh call sends a fresh
+# click, so the escalation survives at tick cadence.
+WALK_BUDGET_SECONDS = 1.0
 PROGRESS_RESET = 3.0  # subtiles closer to the goal that make a cycle "progress"
 # Shake loose before re-planning from a spot that did not work.
 #

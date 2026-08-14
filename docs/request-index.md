@@ -313,3 +313,5 @@ headings, noted in parentheses, say roughly where they fell).
 - R260 resolved (approved; seam gate in _hostiles + clear in_radius, 1340 green; acceptance series restarts) · 2026-08-13 21:58
 - R261 [verify] P4 gate: judge the battery, rule on the swing-contention fix · 2026-08-13 22:08
 - R261 resolved (approved; bucketed stall family + shake-first shipped, 1343 green; battery resumes run 6, operator spectating) · 2026-08-13 22:24
+- R261 progressed (runs 6b 277s/88s + 7 215s/71s; census 1/1, 0 junk; wandering window explained -> R262 tuning ordered) · 2026-08-14 00:02
+- R262 [decision] Speed tuning: chase gate, faster ring give-up, 1s walk budget · 2026-08-14 00:05

@@ -2616,3 +2616,38 @@ def test_a_traverse_does_not_cleanse_with_nothing_queued():
     step.step(snap(pos=world["pos"], area=20), ctx)
 
     assert not cleansed
+
+
+# -- the chase gate (R262) -----------------------------------------------------
+
+
+def test_far_monsters_are_the_ring_walks_job_while_it_is_unwalked():
+    """Run 7's chase-abandon-retrace: the step marched 9 s at a pack 66
+    subtiles out and off-screen, lost it from perception, and retraced.
+    While the ring is pending, a far monster earns a patrol leg (the
+    ring approaches it by construction), never a cross-field march."""
+    clock = Clock()
+    combat = StubCombat()
+    step, svc, here, executor, ctx = patrolling(clock, combat=combat)
+    far = monster(9, (HOME[0] - 66, HOME[1] + 33))  # in radius, far from player
+    for _ in range(3):
+        outcome = step.step(snap(pos=here["pos"], monsters=[far]), ctx)
+        assert "closing" not in (outcome.note or "")
+    assert combat.approach_calls == 0, "the step asked the module to close"
+    assert [a for a in executor.actions if isinstance(a, MoveTo)], (
+        "no patrol leg was walked"
+    )
+
+
+def test_the_chase_gate_lifts_once_the_ring_is_walked():
+    clock = Clock()
+    combat = StubCombat()
+    step, svc, here, executor, ctx = patrolling(clock, combat=combat)
+    outcome = drive(step, here, ctx, clock)  # empty field: ring completes
+    assert outcome is not None
+    step._empty_since = None  # re-open the settle: a far monster appears
+    far = monster(9, (HOME[0] - 66, HOME[1] + 33))
+    step.step(snap(pos=here["pos"], monsters=[far]), ctx)
+    assert combat.approach_calls == 1, (
+        "post-ring, a far monster must reach the closing path again"
+    )

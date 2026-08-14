@@ -194,7 +194,24 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
             # monsters the combat module refuses to fight.
             and (snap.area is None or snap.area.contains(m.position))
         ]
-        if in_radius:
+        # The chase gate (R262, run 7's chase-abandon-retrace): while the
+        # ring is still unwalked, the step only fights and closes on
+        # monsters near the PLAYER — a pack 66 subtiles out is the ring
+        # walk's job to approach, not a cross-field march that gets
+        # abandoned the moment the pack leaves perception. Far monsters
+        # still hold the clearance open (the fall-through below keeps
+        # `_empty_since` unset and walks the circle), and once the ring
+        # is complete the gate lifts, so termination is unchanged.
+        engageable = (
+            in_radius
+            if self.patrol_complete
+            else [
+                m for m in in_radius
+                if _chebyshev(m.position, snap.player.position)
+                <= self.services.clearance_close_range
+            ]
+        )
+        if engageable:
             self._empty_since = None
             # A fight is not a failed patrol leg. The character walks
             # TOWARD the monster, which is away from wherever the patrol
@@ -218,7 +235,7 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
                     # carry no `toward` because they aim at open ground.
                     blamed = getattr(action, "toward", None)
                     target = next(
-                        (m for m in in_radius if m.unit_id == blamed), None
+                        (m for m in engageable if m.unit_id == blamed), None
                     )
                     if target is not None:
                         # Straight to a write-off rather than onto the
@@ -250,7 +267,7 @@ class ClearRadiusStep(_PatrolMixin, _PickupMixin):
             # fight is actually in progress, which is what keeps this from
             # overriding a deliberate pause.
             nearest = min(
-                in_radius,
+                engageable,
                 key=lambda m: _chebyshev(m.position, snap.player.position),
             )
             # Route-aware closing (R181): ask the map first. No route =

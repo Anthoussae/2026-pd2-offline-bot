@@ -48,6 +48,18 @@ class RunServices:
     # Tuning that belongs to the steps rather than to a class.
     clear_settle_s: float = 5.0
     pickup_radius: int = 30  # opportunistic pickups during clearance
+    # How far from the PLAYER a clearance monster may be for the step to
+    # walk at it directly while the patrol ring is still unwalked (R262,
+    # from run 7's chase-abandon-retrace: the step marched 9 s west at a
+    # pack 66 subtiles out and off-screen, the pack fell out of
+    # perception, and the bot retraced the whole leg). Farther monsters
+    # are not ignored — they still hold the clearance open — the RING
+    # WALK is simply trusted to bring the bot to them, which it does by
+    # construction (ring spacing keeps every cell within perception of
+    # some point). Once the ring is complete, distance no longer gates
+    # closing, so termination is unchanged. 40 matches the engage
+    # radius: what combat would fight is what the step will walk at.
+    clearance_close_range: int = 40
     pickup_reach: int = 4  # close enough to click an item and have it land
     pickup_attempts: int = 3  # WALKS toward an item before calling it stuck
     # CLICKS per item before calling it stuck — one per T63 sprite-offset,
@@ -143,7 +155,14 @@ class RunServices:
     # the sim abandoned SEVEN OF EIGHT points while reporting green.
     # A budget that has to be re-derived whenever the ring or the leg
     # length changes is not a budget, it is a coincidence.
-    patrol_attempts: int = 3
+    #
+    # Was 3; 2 since the R262 speed tuning (operator order): run 7 paid
+    # three capped walks (~7 s) proving one blocked ring point
+    # unreachable. One no-progress leg can be a fluke (the T55 torn
+    # read); a second consecutive one is the give-up. Visited means
+    # "dealt with", not "stood on" — the write-off costs nothing but
+    # the ground not walked.
+    patrol_attempts: int = 2
     # -- writing off a monster we cannot get to ---------------------------
     #
     # The same idea as `stuck` for items and as `patrol_attempts` for ring
