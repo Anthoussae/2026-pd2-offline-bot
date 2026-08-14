@@ -88,7 +88,9 @@ armor_skill = "bone_armor"
 
 # Rung 5 — healing potion: below this hp%, drink a healing column, at
 # most once per heal_cooldown_s. The second healing column is the backup.
-heal_below_pct = 100.0
+# 75 is the R241 choice: drink when meaningfully hurt, not to top up
+# after every scratch (was 100.0 until 2026-08-09).
+heal_below_pct = 75.0
 heal_cooldown_s = 10.0
 
 # Rung 6 — mana potion: below this mana%, at most once per
@@ -161,6 +163,14 @@ armor_in_town = true
 engage_radius = 40
 melee_range = 3
 dash_step = 8
+# How far out the CHARGE style (berserk) attacks directly instead of
+# dashing (R259, 2026-08-13): an attack-click walks the character in
+# via the client's own unit-aware pathing — manual move-clicks cannot
+# push through monster collision (run 1 of the T92 battery: 88 blocked
+# dashes, 183 s). 16 stays inside the nearest screen edge (T50: 19-38).
+# Only styles with style = "charge" read this; skirmish strikes at
+# melee_range as always.
+charge_attack_range = 16
 # How far back out of the pack after each strike.
 retreat_subtiles = 12
 # Poison does the killing, so a struck monster is already dying: prefer
@@ -209,8 +219,108 @@ revive_search_radius = 15
 # recasting forever — every one of those ticks is a tick not fighting.
 # The settle delays stop the bot re-casting before the last cast resolved.
 desecrate_rounds = 2
+# Strikes on ONE unit that move neither its health nor our mana before it
+# stops being a target (T72, 2026-08-06). That run put 23 strikes each
+# into two decorative bats over 173 seconds and nothing in the code could
+# notice. Two readings, both required: a poison strike costs mana, so
+# mana that does not move means the strike never connected at all, while
+# mana spent with the target's health static means it landed and has not
+# shown yet. NEITHER is permanent: Hell "immunity" is 100% resistance,
+# not invulnerability, and this character pierces poison resistance while
+# the merc's Pus Spitter casts Lower Resist on striking. Raise this if
+# tough-but-killable monsters are being abandoned; the write-off already
+# expires the instant a target's health moves.
+futile_strikes = 4
 desecrate_settle_s = 1.0
 revive_settle_s = 0.6
+# A budget burned against desecrate's own cooldown refreshes after this
+# long (M6 P3, user: 3 revives up matters — the bot dilly-dallied). In
+# combat only (the quiet-field gate still stops empty-field churn);
+# 0 disables the refresh.
+desecrate_budget_refresh_s = 8.0
+# While the wall is short and a wall cast is actively resolving, strikes
+# and dashes hold (drift only) so the desecrate->revive casts get the
+# cast pipeline to themselves — strike CLICKS colliding with cast
+# animations were what made the wall build slow (M6 P3, user note 1.5).
+revive_urgency_hold = true
+# After the last right-skill cast of a burst, the executor switches back
+# to the armor hotkey once this grace passes with no further cast (M6
+# P3, user note 1): an active Revive right skill makes ground corpses
+# selectable, which interferes with pathing and item pickup.
+park_grace_s = 2.0
+# Posture switches (M6 P3, R212 Q5). These two ARE the cautious posture;
+# the named presets below override them per run step.
+#   linger: drift near poisoned monsters rather than moving on. false =
+#   brisk's "brush past them toward the target".
+linger = true
+#   retreat_group_size 0 = back out after EVERY strike (the cautious
+#   skirmish beat). N>0: retreat only when >=N hostiles stand within
+#   retreat_group_radius — isolated enemies get struck without the
+#   back-out, a closing group still triggers the full retreat.
+retreat_group_size = 0
+retreat_group_radius = 8
 # Which skills the maintenance uses (names from [skills] above).
 desecrate_skill = "desecrate"
 revive_skill = "revive"
+
+# The posture every game STARTS in (R256 QA, operator ruling 2026-08-13):
+# "switch the bot's default combat behavior to Berserk, henceforth. We
+# may shelve the skirmish stance entirely; for the foreseeable future,
+# please set Berserk as the default posture. I'm fairly convinced that
+# it's not just the fastest, but the safest too (best defense is a good
+# offense)." Measured basis: T92 — the skirmish beat's retreat-dash
+# cycle dominated the 8.3x human-vs-bot gap (combat exposure 388 s of
+# 454). The cautious base and the skirmish beat above stay DEFINED —
+# run steps may still name any posture per step — but nothing selects
+# them by default anymore. Remove this line to fall back to cautious.
+default_posture = "berserk"
+
+# Named combat postures (M6 P3, R212 Q5): override tables over the
+# [combat] numbers above. "cautious" is the base itself and cannot be
+# redefined. Run steps select a posture per step (runs/countess.toml:
+# brisk for the descent, aggressive on Cellar 5); a step naming none
+# leaves the module in whatever posture it already holds (cautious at
+# game start). Every number here is a first-guess judgment call —
+# tune in the P5 battery like every M5 number was.
+
+[combat.postures.brisk]
+# Fight only what obstructs passage (the user's Q4): a tight engagement
+# bubble around the moving character IS the route corridor, and with
+# linger off the run keeps walking the moment nothing blocks it.
+engage_radius = 12
+linger = false
+retreat_subtiles = 8
+
+[combat.postures.aggressive]
+# Attack whenever safely feasible, especially isolated enemies; still
+# back off from groups that close in (the user's own definition).
+restrike_s = 0.5
+retreat_group_size = 3
+wait_for_revives_s = 0.5
+
+# -- the route leash (R241) ----------------------------------------------------
+# When a run step has a recorded route line (maps/<seed>/line-<area>.json,
+# recorded by walking it once with drills/t84_record_line.py), the step
+# reports and corrects drift from that line.
+[route]
+# Farther than this from the line counts as strayed (subtiles).
+stray_subtiles = 12.0
+# Non-brisk postures wait until no living hostile is within this radius
+# before walking back to the line; brisk returns immediately.
+return_hostile_radius = 12
+
+# Berserk (R241): the charge style — always attack the nearest visible
+# enemy with the dagger, no dash-out, no waiting for the wall. The
+# reflex ladder still owns survival (potions, escapes), with the armor
+# recast tightened to 60%. Returns to a route line only when nothing
+# hostile is nearby (the traverse leash's default wait).
+[combat.postures.berserk]
+style = "charge"
+armor_recast_below_pct = 60.0
+restrike_s = 0.5
+linger = true
+# P4 tuning iteration 1 tried dash_step = 16 here (run 4's ~13 s
+# no-op dash spans read as clicks landing inside the revive crowd) and
+# run 5 MEASURED it useless: stuck walks 37 -> 41, route 1017 -> 1750.
+# Reverted — the block family spans all leg lengths, which points at
+# the swing-eats-click contention instead (see the battery record).

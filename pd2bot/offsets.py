@@ -16,6 +16,11 @@ Do not put a magic offset anywhere else in this codebase. Values marked
 "verified live" were confirmed against the running client during M1/M2.
 """
 
+import re
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+
 # --- module-relative pointers (add to D2Client.dll's runtime base) ----------
 
 # D2Ptrs.h:235  VARPTR(D2CLIENT, PlayerUnit, UnitAny*, 0x11BBFC, 0x11D050)
@@ -156,6 +161,43 @@ STAT_STAMINA = 10
 STAT_MAX_STAMINA = 11
 STAT_LEVEL = 12
 STAT_EXPERIENCE = 13
+# The COMBAT-RATED markers (T74, 2026-08-06). A unit that carries any of
+# these is a thing that can fight or be fought; a unit carrying none of
+# them is scenery.
+#
+# Measured, not assumed. T74 read the stat lists of a Fallen (kind 21),
+# a Goatman (55), the Rogue merc (271) and the decorative bats the bot
+# had been attacking for 173 s (kind 159, MonStats code "B9"):
+#
+#   Fallen   6, 7, 12, 36, 39, 41, 43, 45, 67, 68, 69, 190, 328
+#   Goatman  6, 7, 12, 36, 39, 67, 68, 69, 328
+#   merc     6, 7, 12, 39, 41, 43, 45, ... (76 stats)
+#   BAT      6, 7, 67, 68, 69           <- hp, max hp, and animation rates
+#
+# The bat carries exactly enough to draw and move a sprite and nothing
+# else: no level, no resistances, no experience.
+#
+# An OR rather than a single stat, and deliberately: the failure we now
+# fear is a PACIFIST bot (T73 caught that fix one step from being
+# written), so this is generous about what counts as a combatant and
+# strict only about what carries none of it. D2 omits zero-valued stats,
+# so a monster with no resistances still answers on its level.
+STAT_DAMAGE_RESIST = 36
+STAT_FIRE_RESIST = 39
+STAT_LIGHT_RESIST = 41
+STAT_COLD_RESIST = 43
+STAT_POISON_RESIST = 45
+COMBAT_RATED_STATS = frozenset(
+    {
+        STAT_LEVEL,
+        STAT_EXPERIENCE,
+        STAT_DAMAGE_RESIST,
+        STAT_FIRE_RESIST,
+        STAT_LIGHT_RESIST,
+        STAT_COLD_RESIST,
+        STAT_POISON_RESIST,
+    }
+)
 STAT_GOLD = 14
 STAT_GOLD_BANK = 15
 # Bone Armor's remaining/maximum absorb (the small square by the HP orb).
@@ -259,7 +301,7 @@ ROOM1_ROOM_NEXT = 0x7C
 # Both end with `WORD* pMapStart; //0x20` and `WORD* pMapEnd; //0x22`, and
 # 0x22 cannot be right for a pointer following a pointer at 0x20. Reading
 # 0x24 as pMapEnd instead was ALSO wrong, and the live client said so
-# (`python -m pd2bot.collision --debug`, 2026-07-28): every room reported
+# (`python -m pd2bot.nav.collision --debug`, 2026-07-28): every room reported
 # pMapStart == Coll + 0x24, i.e. the grid is stored **inline right after a
 # 0x24-byte header**, and the dword at 0x24 is the first two collision
 # cells (observed 0x00010001 = two blocked, 0x00000000 = two open) — not a
@@ -345,13 +387,53 @@ COLL_FLAG_NAMES = {
     COLL_DEAD_BODIES: "dead_bodies",
 }
 
-# --- Room2 (D2Structs.h:333) — static/preset room layer --------------------
+# --- Room2 (D2Structs.h:333-356) — static/preset room layer ----------------
+# Unlike Room1 (runtime, only the player's neighbourhood loaded), Room2
+# spans the WHOLE level once the level is initialized — which is what makes
+# area-wide exit enumeration possible from anywhere in the area (M6 P1).
+# Layout cross-checked 2026-08-03 against d2mapapi_mod's independent
+# lineage (d2structs.h, struct Room2_113): field-for-field agreement.
 
+ROOM2_NEXT = 0x24  # Room2* pRoom2Next — the level-wide chain
 ROOM2_ROOM1 = 0x30
+ROOM2_POS_X = 0x34  # dwPosX, in TILES (x5 for subtiles)
+ROOM2_POS_Y = 0x38  # dwPosY
+ROOM2_SIZE_X = 0x3C  # dwSizeX
+ROOM2_SIZE_Y = 0x40  # dwSizeY
+ROOM2_ROOM_TILES = 0x4C  # RoomTile* — warp connections out of this room
 ROOM2_LEVEL = 0x58  # Level*
+ROOM2_PRESET = 0x5C  # PresetUnit* — preset npcs/objects/warp tiles
 
-# --- Level (D2Structs.h:317) -----------------------------------------------
+# --- RoomTile (D2Structs.h:159-164) — one warp connection -------------------
+# A RoomTile says "this room connects, via warp number *nNum, to pRoom2
+# (a room in the DESTINATION level)". Cross-checked against d2mapapi_mod
+# struct RoomTile113: agreement.
 
+ROOMTILE_ROOM2 = 0x00  # Room2* — destination-side room
+ROOMTILE_NEXT = 0x04  # RoomTile*
+ROOMTILE_NUM_PTR = 0x10  # DWORD* nNum — POINTER to the warp number
+
+# --- PresetUnit (D2Structs.h:307-315) — preset placements in a Room2 -------
+# Positions are RELATIVE to the room: world subtile = room2 tile pos * 5 +
+# preset pos (d2mapapi mapdata.cpp:205-206, the vendored generator's own
+# arithmetic). Cross-checked against d2mapapi_mod struct PresetUnit113.
+
+PRESET_TXT_FILE_NO = 0x04  # dwTxtFileNo
+PRESET_POS_X = 0x08  # dwPosX, subtiles within the room
+PRESET_NEXT = 0x0C  # PresetUnit* pPresetNext
+PRESET_TYPE = 0x14  # dwType
+PRESET_POS_Y = 0x18  # dwPosY
+# dwType values as d2mapapi names them (mapdata.cpp:21-23): 1 npc,
+# 2 object, 5 tile. A TILE preset is a warp — a staircase, a doorway —
+# and matching its dwTxtFileNo against a RoomTile's *nNum is how the
+# generator itself locates level exits (mapdata.cpp:217-232).
+PRESET_TYPE_NPC = 1
+PRESET_TYPE_OBJECT = 2
+PRESET_TYPE_TILE = 5
+
+# --- Level (D2Structs.h:317-331) --------------------------------------------
+
+LEVEL_ROOM2_FIRST = 0x10  # Room2* — the level-wide static room chain
 LEVEL_POS_X = 0x1C
 LEVEL_POS_Y = 0x20
 LEVEL_SIZE_X = 0x24
@@ -366,6 +448,18 @@ MONSTER_FLAG_NORMAL = 1 << 1
 MONSTER_FLAG_CHAMPION = 1 << 2
 MONSTER_FLAG_BOSS = 1 << 3
 MONSTER_FLAG_MINION = 1 << 4
+# Super-unique identity (M6 P1, the Countess). wUniqueNo indexes
+# superuniques.txt. wName turned out to hold GARBAGE on live units (T68)
+# — kept readable as a diagnostic only, never identity.
+MONSTER_UNIQUE_NO = 0x26  # WORD wUniqueNo
+MONSTER_NAME = 0x2C  # wchar_t wName[28]
+MONSTER_NAME_CHARS = 28
+# The Countess herself, live-captured: T68 read kind 734 / unique_no 6
+# in Tower Cellar Level 5 (2026-08-05), and the user confirmed her alive
+# on screen during that visit (R216). unique_no 6 is superuniques.txt's
+# Countess row — two independent facts agreeing, the usual bar.
+COUNTESS_KIND = 734
+COUNTESS_UNIQUE_NO = 6
 
 # --- ItemData (D2Structs.h:510) --------------------------------------------
 
@@ -595,34 +689,18 @@ PLAYER_HOVER_ITEM = 0xE8
 # 1 = labels showing, 0 = hidden (semantics as read at T66's start).
 BH_LABEL_MODULE = "BH.dll"
 BH_LABEL_DISPLAY = 0x14D2CA
+# The label STYLE toggle ("F" — default names vs loot-filter styling),
+# found by T91 (2026-08-13): 116 modules diffed across four F presses,
+# exactly ONE byte alternated, 90 bytes below the display flag above.
+# Semantics calibrated against the operator's stated state at the probe
+# ("default mode is OFF" while the byte read 1): 1 = loot-filter
+# styling, 0 = the game's default names.
+BH_FILTER_STYLE = 0x14D1CC
 
 # Both live-verified by the T38 probe (64 and 72 charges respectively), and
 # 534 corroborated at R112 where the bot identified an item by accident.
 TOME_OF_TOWN_PORTAL = 533
 TOME_OF_IDENTIFY = 534
-
-# Items whose RIGHT-CLICK does something instead of nothing, and which the
-# inventory cleanse must therefore never point its drop gesture at.
-#
-# The cleanse drops with ctrl+right-click. That gesture is only safe while
-# the modifier actually lands — and in stage B run 4 the bot opened a town
-# portal, which is precisely what an unmodified right-click on tome 533
-# does. Potions were already excluded (an unmodified right-click drinks
-# one, the hazard behind R131), and tomes belong in the same category for
-# the same reason: 533 opens a portal, 534 arms the identify cursor, and an
-# armed identify cursor turns every later click into an identify.
-#
-# Exclusion beats detection here. A portal opens in the WORLD, not in a
-# panel, so no UI read would catch it after the fact — and the identify
-# cursor is not a cursor ITEM either. Never aiming at them is the only
-# guardrail that works.
-#
-# Individual TP/ID scrolls belong here too and are not in the vocabulary
-# yet; they get added the moment a drill reads one.
-RIGHT_CLICK_HAZARD_KINDS = frozenset(POTION_KINDS) | {
-    TOME_OF_TOWN_PORTAL,
-    TOME_OF_IDENTIFY,
-}
 
 # Gold's kind. kolbot's sdk said 523, and this carried that value with a
 # note that it was unverified. It was WRONG: the live code table (T42) says
@@ -631,24 +709,133 @@ RIGHT_CLICK_HAZARD_KINDS = frozenset(POTION_KINDS) | {
 # the P6 checklist had been waiting for (R144).
 GOLD_KIND = 538
 
-# The Horadric Cube. Right-clicking it OPENS it, so the shift+right-click
-# that transfers every other item does something else entirely here — T13
-# shift-right-clicked the cube twice, nothing moved, and the full-stash
-# guardrail halted (user diagnosis, R67). Identified live: the single
-# kind-564 item in the character's inventory.
+# --- The item-exception registry: everything whose right-click bites --------
 #
-# Anything that cannot survive a shift+right-click belongs in the set
-# below, and the town layer skips those items rather than trusting a
-# caller's keep-predicate to remember. Quest items are the obvious future
-# members; add them as they are met, with the reason.
+# Some items DO something when right-clicked — a tome arms a cursor or opens
+# a portal, the Cube opens, a scroll is consumed, a map opens its dungeon.
+# The bot handles inventory with two MODIFIED right-clicks: the cleanse
+# DROPS junk (ctrl+right-click) and the stash deposit TRANSFERS keepers
+# (shift+right-click). Either modifier can slip (R112/R113 and T70 run 2:
+# the same Tome of Identify used instead of moved, fifteen days apart, even
+# with the modifier settle in place) — and a slipped modifier fires the
+# bare right-click, whose side effect outlives the click and poisons
+# everything after it. A portal opens in the WORLD and an armed identify
+# cursor is not a cursor ITEM, so no UI read catches it afterwards: never
+# aiming the gesture at these items is the only guardrail that works.
 #
-# The Cube's membership is also POLICY, not just mechanics (user, R172):
-# the Horadric Cube is always protected — by the cleanse, the stash
-# deposit, everything — whatever else changes about item handling. If a
-# future change ever makes the cube movable again, it still must not be
-# droppable or depositable without a fresh user decision.
-CUBE_KIND = 564
-UNMOVABLE_KINDS = frozenset({CUBE_KIND})
+# So this is ONE registry keyed by kind, recording what the right-click
+# does and therefore which gesture is unsafe, and the two sets the rest of
+# the code reads are DERIVED from it (P5 of the pickup-reliability plan).
+# Adding a member is one line here, not a hunt across two frozensets.
+
+CUBE_KIND = 564  # the single kind-564 item; right-click OPENS it (T13/R67)
+TOME_OF_IDENTIFY_KIND = 534  # R112 + T38 (72 charges)
+TOME_OF_TOWN_PORTAL_KIND = 533  # T38 (64 charges)
+# The scrolls the old RIGHT_CLICK_HAZARD comment promised "the moment a
+# drill reads one" — their codes were in the T42 table the whole time. A
+# loose Scroll of Identify is WORSE than the tome: it is junk, so the
+# cleanse actually aims its ctrl+right-click at one, and a slipped modifier
+# arms the identify cursor. (R112 with a cheaper item and no reason to keep.)
+SCROLL_OF_TOWN_PORTAL_KIND = 544  # `tsc` (T42 code table)
+SCROLL_OF_IDENTIFY_KIND = 545  # `isc` (T42 code table)
+
+
+@dataclass(frozen=True)
+class ItemException:
+    """What an item's bare right-click does, and which gestures it forbids."""
+
+    reason: str          # operator-facing, e.g. "right-click opens a portal"
+    no_transfer: bool    # shift+right-click unsafe -> stash deposit skips it
+    no_drop: bool        # ctrl+right-click unsafe -> the cleanse never drops it
+    # Protected by DECISION, not only mechanics (the Cube, R172): even if a
+    # future change made it movable, it must not become droppable/depositable
+    # without a fresh user decision. Kept as data so a refactor cannot lose it.
+    policy: bool = False
+
+
+# Dungeon MAPS (PD2). T77 (2026-08-06) read ten off the floor and the code
+# table shows the whole family shares the `t<dd>` form (30 kinds, 737-788,
+# no non-map collision). Resolved from `config/item_codes.toml` by that
+# pattern rather than hardcoded — R144 (kinds renumber per season; the code
+# does not) — with kind 810 added explicitly because T77 saw it on the floor
+# yet it is absent from the (T42-generated) code table. A map's right-click
+# OPENS its dungeon, so both gestures are unsafe.
+_MAP_CODE_RE = re.compile(r"^t\d\d$")
+MAP_KIND_UNCODED = 810  # observed by T77; predates the current code table
+
+
+def _load_map_kinds() -> frozenset[int]:
+    """Map kinds resolved from the live code table by the `t<dd>` pattern.
+
+    Reads `config/item_codes.toml` directly (stdlib only, no import cycle);
+    any failure yields the empty set, so a missing/renamed table leaves maps
+    UNPROTECTED rather than breaking every import of this module. Regenerate
+    the table with the T42 drill after a season patch.
+    """
+    try:
+        path = Path(__file__).resolve().parent.parent / "config" / "item_codes.toml"
+        with open(path, "rb") as fh:
+            codes = tomllib.load(fh).get("codes", {})
+        return frozenset(
+            int(kind) for kind, code in codes.items() if _MAP_CODE_RE.match(code)
+        )
+    except Exception:  # noqa: BLE001 - never break import over a config read
+        return frozenset()
+
+
+MAP_KINDS: frozenset[int] = _load_map_kinds() | {MAP_KIND_UNCODED}
+
+# The registry. Cube + tomes reproduce today's exact membership (the Cube is
+# no_transfer only — the cleanse's `is_movable` check catches it before the
+# drop path, so leaving no_drop False keeps the derived hazard set identical
+# to what shipped); scrolls and maps are the new members.
+ITEM_EXCEPTIONS: dict[int, ItemException] = {
+    CUBE_KIND: ItemException(
+        "the Horadric Cube — right-click opens it",
+        no_transfer=True, no_drop=False, policy=True,
+    ),
+    TOME_OF_TOWN_PORTAL_KIND: ItemException(
+        "a Tome of Town Portal — right-click opens a portal",
+        no_transfer=True, no_drop=True,
+    ),
+    TOME_OF_IDENTIFY_KIND: ItemException(
+        "a Tome of Identify — right-click arms the identify cursor",
+        no_transfer=True, no_drop=True,
+    ),
+    SCROLL_OF_TOWN_PORTAL_KIND: ItemException(
+        "a Scroll of Town Portal — right-click opens a portal",
+        no_transfer=True, no_drop=True,
+    ),
+    SCROLL_OF_IDENTIFY_KIND: ItemException(
+        "a Scroll of Identify — right-click arms the identify cursor",
+        no_transfer=True, no_drop=True,
+    ),
+    **{
+        kind: ItemException(
+            "a dungeon Map — right-click opens its dungeon",
+            no_transfer=True, no_drop=True,
+        )
+        for kind in MAP_KINDS
+    },
+}
+
+# The two sets the rest of the code reads, DERIVED so no call site changed.
+# `UNMOVABLE_KINDS`: never shift+right-clicked (the stash deposit skips them,
+# and `items.CarriedItem.is_movable` reads this). `RIGHT_CLICK_HAZARD_KINDS`:
+# never ctrl+right-clicked — POTION_KINDS (a bare right-click drinks one,
+# R131) plus every no_drop exception.
+UNMOVABLE_KINDS = frozenset(
+    kind for kind, exc in ITEM_EXCEPTIONS.items() if exc.no_transfer
+)
+RIGHT_CLICK_HAZARD_KINDS = frozenset(POTION_KINDS) | frozenset(
+    kind for kind, exc in ITEM_EXCEPTIONS.items() if exc.no_drop
+)
+
+
+def unmovable_reason(kind: int) -> str:
+    """Why this kind is never transferred, for operator-facing reports."""
+    exc = ITEM_EXCEPTIONS.get(kind)
+    return exc.reason if exc is not None else f"kind {kind}"
 
 # --- Town NPCs and objects (Act 1, M5) --------------------------------------
 #
@@ -722,9 +909,34 @@ OBJECT_KINDS = {
 # the same trust-nothing pattern as the difficulty guard.
 AREA_ROGUE_ENCAMPMENT = 1
 AREA_COLD_PLAINS = 3
+# The Countess route (M6). Ids match the T52 survey's atlas file names
+# (maps/<seed>/area-006 … area-025) — strong prior evidence, but still
+# expectations until the P2 traversal drill reads each one live (R212 Q1).
+AREA_BLACK_MARSH = 6  # live-verified: T69 read it on arrival (2026-08-05)
+AREA_FORGOTTEN_TOWER = 20
+AREA_TOWER_CELLAR_1 = 21
+AREA_TOWER_CELLAR_2 = 22
+AREA_TOWER_CELLAR_3 = 23
+AREA_TOWER_CELLAR_4 = 24
+AREA_TOWER_CELLAR_5 = 25
+# The two cross-act calibration destinations (R212 Q2). Halls of Pain
+# was READ on arrival in T69 — and note it contradicts classic-D2 area
+# tables (which put it near 117), so the live read is the only number
+# trusted. Arcane Sanctuary is still classic-lore 74, an EXPECTATION:
+# the first bot trip proves or refutes it by arrival (a wrong id fails
+# the travel loudly, which is the trust-nothing behavior we want).
+AREA_ARCANE_SANCTUARY = 74  # expectation (classic lore); unverified live
+AREA_HALLS_OF_PAIN = 123  # live-verified: T69 read it on arrival
 AREA_NAMES = {
     AREA_ROGUE_ENCAMPMENT: "Rogue Encampment",
     AREA_COLD_PLAINS: "Cold Plains",
+    AREA_BLACK_MARSH: "Black Marsh",
+    AREA_FORGOTTEN_TOWER: "Forgotten Tower",
+    AREA_TOWER_CELLAR_1: "Tower Cellar Level 1",
+    AREA_TOWER_CELLAR_2: "Tower Cellar Level 2",
+    AREA_TOWER_CELLAR_3: "Tower Cellar Level 3",
+    AREA_TOWER_CELLAR_4: "Tower Cellar Level 4",
+    AREA_TOWER_CELLAR_5: "Tower Cellar Level 5",
 }
 
 # --- UI state (BH Constants.h:65-89) ---------------------------------------

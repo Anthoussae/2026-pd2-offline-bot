@@ -1,32 +1,44 @@
-"""The poison dagger necromancer: the user's own skirmish pattern, encoded.
+"""The poison dagger necromancer's combat module: two styles, one ladder.
 
-R47.2, in the user's description: *on contact, wait briefly for the revives
-to engage, dash in, left-click the monster, run back out of danger, recast
-bone armor if low, repeat until the pack is dead.* That is what this module
-implements — encoded, not invented. Where a number was not given (how far
-"in" a dash is, how long "briefly" lasts) it is a commented config default
-in `config/necro.toml`, never a literal in here.
+**The standing default is BERSERK** (the charge style; R256 QA, operator
+ruling 2026-08-13): attack the nearest strikeable hostile — at range via
+a walk-in click the client paths itself (R259) — no dash-out, no waiting
+for the wall. The T92 human-vs-bot battery measured why: the operator
+cleared the same field 8× faster with the same character, and the
+skirmish beat's retreat-dash cycle was the dominant cost. The reflex
+ladder (potions, armor, escapes) owns survival above either style, and
+that is the safety argument in the operator's words: "not just the
+fastest, but the safest too — best defense is a good offense."
 
-Three things about this class shape the code:
+**The skirmish style stays implemented and selectable** (per-step
+posture, or an un-set `default_posture`). It is R47.2 in the user's own
+description: *on contact, wait briefly for the revives to engage, dash
+in, left-click the monster, run back out of danger, recast bone armor if
+low, repeat until the pack is dead* — encoded, not invented. Where a
+number was not given it is a commented config default in
+`config/necro.toml`, never a literal in here.
+
+Three things about this class still shape both styles:
 
 **Offense never switches skills.** The left skill is permanently Poison
-Strike (R47.1), so an attack is a plain left-click on the monster — with
-SHIFT, so it strikes rather than walking into the pack. The right-hand
-skills are utility only, and every one of them goes through a verified
-switch in the executor.
+Strike (R47.1), so an attack is a plain left-click on the monster. For
+skirmish that click holds SHIFT (strike in place, never wander into the
+pack); charge DROPS SHIFT beyond melee range on purpose — the walk-in
+is the point (`actions.AttackUnit.walk_in`). The right-hand skills are
+utility only, and every one goes through a verified switch in the
+executor.
 
 **Poison does the killing, not the dagger.** So re-stabbing one monster
-until it drops is wasted time: a struck monster is already dying. Target
-selection therefore prefers monsters that have not been struck, and only
-re-strikes one after `restrike_s` if it somehow survived the poison.
+until it drops is wasted time: a struck monster is already dying.
+Skirmish prefers never-struck targets; charge takes the nearest off
+cooldown; both hold `restrike_s` on a poisoned survivor.
 
 **Standing still is what kills this character** (R47.9, user danger
-assessment: groups stun-lock). Hence the retreat after every strike, and
-hence the dash being taken in SHORT HOPS rather than one long walk: a
-blocking `walk_to` into a pack is time the reflex ladder is not being
-consulted, and the ladder is the thing keeping the character alive. Each
-hop is at most `dash_step` subtiles, so the engine gets a tick — and the
-ladder a look — between them.
+assessment: groups stun-lock). Skirmish answers with the post-strike
+retreat and short dash hops; charge answers with perpetual forward
+motion and the ladder's precedence — each manual hop is still at most
+`dash_step` subtiles, so the engine gets a tick, and the ladder a look,
+between them.
 
 The module decides only; it returns declarative actions and never sends.
 """
@@ -40,14 +52,24 @@ from dataclasses import dataclass, field
 from pd2bot import offsets
 from pd2bot.behavior.actions import Action, AttackUnit, CastAtPoint, MoveTo
 from pd2bot.behavior.reflex import retreat_point
-from pd2bot.snapshot import GameSnapshot
-from pd2bot.units import Monster
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.perception.units import Monster
 
 
 @dataclass(frozen=True)
 class CombatConfig:
     """Every combat number. Defaults mirror config/necro.toml's [combat]."""
 
+    # The fight STYLE (R241, ADR 2026-08-09-posture-fight-styles): a
+    # bounded enum this module implements. "skirmish" is the classic
+    # dash-in/strike/dash-out beat; "charge" (berserk's engine) attacks
+    # the nearest strikeable hostile with no dash-out and no waiting for
+    # the wall. The reflex ladder sits ABOVE either style, unchanged.
+    style: str = "skirmish"
+    # Posture-only armor override: when set, the ladder's bone-armor
+    # rung recasts below THIS percent instead of [reflex]'s number
+    # (berserk wants 60). None = defer to the reflex config.
+    armor_recast_below_pct: float | None = None
     # Engagement.
     engage_radius: int = 40  # hostiles this close mean "we are in a fight"
     melee_range: int = 3  # close enough to strike
@@ -69,6 +91,16 @@ class CombatConfig:
     # How far a small idle step moves. Deliberately much shorter than
     # `retreat_subtiles`: this is drift, not a withdrawal.
     reposition_subtiles: int = 4
+    # How far out the CHARGE style attacks directly instead of dashing
+    # (R259, operator-approved mid-battery). The T92 battery's run 1
+    # measured the alternative: 88 manual dash-clicks burned their full
+    # 2 s walk budget ≥6 subtiles short — 183 s of one run — because
+    # move-clicks cannot path through monster collision, while an
+    # attack-click walks the character in around bodies via the
+    # client's own pathing (what a human does). 16 stays inside the
+    # nearest screen edge (T50: 19-38 subtiles), so the target sprite
+    # is always clickable. Skirmish keeps melee_range strikes only.
+    charge_attack_range: int = 16
     # How far a ground-targeted cast stays away from a clickable OBJECT.
     # Larger than the 2 used for units because an object's sprite is
     # larger than a monster's, and because the cost is asymmetric: a cast
@@ -79,6 +111,45 @@ class CombatConfig:
     wait_for_revives_s: float = 0.8  # let them get in front before dashing
     revive_engaged_range: int = 8  # a revive this close to a hostile is engaged
     revive_target: int = 3
+    # -- posture switches (M6 P3, R212 Q5) --------------------------------
+    # These four are what the named postures (cautious/brisk/aggressive)
+    # override; the defaults ARE cautious, so an empty posture table
+    # changes nothing and every pre-M6 run behaves exactly as it did.
+    #
+    # linger=False (brisk): when everything nearby is freshly poisoned,
+    # return None instead of drifting — the run step keeps moving, which
+    # is what "brush past them toward the target" means mechanically.
+    linger: bool = True
+    # retreat_group_size=0: back out after EVERY strike (the cautious
+    # skirmish beat). N>0 (aggressive): the post-strike retreat fires
+    # only when >=N hostiles stand within retreat_group_radius — an
+    # isolated enemy gets struck without the back-out ("attacks more,
+    # backs off less"), while a closing group still triggers the full
+    # retreat (the user's own definition of aggressive, R212 Q5).
+    retreat_group_size: int = 0
+    retreat_group_radius: int = 8
+    # -- revive urgency (M6 P3, user note 1.5) ----------------------------
+    # While hostiles are present, the wall is short, and the wall CAN
+    # still grow, offense holds (drift only, no strikes/dashes) so the
+    # desecrate->revive casts get the cast pipeline to themselves — the
+    # T55 armor lesson one rung down: strike CLICKS colliding with cast
+    # animations (CastInFlight) are what made the wall build look like
+    # dilly-dallying. Bounded by _building_wall exactly like the
+    # approach gate, so it can never hold offense forever.
+    revive_urgency_hold: bool = True
+    # A desecrate budget burned against the skill's own cooldown used to
+    # stay burned until the wall grew (R185 B). This refreshes it on
+    # TIME instead — in-combat only (the quiet-field gate still stops
+    # empty-field churn), and 0 disables the refresh entirely.
+    desecrate_budget_refresh_s: float = 8.0
+    # -- right-skill parking (M6 P3, user note 1; consumed by the
+    # executor, carried here so the user tunes it with the rest) --------
+    # After any right-skill cast resolves with no follow-up cast inside
+    # this grace, the executor switches back to the armor hotkey: an
+    # active Revive right-skill makes ground corpses selectable, which
+    # interferes with pathing and pickup. The grace is what lets a
+    # 3-revive burst finish without thrashing the switch.
+    park_grace_s: float = 2.0
     # How many revives must be up before OFFENSE may advance — a different
     # question from `revive_target`, which is how many upkeep maintains,
     # and conflating the two is why the bot stood back so much (R163).
@@ -89,6 +160,13 @@ class CombatConfig:
     approach_with_revives: int = 1
     revive_search_radius: int = 15  # corpses this close are revive fuel
     desecrate_rounds: int = 2  # bounded: stop if it makes no corpses
+    # Strikes on ONE unit that move neither its health nor our mana before
+    # it stops being a target (T72: 23 strikes each on two decorative bats
+    # over 173 s, with nothing in the code able to notice). Small on
+    # purpose — poison kills over seconds, so a genuine fight moves the
+    # target's health well inside four strikes, and the write-off expires
+    # the moment that health does move.
+    futile_strikes: int = 4
     desecrate_settle_s: float = 1.0  # wait for corpses before casting again
     revive_settle_s: float = 0.6  # do not re-target the same corpse instantly
     # Skill ids, filled from the class config (defaults are the live ids).
@@ -112,8 +190,64 @@ class NecroCombat:
     config: CombatConfig = field(default_factory=CombatConfig)
     is_walkable: Callable[[tuple[int, int]], bool] = lambda p: True
     clock: Callable[[], float] = time.monotonic
+    # The named posture presets (M6 P3): full CombatConfigs built by the
+    # class-config loader. Empty = no postures in this environment and
+    # set_posture refuses everything but leaving things alone.
+    postures: dict[str, CombatConfig] = field(default_factory=dict)
+    posture: str = "cautious"
+    # The posture the module STARTS in (R256 QA, 2026-08-13): the
+    # operator ruled berserk the standing default ("not just the
+    # fastest, but the safest too — best defense is a good offense"),
+    # and the class config carries that ruling here. None = start in
+    # the base config exactly as before, which is what every sim and
+    # drill that builds a bare NecroCombat gets. Run steps that name a
+    # posture still override per step (`ClearRadiusStep.posture`), same
+    # as always — this only changes where the module BEGINS.
+    default_posture: str | None = None
     # Bookkeeping.
     _last_strike: dict[int, float] = field(default_factory=dict)
+    # -- the futile-strike write-off (T72/T74, 2026-08-06) -----------------
+    #
+    # Per unit id: how many strikes have landed on it with NOTHING to show
+    # for them, and what the world looked like at the last one. "Nothing to
+    # show" is two independent readings that must BOTH hold:
+    #
+    #   - the target's health has not moved, and
+    #   - OUR MANA has not moved either (the operator's insight: a poison
+    #     strike costs mana, so mana that does not move means the attack
+    #     never actually happened).
+    #
+    # The pair is what makes the signature readable, and the two halves
+    # mean genuinely different things — which is why they are recorded
+    # separately rather than collapsed into one counter:
+    #
+    #   mana spent + health static = "no-damage". The strike landed and
+    #       achieved nothing VISIBLE YET. Usually transient: poison is
+    #       damage over time and the monster's health is stored on a
+    #       coarse 0-128 scale, the swing may simply have missed, or a
+    #       resistance has not yet been pierced.
+    #   mana NOT spent             = "no-contact". The strike never
+    #       happened at all — a phantom, a unit behind a wall, a click
+    #       that went nowhere.
+    #
+    # NEITHER is a durable property, and the earlier version of this
+    # comment was wrong to imply the first one was (operator correction,
+    # 2026-08-06). Hell "immunity" is 100% resistance, not invulnerability:
+    # characters and mercs deal MIXED damage, Poison Dagger carries poison
+    # resistance pierce, and the operator's merc runs Pus Spitter, whose
+    # Lower Resist on striking breaks immunities outright. A monster that
+    # looks unkillable for four strikes may be dying on the fifth — which
+    # is exactly why the write-off expires the moment its health moves,
+    # and why nothing here is remembered across runs.
+    #
+    # T72 spent 173 s and 46 strikes on two decorative bats without this.
+    # The critter filter (T74) now removes that particular family before
+    # combat ever sees it; this exists for the family nobody has met yet.
+    _futile: dict[int, int] = field(default_factory=dict)
+    _futile_seen: dict[int, tuple[int, int, tuple[int, int]]] = field(
+        default_factory=dict
+    )
+    _written_off: dict[int, tuple[int, int]] = field(default_factory=dict)
     _engagement_start: float | None = None
     _retreat_after_strike: bool = False
     _desecrate_rounds: int = 0
@@ -123,6 +257,36 @@ class NecroCombat:
     # How many revives stood at the last upkeep look. The desecrate budget
     # refills only when this GROWS (R185 B) — see `upkeep`.
     _revive_count_seen: int = 0
+    # When upkeep last returned a wall cast (desecrate or revive) — the
+    # revive-urgency hold's correlation input (M6 P3).
+    _last_wall_cast: float | None = None
+
+    # -- postures (M6 P3) -------------------------------------------------------
+
+    def __post_init__(self) -> None:
+        # Applied through `set_posture` so an unknown name is exactly as
+        # loud here as it would be from a run step — though the class
+        # config loader already refuses one before a module ever exists.
+        if self.default_posture is not None:
+            self.set_posture(self.default_posture)
+
+    def set_posture(self, name: str) -> None:
+        """Swap the active config for a named preset, mid-run safe.
+
+        Only `config` changes; every piece of bookkeeping (`_last_strike`,
+        the desecrate budget, the engagement timer) survives — a posture
+        is a change of manner, not a new fight. Unknown names are loud:
+        the run file was validated against the loaded posture names at
+        build time, so reaching here with a bad one is a wiring bug.
+        """
+        preset = self.postures.get(name)
+        if preset is None:
+            raise KeyError(
+                f"unknown posture {name!r} (loaded: "
+                f"{', '.join(sorted(self.postures)) or 'none'})"
+            )
+        self.config = preset
+        self.posture = name
 
     # -- engagement ------------------------------------------------------------
 
@@ -134,7 +298,93 @@ class NecroCombat:
             m
             for m in snap.live_monsters
             if _chebyshev(m.position, origin) <= self.config.engage_radius
+            and self._worth_striking(m)
+            # The seam gate (R260): a hostile standing in ANOTHER area is
+            # not engaged — battery run 3's walk-in attack chased a
+            # border pack into Blood Moor and spent 202 s there, because
+            # the client's attack-pathing crosses a seam as happily as
+            # any walk. The ring points have refused the seam since
+            # R189 c; the fights needed the same rule. A cross-border
+            # monster becomes engageable the moment it crosses to us; an
+            # unreadable area (mid-load) filters nothing — honest
+            # fallback, engaging is the safe default.
+            and (snap.area is None or snap.area.contains(m.position))
         ]
+
+    # -- the futile-strike write-off -------------------------------------------
+
+    def _worth_striking(self, monster: Monster) -> bool:
+        """False once strikes on this unit have provably achieved nothing.
+
+        The write-off EXPIRES when the monster's health finally moves —
+        the same shape as `ClearRadiusStep._reachable`, whose write-off
+        expires when the monster moves. A retry that cannot differ from
+        the attempt it retries is not a retry; a target whose health has
+        started falling is a genuinely different situation.
+        """
+        recorded = self._written_off.get(monster.unit_id)
+        if recorded is None:
+            return True
+        hp_then, _ = recorded
+        if monster.hp < hp_then:
+            # Something is hurting it after all (a revive, the merc, a
+            # lingering poison stack). It is back on the table.
+            del self._written_off[monster.unit_id]
+            self._futile.pop(monster.unit_id, None)
+            self._futile_seen.pop(monster.unit_id, None)
+            return True
+        return False
+
+    def _book_strike_outcome(
+        self, snap: GameSnapshot, target: Monster, now: float
+    ) -> None:
+        """Judge the PREVIOUS strike on `target` before issuing another.
+
+        Called just before a strike is committed, because that is the
+        moment both readings are available and comparable: what the
+        target's health was when we last hit it, and what our mana was.
+        """
+        player = snap.player
+        if player is None:
+            return
+        previous = self._futile_seen.get(target.unit_id)
+        self._futile_seen[target.unit_id] = (
+            target.hp, player.mana, target.position
+        )
+        if previous is None:
+            return
+        hp_then, mana_then, _ = previous
+        health_moved = target.hp < hp_then
+        mana_moved = player.mana < mana_then
+        if health_moved:
+            # The fight is working. Any accumulated futility is stale.
+            self._futile.pop(target.unit_id, None)
+            return
+        strikes = self._futile.get(target.unit_id, 0) + 1
+        self._futile[target.unit_id] = strikes
+        if strikes < self.config.futile_strikes:
+            return
+        self._written_off[target.unit_id] = (target.hp, target.kind)
+        # Both signatures are reported, and both are TRANSIENT claims
+        # about this moment rather than facts about the monster: see the
+        # field comments. The log carries them so a pattern across runs
+        # can be noticed by a human, never so the bot can teach itself
+        # that something is unkillable.
+        # `monster_kind`, never `kind`: the run log's envelope owns the
+        # "kind" key, and a field by that name used to clobber the event
+        # kind on write (the 2026-08-10 order-event lesson).
+        self.note_write_off(
+            unit_id=target.unit_id,
+            monster_kind=target.kind,
+            strikes=strikes,
+            signature="no-damage" if mana_moved else "no-contact",
+            hp=target.hp,
+        )
+
+    def note_write_off(self, **fields) -> None:
+        """Report a write-off. Overridden/patched by the wiring to reach
+        the run log; a no-op by default so the module stays loggerless."""
+        return None
 
     def _revives_engaged(self, snap: GameSnapshot, hostiles: list[Monster]) -> bool:
         """Have the revives actually gone in? The wait is for them to tank,
@@ -169,6 +419,18 @@ class NecroCombat:
         # on that ground — the deadlock this method's own docstring exists
         # to prevent, reached by a different road.
         return self._open_ground(snap, origin) is not None
+
+    def _wall_pipeline_s(self) -> float:
+        """How long after a wall cast the urgency hold keeps offense out.
+
+        Derived, not a knob: the longest settle plus roughly one cast
+        animation (T48 measured 610-640 ms), so tuning the settles moves
+        the hold with them and there is no second number to forget.
+        """
+        return (
+            max(self.config.desecrate_settle_s, self.config.revive_settle_s)
+            + 1.0
+        )
 
     def _reposition(
         self, origin: tuple[int, int], hostiles: list[Monster]
@@ -285,7 +547,14 @@ class NecroCombat:
             candidates.append((not adjacent, struck_at is not None, distance, hostile))
         if not candidates:
             return None
-        candidates.sort(key=lambda c: (c[0], c[1], c[2], c[3].unit_id))
+        if self.config.style == "charge":
+            # Charge: the nearest strikeable hostile, full stop (R241's
+            # berserk definition). Restrike pacing and write-offs still
+            # apply — clicking one poisoned target forever is not rage,
+            # it is a livelock.
+            candidates.sort(key=lambda c: (c[2], c[3].unit_id))
+        else:
+            candidates.sort(key=lambda c: (c[0], c[1], c[2], c[3].unit_id))
         return candidates[0][3]
 
     def _dash_target(
@@ -318,9 +587,13 @@ class NecroCombat:
         if self._engagement_start is None:
             self._engagement_start = now
 
+        charge = self.config.style == "charge"
+
         # Phase 2 — let the tanks get in front. Ends early once they have.
+        # Charge (berserk) does not wait for tanks — that is its point.
         if (
-            snap.revives
+            not charge
+            and snap.revives
             and not self._revives_engaged(snap, hostiles)
             and now - self._engagement_start < self.config.wait_for_revives_s
         ):
@@ -341,8 +614,30 @@ class NecroCombat:
                 return MoveTo(spot)
             # Nowhere to back off to: keep fighting rather than stand still.
 
+        # The revive-urgency hold (M6 P3, user note 1.5): while the wall is
+        # short AND a wall cast is actively in the pipeline, strikes and
+        # dashes wait — a strike is a CLICK, and clicks landing inside
+        # cast animations (CastInFlight) are what made the wall build
+        # look like dilly-dallying (the T55 armor lesson, one rung down).
+        # Keyed to a RECENT wall cast rather than to wall-shortness alone,
+        # so this never re-creates the pre-R163 full-wall passivity: no
+        # cast in flight (budget spent, corpses missing) = offense free.
+        if (
+            self.config.revive_urgency_hold
+            and len(snap.revives) < self.config.revive_target
+            and self._last_wall_cast is not None
+            and now - self._last_wall_cast < self._wall_pipeline_s()
+            and self._building_wall(snap, origin)
+        ):
+            return self._reposition(origin, hostiles)
+
         target = self._select_target(origin, hostiles, now)
         if target is None:
+            if not self.config.linger:
+                # Brisk (M6 P3): everything nearby is poisoned and nothing
+                # blocks the way — nothing to say, so the RUN keeps moving
+                # instead of the module drifting in place.
+                return None
             # Everything nearby is freshly poisoned. The original design
             # stood still here and let the poison work; the user watched it
             # and judged the stillness itself the bigger risk — "better to
@@ -351,7 +646,15 @@ class NecroCombat:
             return self._reposition(origin, hostiles)
 
         distance = _chebyshev(target.position, origin)
-        if distance > self.config.melee_range:
+        # Charge strikes AT RANGE (R259): the attack-click walks the
+        # character in through the client's own unit-aware pathing, so
+        # the dash below — a manual move-click that monster collision
+        # simply stops (run 1's 88 blocked walks) — is reserved for
+        # targets beyond clickable range.
+        strike_range = (
+            self.config.charge_attack_range if charge else self.config.melee_range
+        )
+        if distance > strike_range:
             # Do not walk into a pack without the wall up (user protocol):
             # three revives BEFORE approaching, and desecrate makes its own
             # corpses so there is never a reason to go in short-handed. The
@@ -363,10 +666,10 @@ class NecroCombat:
             # after `desecrate_rounds` fruitless casts, and a gate that did
             # not know that would hold offense back forever on ground where
             # no corpse can be raised.
-            if len(
-                snap.revives
-            ) < self.config.approach_with_revives and self._building_wall(
-                snap, origin
+            if (
+                not charge
+                and len(snap.revives) < self.config.approach_with_revives
+                and self._building_wall(snap, origin)
             ):
                 return self._reposition(origin, hostiles)
             # `toward` names the monster this dash is for, so a caller that
@@ -377,9 +680,36 @@ class NecroCombat:
                 self._dash_target(origin, target.position), toward=target.unit_id
             )
 
+        # Judge the LAST strike on this target before spending another
+        # (the futile-strike write-off). Deliberately here rather than at
+        # target selection: this is the one place both readings — the
+        # target's health and our mana — are current and comparable.
+        self._book_strike_outcome(snap, target, now)
+        if not self._worth_striking(target):
+            return None  # written off just now; re-decide next tick
         self._last_strike[target.unit_id] = now  # phase 4
-        self._retreat_after_strike = True
-        return AttackUnit(target.unit_id, target.position)
+        # Aggressive (M6 P3): the post-strike retreat is group-conditioned.
+        # 0 keeps the cautious beat — back out after every strike.
+        group = self.config.retreat_group_size
+        # Charge never takes the dash-out: the strike ends where it lands
+        # (the reflex ladder, not the beat, owns berserk's survival).
+        self._retreat_after_strike = not charge and (group == 0 or (
+            sum(
+                1
+                for h in hostiles
+                if _chebyshev(h.position, origin)
+                <= self.config.retreat_group_radius
+            )
+            >= group
+        ))
+        # Walk-in only when there is ground to cover: inside melee range
+        # the in-place strike is the proven mechanism, and dropping SHIFT
+        # there would buy nothing.
+        return AttackUnit(
+            target.unit_id,
+            target.position,
+            walk_in=charge and distance > self.config.melee_range,
+        )
 
     # -- desecrate -> revive maintenance (R47.4) --------------------------------
 
@@ -484,6 +814,7 @@ class NecroCombat:
             )
             self._last_revive = now
             self._last_revive_target = corpse.unit_id
+            self._last_wall_cast = now  # feeds the urgency hold (M6 P3)
             # Deliberately NO budget reset here (R185 B): corpses existing
             # is what desecrate manufactures, and refilling the budget on
             # its own product is how run 4 churned for 10 minutes.
@@ -498,10 +829,28 @@ class NecroCombat:
         ):
             return None  # corpses arrive a beat after the cast
         if self._desecrate_rounds >= self.config.desecrate_rounds:
-            return None
+            # The time-based refresh (M6 P3, user note 1.5): a budget
+            # burned against the skill's own cooldown used to stay burned
+            # until the wall grew — which it could not, with no corpses to
+            # raise. R185 B's only-on-growth rule stands for the churn it
+            # was written against (this branch is reached with hostiles
+            # PRESENT — the quiet-field gate already returned above), and
+            # the refresh is paced at desecrate_budget_refresh_s, so the
+            # worst case is desecrate_rounds casts per refresh window, in
+            # combat, not run 4's 10-minute empty-field churn.
+            if (
+                self.config.desecrate_budget_refresh_s > 0
+                and self._last_desecrate is not None
+                and now - self._last_desecrate
+                >= self.config.desecrate_budget_refresh_s
+            ):
+                self._desecrate_rounds = 0
+            else:
+                return None
         spot = self._open_ground(snap, origin)
         if spot is None:
             return None
         self._desecrate_rounds += 1
         self._last_desecrate = now
+        self._last_wall_cast = now  # feeds the urgency hold (M6 P3)
         return CastAtPoint(self.config.desecrate_skill_id, spot)

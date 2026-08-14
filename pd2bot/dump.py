@@ -16,9 +16,9 @@ import argparse
 import sys
 import time
 
-from pd2bot.memory import GameNotRunning, GameSession, NeedsAdministrator
-from pd2bot.snapshot import GameSnapshot, Perception
-from pd2bot.uistate import UIArrayNotFound
+from pd2bot.perception.memory import GameNotRunning, GameSession, NeedsAdministrator
+from pd2bot.perception.snapshot import GameSnapshot, Perception
+from pd2bot.perception.uistate import UIArrayNotFound
 
 
 def format_snapshot(snap: GameSnapshot, verbose: bool = False) -> str:
@@ -137,7 +137,7 @@ def dump_item_units(session) -> str:
     raw fields decide rather than another assumption.
     """
     from pd2bot import offsets
-    from pd2bot.units import iter_units, iter_units_of_type, nearby_rooms
+    from pd2bot.perception.units import iter_units, iter_units_of_type, nearby_rooms
 
     lines = []
 
@@ -217,7 +217,7 @@ def dump_carried_items(session) -> str:
     the ItemData location byte has lied before (instruction log R17).
     """
     from pd2bot import offsets
-    from pd2bot.items import read_carried_items
+    from pd2bot.perception.items import read_carried_items
 
     carried = read_carried_items(session)
     lines = [f"{len(carried.items)} carried items ({carried.skipped} skipped)"]
@@ -262,7 +262,7 @@ def dump_monster_units(session) -> str:
     misclassification is diagnosable rather than guessable.
     """
     from pd2bot import offsets
-    from pd2bot.units import (
+    from pd2bot.perception.units import (
         PERCEPTION_RADIUS,
         iter_units_of_type,
         player_unit,
@@ -316,6 +316,64 @@ def dump_monster_units(session) -> str:
     return "\n".join(lines)
 
 
+def dump_level_exits(session: GameSession) -> str:
+    """The current area's warp exits + any boss-flagged monsters in range.
+
+    The M6 P1 probe (and the standing re-verification tool): run it, look
+    at the map, and confirm the staircases are where it says. The boss
+    table is the Countess-id capture surface — the P2 descent drill reads
+    its (unique_no, name) pairs off this same code path.
+    """
+    from pd2bot import offsets
+    from pd2bot.perception.exits import read_level_exits
+    from pd2bot.perception.player import read_player
+    from pd2bot.perception.units import _read_monster, iter_units_of_type
+
+    scan = read_level_exits(session)
+    if scan is None:
+        return "not in a game (or mid-load): no level to read exits from"
+    player = read_player(session)
+    origin = player.position if player is not None else None
+
+    lines = [
+        f"area {scan.area} ({offsets.AREA_NAMES.get(scan.area, 'unnamed')}), "
+        f"{scan.rooms_walked} static room(s) walked, {scan.skipped} skipped"
+    ]
+    if not scan.exits:
+        lines.append("  no warp exits found (edge-seam areas connect without warps)")
+    for one in scan.exits:
+        distance = (
+            max(abs(one.position[0] - origin[0]), abs(one.position[1] - origin[1]))
+            if origin
+            else -1
+        )
+        lines.append(
+            f"  -> {one.dest_name:<24} (area {one.dest_area:>3}) at "
+            f"{str(one.position):<16} distance {distance}"
+        )
+
+    boss_lines = []
+    for unit in iter_units_of_type(session, offsets.UNIT_TYPE_MONSTER):
+        try:
+            monster = _read_monster(session, unit)
+        except Exception:  # noqa: BLE001 - diagnostic: skip what tears
+            continue
+        if monster is None or not monster.is_boss:
+            continue
+        boss_lines.append(
+            # ascii(): a torn or garbage wName must not crash the probe on
+            # a console codepage that cannot print it (cp1252 did, live).
+            f"  kind {monster.kind:<5} unique_no {monster.unique_no!s:<6} "
+            f"name {ascii(monster.name):<30} at {monster.position}"
+            f"{'  SUPER-UNIQUE' if monster.is_super_unique else ''}"
+        )
+    lines.append(
+        f"\nboss-flagged monsters in the hash table: {len(boss_lines)}"
+    )
+    lines.extend(boss_lines)
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--watch", action="store_true", help="keep printing at ~5 Hz")
@@ -334,6 +392,11 @@ def main(argv: list[str] | None = None) -> int:
         "--carried",
         action="store_true",
         help="dump every carried item with raw location bytes (diagnostic)",
+    )
+    parser.add_argument(
+        "--exits",
+        action="store_true",
+        help="dump the current area's warp exits and boss-flagged monsters (M6)",
     )
     args = parser.parse_args(argv)
 
@@ -356,6 +419,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.carried and not args.watch:
         print(dump_carried_items(session))
+        return 0
+
+    if args.exits:
+        print(dump_level_exits(session))
         return 0
 
     if not args.watch:

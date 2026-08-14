@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "run": "countess",
+  "started_at": "2026-08-07T03:21:58.152",
+  "run_file": "C:\\dev\\2026-pd2-bot\\2026-pd2-offline-bot\\runs\\countess.toml",
+  "class_config": "C:\\dev\\2026-pd2-bot\\2026-pd2-offline-bot\\config\\necro.toml",
+  "chicken_life_pct": 35.0,
+  "tick_interval_s": 0.2,
+  "idle_bail_s": 10.0,
+  "wait_bail_s": 30.0,
+  "map_seed": 1314025823,
+  "character": "MaqiuDoubing",
+  "level": 92
+}

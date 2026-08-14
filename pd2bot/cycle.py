@@ -50,11 +50,12 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from pd2bot import offsets, oog, uistate, world
-from pd2bot.input import InputRefused
-from pd2bot.memory import GameSession
-from pd2bot.menuinput import MenuInput
-from pd2bot.navigate import NavigationError
+from pd2bot import offsets
+from pd2bot.input.gated import InputRefused
+from pd2bot.input.menu import MenuInput
+from pd2bot.nav.navigate import NavigationError
+from pd2bot.perception import oog, uistate, world
+from pd2bot.perception.memory import GameSession
 from pd2bot.safety import ChickenExit, DeathHalt
 
 
@@ -442,8 +443,8 @@ class GameCycle:
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    from pd2bot.memory import GameNotRunning, NeedsAdministrator
-    from pd2bot.player import read_player
+    from pd2bot.perception.memory import GameNotRunning, NeedsAdministrator
+    from pd2bot.perception.player import read_player
     from pd2bot.safety import SafetyConfig, SafetyMonitor
 
     parser = argparse.ArgumentParser(

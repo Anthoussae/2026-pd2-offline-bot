@@ -1,0 +1,20 @@
+# T87: the waypoint-trip battery (operator request, 2026-08-13, pre-R246).
+#
+# One trip = create a game, walk from the Rogue Encampment spawn to the
+# waypoint, travel to Black Marsh, verify arrival by area id, done — the
+# cycle then leaves and remakes. Launched with -Games 5 for five trips;
+# each game writes its own events.jsonl (T87 trials 1-5, newest-last
+# under logs/runs/*t87-black-marsh-trips).
+#
+# Deliberately NO preamble and NO clearance: the trip is the test, and
+# every command the bot issues should be waypoint travel. The safety
+# stack (monitor, watchdog, chicken) runs unchanged.
+
+name = "t87-black-marsh-trips"
+
+[[step]] # town waypoint -> Black Marsh (area 6, live-verified by T69)
+name = "waypoint"
+dest = 6
+
+[[step]] # arrival verified; the cycle takes it from here (leave, next game)
+name = "done"

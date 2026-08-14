@@ -1,5 +1,13 @@
 # P5 — The Countess test battery and staged acceptance
 
+> **Before restarting this battery, read
+> [p5-preflight.md](p5-preflight.md).** T71 run 5 died mid-battery on
+> 2026-08-07 (chicken starvation); the fix changed the walking layer,
+> added a required watchdog process, and added three run-log event kinds
+> to watch. The pre-flight records the delta, what could regress, and a
+> suggested cheaper first step (a descent-only run) before the full
+> Countess.
+
 Part of [plan.md](plan.md) (M6). Size: `md` — live work is serial and
 user-gated; no further planning pass needed, the stages are defined
 here (the M5 P6 precedent). Dependencies: P4 passed its go/no-go. The
@@ -92,3 +100,18 @@ Stages A–D passed in order with logged outcomes; thresholds finalized
 via Stage C (chicken 35 for proper runs); the acceptance report and
 timing table captured; open tuning items (if any) named for the
 closeout's follow-ups.
+
+## Named tuning item, already open (2026-08-06)
+
+The first complete run (T71 run 4) landed before this battery formally
+began and produced the battery's biggest finding early: **pickup
+accuracy is ~42% failure on wanted items (13 of 31 attempted never came
+up), and pickup is the largest single cost in the run.** The operator's
+call: *"this level of delay and potential failure is too high for the
+working bot."*
+
+Full evidence and analysis: **notes.md → "NAMED TUNING ITEM: pickup
+accuracy and the pickup logic as a whole"**. It is a workstream needing
+its own planning pass, not a Stage C threshold tweak — so it does not
+belong inside this battery, but Stage B/D reports must record pickup
+attempted-vs-collected counts so the fix has a before-number to beat.

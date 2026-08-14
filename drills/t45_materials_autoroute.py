@@ -33,15 +33,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import offsets  # noqa: E402
+from pd2bot.behavior.town import TownConfig, TownLayer  # noqa: E402
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
-from pd2bot.input import GatedInput  # noqa: E402
-from pd2bot.items import read_carried_items  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.menuinput import MenuInput  # noqa: E402
-from pd2bot.panelinput import PanelInput  # noqa: E402
+from pd2bot.input.gated import GatedInput  # noqa: E402
+from pd2bot.input.menu import MenuInput  # noqa: E402
+from pd2bot.input.panel import PanelInput  # noqa: E402
+from pd2bot.perception.items import read_carried_items  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.snapshot import Perception  # noqa: E402
 from pd2bot.pickit import load_item_table  # noqa: E402
-from pd2bot.snapshot import Perception  # noqa: E402
-from pd2bot.town import TownConfig, TownLayer  # noqa: E402
 
 T45 = Drill(
     test_id="T45",

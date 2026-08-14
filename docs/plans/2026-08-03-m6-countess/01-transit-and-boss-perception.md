@@ -94,3 +94,31 @@ Report what changed, what was validated, deviations.
 Offsets cited and cross-checked; exit reader + boss read implemented
 with defensive traversal; area constants in; probe tool ready; unit
 tests green; ruff clean. Live proof deferred to P2 by design.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-08-03
+Commit: pending
+
+- Changed: `pd2bot/offsets.py` (Room2 full layout, RoomTile, PresetUnit
+  + type constants, LEVEL_ROOM2_FIRST, MONSTER_UNIQUE_NO/NAME, area ids
+  6/20/21–25 with names — every entry citing BH D2Structs.h lines,
+  cross-checked 2026-08-03 against d2mapapi_mod's independent
+  Room2_113/RoomTile113/PresetUnit113/Level113: field-for-field
+  agreement); `pd2bot/exits.py` (new — `LevelExit`/`ExitScan`/
+  `read_level_exits`, the d2mapapi algorithm with bounded walks, cycle
+  guard, skip-and-count); `pd2bot/units.py` (`Monster.unique_no`,
+  `Monster.name`, provisional `is_super_unique`, boss-only best-effort
+  identity reads); `pd2bot/dump.py` (`--exits` probe: area, exits with
+  distances, boss table); `tests/test_exits.py` (new, 6 tests);
+  `tests/test_units.py` (builder + 3 identity tests);
+  `docs/architecture/perception.md` ("What M6 added" section).
+- Validated: `pytest -q` → **873 passed** (was 864); `ruff check .`
+  clean. Covered: world-position arithmetic, type-vs-number preset
+  matching, dedupe, chain-cycle stop, unreadable-destination
+  skip-and-count, not-in-game None, super-unique identity read, torn
+  identity block, no-identity-reads-for-the-crowd.
+- Deviations: the probe shipped as `pd2bot.dump --exits` rather than a
+  drills/ file (the phase offered either); everything else to plan.
+  Live verification rides P2's drills as designed.

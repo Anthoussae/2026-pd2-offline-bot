@@ -1,4 +1,11 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(powershell -NoProfile -File \"C:\\dev\\2026-pd2-bot\\2026-pd2-offline-bot\\tools\\live-run.ps1\"*)",
+      "Bash(powershell -File \"C:\\dev\\2026-pd2-bot\\2026-pd2-offline-bot\\tools\\live-run.ps1\"*)",
+      "Write(C:\\Users\\james\\AppData\\Local\\pd2bot-bridge\\**)"
+    ]
+  },
   "hooks": {
     "Stop": [
       {

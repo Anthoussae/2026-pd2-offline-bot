@@ -1,0 +1,2 @@
+﻿75c03b9 feat: the chicken can no longer be starved (safety), plus town-walk fixes
+9ceb529 fix: friendly units are never scenery (NPC classification)

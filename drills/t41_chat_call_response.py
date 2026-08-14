@@ -43,7 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
 
 # The bridge redirects stdout to a file, and PS 5.1 hands Python a cp1252
 # console encoding — so printing a byte the game put in its chat buffer

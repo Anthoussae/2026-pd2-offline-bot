@@ -40,11 +40,13 @@ from typing import Protocol
 from pd2bot import offsets
 from pd2bot.behavior.actions import ActionExecutor
 from pd2bot.behavior.reflex import ReflexLadder
-from pd2bot.input import InputRefused
-from pd2bot.narrate import noop as narrate_noop
-from pd2bot.safety import ChickenExit
-from pd2bot.skills import SkillSwitchFailed
-from pd2bot.snapshot import GameSnapshot
+from pd2bot.input.gated import InputRefused
+from pd2bot.input.skills import SkillSwitchFailed
+from pd2bot.nav import mapframe
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.runlog import NullRunLog
+from pd2bot.runlog.narrate import noop as narrate_noop
+from pd2bot.safety import ChickenExit, DeathHalt, SafetyInterrupt
 
 # Two different ways a send can fail to land, treated identically on
 # purpose. `InputRefused` is the guard saying "not now"; `SkillSwitchFailed`
@@ -89,6 +91,24 @@ class IdleBail(ChickenExit):
     cycle's vitals backstop counted these too, so one real chicken
     followed by one idle bail halted with a message telling the operator
     to heal a character whose actual problem was a hang.
+    """
+
+    is_vitals = False
+
+
+class WatchdogDown(ChickenExit):
+    """The out-of-process chicken watchdog is not answering.
+
+    A `ChickenExit` subclass so the game is LEFT rather than abandoned —
+    the character ends up somewhere safe instead of standing in Hell
+    while nobody watches. `is_vitals` is False: nothing is wrong with the
+    character, so this must not feed the "heal it" backstop (R115).
+
+    Only raised when a run explicitly requires the watchdog, which the
+    real launcher turns on and drills and sims do not. A watchdog that
+    is silently not running is a safety layer that silently does not
+    exist, and after 2026-08-07 that is not a thing this project is
+    willing to discover afterwards.
     """
 
     is_vitals = False
@@ -227,6 +247,23 @@ class EngineConfig:
     # (the one real race — an ESC landing just after a panel closed opens
     # the menu instead); beyond it, the menu is the operator's.
     operator_escape_grace_s: float = 1.5
+    # Whether this run insists the out-of-process chicken watchdog is
+    # alive (`pd2bot.safety.watchdog`). OPT-IN, and the default must stay False:
+    # sims and the many drills that build an engine bare have no watchdog
+    # and must keep working. `tools/live-run.ps1` — the real entry point,
+    # and the one that starts a watchdog — turns it on.
+    require_watchdog: bool = False
+    # How long the heartbeat must read stale CONTINUOUSLY before the
+    # watchdog is declared down (R253, operator-approved). The watchdog
+    # transiently stalls ~4-10 s and RECOVERS (five occurrences before
+    # the 2026-08-13 diagnosis: its own log gap-free, the heartbeat
+    # fresh again at teardown, every 10 s faulthandler dump empty) — and
+    # the old instant declaration meant the backstop's own hiccups ended
+    # healthy runs. Safety analysis: Track A (the in-process poll,
+    # 0.100 s chicken latency, ADR 2026-08-07) is untouched; a backstop
+    # that answers a REAL watchdog death within 15 s still bounds the
+    # unguarded window to seconds. A fresh read resets the clock.
+    watchdog_stale_grace_s: float = 15.0
 
 
 @dataclass
@@ -262,6 +299,10 @@ class BehaviorEngine:
         narrate: Callable[[str], None] = narrate_noop,
         should_stop: Callable[[], bool] | None = None,
         bot_escape_at: Callable[[], float | None] | None = None,
+        watchdog_alive: Callable[[], bool] | None = None,
+        watchdog_latch: Callable[[], dict | None] | None = None,
+        runlog: object | None = None,
+        frame: Callable[[], object] | None = None,
     ) -> None:
         if not states:
             raise BehaviorError("a run with no steps cannot do anything")
@@ -286,9 +327,32 @@ class BehaviorEngine:
         # None = no kill switch in this environment (sims, drills that
         # build the engine bare).
         self._bot_escape_at = bot_escape_at
+        # The out-of-process safety layer (`pd2bot.safety.watchdog`): is it
+        # alive, and has it fired? Both None in every environment that
+        # has no watchdog — sims, drills, the CLI — which is why the
+        # dead-man check is opt-in rather than default-on.
+        self._watchdog_alive = watchdog_alive
+        self._watchdog_latch = watchdog_latch
+        # When the heartbeat FIRST read stale, for the R253 grace; None
+        # while it reads fresh.
+        self._watchdog_stale_since: float | None = None
         # The narrative channel (R179): step transitions with durations —
         # the engine is the only thing that knows when a step began.
         self._narrate = narrate
+        # The run event log (the run-event-log plan, P4). This is where
+        # T71's hole was: the engine recorded a tick only when its
+        # outcome carried a `note`, so a step that decided something
+        # silently — the fight branch, a walk leg, the click pacing —
+        # left nothing at all. 144 s in the Forgotten Tower produced five
+        # lines out of ~150 decisions, and the analysis that followed was
+        # therefore invention. Every tick is now recorded, with where the
+        # time went.
+        self._runlog = runlog if runlog is not None else NullRunLog()
+        self._frame = frame
+        self._timing: dict[str, float] = {}
+        self._tick_step: str | None = None
+        self._tick_outcome: StepOutcome | None = None
+        self._tick_snap: GameSnapshot | None = None
         self._step_started = self._clock()
         # Per-rung fire counts, narrated at every 25th fire (R185 C): run
         # 4's clearance spent ~10 silent minutes on combat-module upkeep,
@@ -308,6 +372,12 @@ class BehaviorEngine:
     @property
     def complete(self) -> bool:
         return self._index >= len(self._states)
+
+    @property
+    def runlog(self):
+        """The run event log — public so the runner can book `run.end`
+        with the outcome it alone knows on every exit path."""
+        return self._runlog
 
     @property
     def step_names(self) -> list[str]:
@@ -373,6 +443,88 @@ class BehaviorEngine:
             ):
                 return False
         return True
+
+    def _check_watchdog_alive(self) -> None:
+        """Refuse to go on without the safety layer we were told to have.
+
+        Deliberately opt-IN (`EngineConfig.require_watchdog`, turned on
+        by the real launcher): sims and the many drills that build an
+        engine bare have no watchdog and must keep working. A default-on
+        check would either break them or be quietly switched off, and a
+        safety check that is routinely switched off is worse than none.
+
+        Staleness gets a GRACE (`watchdog_stale_grace_s`, R253): the
+        watchdog transiently stalls and recovers, and declaring it down
+        on the first stale read let the backstop's own hiccups end
+        healthy runs — five times before the diagnosis. The first stale
+        read starts the clock and is put on the record once
+        (`watchdog.stale`); a fresh read resets it; only staleness that
+        OUTLASTS the grace is a down watchdog.
+        """
+        if not self.config.require_watchdog:
+            return
+        if self._watchdog_alive is None:
+            # No channel wired AT ALL — a misconfiguration, not a stall:
+            # nothing can ever recover, so the grace would just delay
+            # the same refusal by 15 s.
+            self._runlog.event("watchdog.down")
+            raise WatchdogDown(
+                "the chicken watchdog is not running (no heartbeat channel "
+                "is wired) and this run requires it — start it with "
+                "`python -m pd2bot.safety.watchdog` and launch again"
+            )
+        if self._watchdog_alive():
+            if self._watchdog_stale_since is not None:
+                self._watchdog_stale_since = None
+                self._runlog.event("watchdog.recovered")
+            return
+        now = self._clock()
+        if self._watchdog_stale_since is None:
+            self._watchdog_stale_since = now
+            # On the record from the FIRST stale read: the transient
+            # stalls were invisible for five runs because nothing spoke
+            # until the run was already being ended.
+            self._runlog.event(
+                "watchdog.stale", grace_s=self.config.watchdog_stale_grace_s
+            )
+            return
+        if now - self._watchdog_stale_since < self.config.watchdog_stale_grace_s:
+            return
+        self._narrate("the watchdog is not answering — standing down")
+        # On the record: the 2026-08-13 stand-down was invisible in the
+        # event stream (the narration lives in a different file), and the
+        # run's log simply STOPPED — indistinguishable from a crash.
+        self._runlog.event(
+            "watchdog.down",
+            stale_s=round(now - self._watchdog_stale_since, 1),
+        )
+        raise WatchdogDown(
+            "the chicken watchdog has not answered for "
+            f"{self.config.watchdog_stale_grace_s:.0f}s and this run "
+            "requires it — start it with "
+            "`python -m pd2bot.safety.watchdog` and launch again"
+        )
+
+    def _watchdog_chickened(self) -> dict | None:
+        """The other thing that opens the ESC menu without a human.
+
+        Same shape of correlation as `_bot_escape_at` above and for the
+        same reason: an open ESC menu is evidence of *someone*, and the
+        kill switch is only useful if it names the right one. After a
+        watchdog fire, "the operator pressed ESC — standing down" is a
+        lie, and it would be the only account of the moment in the log.
+
+        Note what does NOT change: the stand-down itself. A watchdog
+        pause should end the run, and the clean Save-and-Exit that
+        follows is exactly the right thing to happen next. Only the
+        story changes.
+        """
+        if self._watchdog_latch is None:
+            return None
+        try:
+            return self._watchdog_latch()
+        except Exception:  # noqa: BLE001 - a failed read is not an accusation
+            return None
 
     def _check_idle(self, snap: GameSnapshot, now: float) -> None:
         if not snap.in_game or snap.in_town:
@@ -499,12 +651,173 @@ class BehaviorEngine:
         return "\n".join(lines)
 
     def tick(self) -> bool:
-        """One decision. Returns True when the run is complete.
+        """One decision, recorded. Returns True when the run is complete.
 
-        Monitor exceptions (ChickenExit, DeathHalt) and IdleBail propagate
-        to the caller untouched — the cycle owns what they mean.
+        A thin wrapper over `_tick`, so that EVERY tick leaves an event
+        carrying its duration and where that duration went — including
+        the ticks that end by raising (a chicken, an idle bail, a loud
+        give-up), which are exactly the ticks worth reading. That is why
+        the emit sits in a `finally`.
+
+        The timing split is the measurement T71 lacked: 193 ticks over
+        203 s is ~1.05 s per tick against a configured 0.2 s interval, so
+        ~0.85 s of every tick went somewhere nobody could name. Candidates
+        it will now distinguish: the snapshot read, the ladder, the step
+        (which itself calls `carried()` and the exit scan), and the
+        executor's housekeeping.
         """
+        started = self._clock()
+        self._timing = {}
+        self._tick_step = None
+        self._tick_outcome = None
+        self._tick_snap = None
+        try:
+            return self._tick()
+        except SafetyInterrupt as interrupt:
+            raise self._converted(interrupt) from None
+        finally:
+            self._log_tick(started)
+
+    def _converted(self, interrupt: SafetyInterrupt) -> BaseException:
+        """Turn a mid-block safety interrupt back into the real thing.
+
+        `SafetyInterrupt` exists only to survive the journey out of a
+        blocking call — it is a `BaseException` precisely so that the
+        broad `except Exception` guards between here and the walk loop
+        cannot swallow a chicken (see `pd2bot.safety`). This is where
+        that journey ends and the normal vocabulary resumes.
+
+        It converts HERE, at the same boundary the monitor's own
+        `tick()` raises from, so that everything downstream — the
+        cycle's leave-and-continue handler, the death latch's
+        no-input-ever rule, `runner.py`'s counters — is reached by
+        exactly the types it was written and live-verified against. The
+        conversion exists so that none of that has to know about any of
+        this.
+        """
+        verdict = interrupt.verdict
+        try:
+            # `verdict`, not `kind`: the writer does `record.update(fields)`
+            # over an envelope whose own key is "kind", so a field by that
+            # name would silently overwrite the event's kind and make this
+            # event unfindable in the log it exists to appear in.
+            self._runlog.event(
+                "safety.interrupt", verdict=verdict.kind, reason=verdict.message,
+                hp=verdict.hp, max_hp=verdict.max_hp, pct=verdict.pct,
+                step=self._tick_step,
+            )
+        except Exception:  # noqa: BLE001 - guards the logging, not the verdict
+            pass
+        if verdict.is_death:
+            # The latch is already set (the monitor set it when it read
+            # the corpse); this only carries the news the rest of the way.
+            return DeathHalt(verdict.message)
+        if verdict.kind == "stop":
+            return StopRequested(verdict.message)
+        return ChickenExit(verdict.message)
+
+    def _log_tick(self, started: float) -> None:
+        """Emit the tick record. Never raises — instrumentation is not a
+        dependency, least of all on the tick that was already failing."""
+        if not getattr(self._runlog, "enabled", False):
+            return
+        try:
+            snap = self._tick_snap
+            player = snap.player if snap is not None else None
+            outcome = self._tick_outcome
+            frame = None
+            if self._frame is not None:
+                try:
+                    frame = self._frame()
+                except Exception:  # noqa: BLE001
+                    frame = None
+            frame = frame or mapframe.MapFrame.unknown()
+            record: dict = {
+                "n": self.report.ticks,
+                "dur_s": round(self._clock() - started, 3),
+                "timing": {k: round(v, 3) for k, v in self._timing.items()},
+                "step": self._tick_step,
+                "step_index": self._index,
+            }
+            if player is not None:
+                record["player"] = frame.describe(player.position)
+                record["hp"] = player.hp
+                record["max_hp"] = player.max_hp
+                record["mana"] = player.mana
+                record["max_mana"] = player.max_mana
+            else:
+                record["player"] = None
+            if snap is not None:
+                # COUNTS, not lists: cheap, and they settle "was there
+                # anything to fight or pick up?" without a reader having
+                # to infer it.
+                record["hostiles"] = len(snap.live_monsters)
+                record["ground_items"] = len(snap.ground_items)
+                record["allies"] = len(snap.allies)
+                # Decorative units, counted so the filter's own work is
+                # visible (T74). A filter that hides what it excluded is
+                # how the next phantom goes unnoticed for three runs —
+                # and if this number is ever 0 in a room full of bats,
+                # the classifier has regressed.
+                record["critters"] = len(snap.critters)
+                # The nearest few hostiles WITH THEIR HEALTH (T72). The
+                # counts alone proved the Forgotten Tower fight never
+                # ended — two units attacked 23 times each across 173 s,
+                # both still standing — but could not say whether their
+                # health was moving. "Is this fight going anywhere?" is
+                # the question a stalled run most needs answered, and it
+                # is unanswerable from a count. Bounded to four so a
+                # crowded field cannot bloat the tick.
+                if snap.player is not None and snap.live_monsters:
+                    near = sorted(
+                        snap.live_monsters,
+                        key=lambda m: max(
+                            abs(m.position[0] - snap.player.position[0]),
+                            abs(m.position[1] - snap.player.position[1]),
+                        ),
+                    )[:4]
+                    record["hostile_detail"] = [
+                        {
+                            "id": m.unit_id,
+                            "kind": m.kind,
+                            "hp": m.hp,
+                            "life_pct": round(m.life_pct, 1),
+                            "dist": max(
+                                abs(m.position[0] - snap.player.position[0]),
+                                abs(m.position[1] - snap.player.position[1]),
+                            ),
+                            "boss": m.is_boss,
+                            "champion": m.is_champion,
+                        }
+                        for m in near
+                    ]
+            if outcome is not None:
+                record["outcome"] = (
+                    "done" if outcome.done
+                    else "acted" if outcome.acted
+                    else "waiting" if outcome.waiting
+                    else "idle"
+                )
+                record["note"] = outcome.note
+            self._runlog.event("tick", **record)
+        except Exception:  # noqa: BLE001 - never fatal
+            return
+
+    def _tick(self) -> bool:
+        t0 = self._clock()
         snap = self._snapshot()
+        self._timing["snapshot"] = self._clock() - t0
+        self._tick_snap = snap
+        # Stamp the area onto every subsequent event. Done HERE, from the
+        # snapshot, rather than by whoever proves a transition: T72's log
+        # came back with `area` absent on all 620 events because the
+        # setter existed and nothing called it, which made "how long was
+        # it in the Tower?" a question the log could not answer despite
+        # having been built to answer exactly that.
+        if snap.area is not None:
+            self._runlog.area(
+                snap.area.level_no, mapframe.area_name(snap.area.level_no)
+            )
         # The death latch outranks EVERY stop (review 2026-08-02, issue
         # 001): a StopRequested rides ChickenExit into the cycle's
         # leave-game path, which SENDS INPUT — and if the stop preempted
@@ -517,7 +830,21 @@ class BehaviorEngine:
         if self._should_stop is not None and self._should_stop():
             self._narrate("run aborted by request")
             raise StopRequested("stopped by outside request (abort)")
+        self._check_watchdog_alive()
         if self._operator_took_the_controls(snap):
+            latch = self._watchdog_chickened()
+            if latch is not None:
+                pct = latch.get("pct")
+                detail = f" (life {pct}%)" if pct is not None else ""
+                self._narrate(f"the WATCHDOG chickened{detail} — standing down")
+                self._runlog.event(
+                    "watchdog.fired", reason=latch.get("reason"),
+                    pct=pct, hp=latch.get("hp"), max_hp=latch.get("max_hp"),
+                )
+                raise StopRequested(
+                    f"the watchdog pressed ESC{detail} — the game is paused; "
+                    "standing down"
+                )
             self._narrate("operator input (ESC/Enter) — standing down")
             raise StopRequested(
                 "the operator pressed ESC or opened chat — standing down"
@@ -538,8 +865,15 @@ class BehaviorEngine:
             self._last_position = snap.player.position
             self._mark_activity(now)
 
+        t0 = self._clock()
         decision = self._ladder.evaluate(snap) if self._ladder is not None else None
+        self._timing["ladder"] = self._clock() - t0
         if decision is not None:
+            self._tick_step = f"reflex:{decision.rung}"
+            self._runlog.event(
+                "reflex", rung=decision.rung, reason=decision.reason,
+                action=type(decision.action).__name__,
+            )
             # Survival owns the tick; the run step is skipped outright.
             self.report.reflex_fires.append(decision.rung)
             self.report.log.append(
@@ -572,9 +906,12 @@ class BehaviorEngine:
 
         if not self.complete:
             state = self._states[self._index]
+            self._tick_step = state.name
+            t0 = self._clock()
             try:
                 outcome = state.step(snap, self.ctx)
             except SEND_DID_NOT_LAND as exc:
+                self._timing["step"] = self._clock() - t0
                 # Steps send through the same executor, so they refuse the
                 # same way. A step is free to have done part of its work
                 # before the refusal; it is written to be re-entered, which
@@ -582,6 +919,22 @@ class BehaviorEngine:
                 self._note_refusal(f"step {state.name}", exc)
                 self._check_idle(snap, now)
                 return self.complete
+            self._timing["step"] = self._clock() - t0
+            self._tick_outcome = outcome
+            # EVERY decision, not just the ones carrying a note. This one
+            # line is the T71 fix: the silent branches — the fight, a walk
+            # leg, the click pacing — are exactly the ones that mattered
+            # and exactly the ones nothing recorded.
+            self._runlog.event(
+                "step.decision", step=state.name,
+                outcome=(
+                    "done" if outcome.done
+                    else "acted" if outcome.acted
+                    else "waiting" if outcome.waiting
+                    else "idle"
+                ),
+                note=outcome.note,
+            )
             if outcome.acted:
                 self._refusal_streak = 0
                 self._waiting_since = None
@@ -621,6 +974,22 @@ class BehaviorEngine:
                     self._narrate(f"run complete ({self.report.summary()})")
                 self._mark_activity(self._clock())
 
+        # Executor housekeeping (M6 P3): right-skill parking today, any
+        # once-per-tick duty tomorrow. Optional by design — sims and
+        # recording executors simply do not have it — and best-effort: a
+        # refused park is the executor's own pacing problem, never a
+        # reason to disturb the tick. Deliberately NOT counted as
+        # activity: parking is maintenance, and a bot that only parks is
+        # still a bot the never-idle invariant must catch.
+        maintain = getattr(self._executor, "maintain", None)
+        if maintain is not None:
+            t0 = self._clock()
+            try:
+                maintain()
+            except SEND_DID_NOT_LAND:
+                pass
+            self._timing["maintain"] = self._clock() - t0
+
         self._check_idle(snap, now)
         return self.complete
 
@@ -628,6 +997,15 @@ class BehaviorEngine:
         """Absorb one refused send, and escalate only on a long streak."""
         self.report.refusals += 1
         self._refusal_streak += 1
+        # A refusal is a DIFFERENT thing from a send, and the log keeps
+        # them apart: `action.*` means it reached the game, `refusal`
+        # means it did not. `_PickupMixin.send` also swallows walk
+        # failures, which is why they get an event of their own rather
+        # than living only in a prose line.
+        self._runlog.event(
+            "refusal", where=where, error=type(exc).__name__, detail=str(exc),
+            streak=self._refusal_streak,
+        )
         self.report.log.append(
             f"{where}: send did not land — {type(exc).__name__}: {exc}"
         )

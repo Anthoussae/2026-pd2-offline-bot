@@ -26,8 +26,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.input import VK_MENU, GatedInput  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
+from pd2bot.input.gated import VK_MENU, GatedInput  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
 
 CHUNK = 1 << 20
 SETTLE_S = 0.4

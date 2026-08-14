@@ -1,0 +1,97 @@
+﻿exit: 0
+--- stdout ---
+chat> [claude] TEST T70 — traversal — the full descent — town to Tower Cellar Level 5 [bot control] (M6 P2)
+chat> [claude] THE BOT PLAYS: it may leave THIS game and create its own,
+chat> [claude] run the town chores, waypoint out, and walk into the staircases.
+chat> [claude] Watch the transitions — each one is proven by the area id.
+chat> [claude] IT ENDS ON ITS OWN. Stop early: 'abort' in chat, ESC/Enter in
+chat> [claude] the field, tools\drill-cancel.ps1, or take the mouse.
+chat> [claude] The bot WILL SEND INPUT during this test — hands off keyboard and mouse.
+chat> [claude] Test ready — type OK in chat to begin.
+chat> [claude] TEST LIVE
+class      necromancer (necro.toml)
+run        m6-descent.toml: town_preamble, waypoint, traverse, traverse, traverse, traverse, traverse, traverse, done
+clearance  no clear_radius step in this run
+sweep      no clearance to follow; sweeps from where it stands
+pickit     16 rules, 0 pending name(s)
+cleanse    ENABLED
+belt       ('mana', 'rejuv', 'healing', 'healing') -> capacity {'healing': 8, 'mana': 4, 'rejuv': 4}
+minimums   healing 4, mana 2, rejuv 0
+chicken    50% life
+idle bail  10s (declared wait 30s), refusal limit 50
+» run: town_preamble -> waypoint -> traverse -> traverse -> traverse -> traverse -> traverse -> traverse -> done
+» heal: vitals read full (36.9s)
+» repair: nothing damaged (8 worn item(s) checked) (0.0s)
+» belt: 0 moved; cleanse: 3 item(s) in the inventory, 0 judged junk, 3 kept; nothing to drop; belt: minimums hold; stash: nothing left to deposit; skipped 3 unmovable (cube/quest) (0.3s)
+» merc: alive (0.0s)
+» town_preamble: done after 38s — heal: vitals read full; repair: nothing damaged (8 worn item(s) checked); belt: 0 moved; cleanse: KEEP kind 564 quality 2 sockets None at (0, 0) — unmovable (the Horadric Cube — right-click opens it); cleanse: KEEP kind 533 quality 2 sockets 0 at (0, 2) — unmovable (a Tome of Town Portal — right-click opens a portal); cleanse: KEEP kind 534 quality 2 sockets 0 at (2, 0) — unmovable (a Tome of Identify — right-click arms the identify cursor); cleanse: 3 item(s) in the inventory, 0 judged junk, 3 kept; nothing to drop; belt: minimums hold; stash: nothing left to deposit; skipped 3 unmovable (cube/quest); merc: alive
+» waypoint: done after 22s — arrived at (15218, 5788), stepped off to (15208, 5798)
+» combat posture: brisk
+» traverse: exit toward Forgotten Tower at (15251, 5785)
+» traverse: done after 15s — arrived in Forgotten Tower at (10006, 8002)
+» combat posture: brisk
+» traverse: exit toward Tower Cellar Level 1 at (10002, 8013)
+» traverse: done after 20s — arrived in Tower Cellar Level 1 at (12517, 5183)
+» combat posture: brisk
+  click audit: click (12510, 5181) landed 6 from ground item (12512, 5187) — GOAL-EXEMPT (not avoided by design); goal (12512, 5184), 1 nudge(s)
+  click audit: click (12513, 5182) landed 5 from ground item (12512, 5187) — near miss; goal (12520, 5183), 0 nudge(s)
+  click audit: click (12520, 5183) landed 6 from ground item (12514, 5187) — near miss; goal (12520, 5183), 0 nudge(s)
+  click audit: click (12525, 5185) landed 11 from ground item (12514, 5187) — near miss; goal (12525, 5192), 0 nudge(s)
+  click audit: click (12524, 5192) landed 10 from ground item (12514, 5187) — near miss; goal (12525, 5192), 0 nudge(s)
+  click audit: click (12525, 5192) landed 11 from ground item (12514, 5187) — near miss; goal (12525, 5192), 0 nudge(s)
+  click audit: click (12524, 5192) landed 10 from ground item (12514, 5187) — near miss; goal (12526, 5185), 0 nudge(s)
+  click audit: click (12525, 5186) landed 11 from ground item (12514, 5187) — near miss; goal (12526, 5185), 0 nudge(s)
+  click audit: click (12525, 5186) landed 11 from ground item (12514, 5187) — near miss; goal (12526, 5185), 0 nudge(s)
+  click audit: click (12526, 5185) landed 12 from ground item (12514, 5187) — near miss; goal (12526, 5185), 0 nudge(s)
+  click audit: click (12524, 5189) landed 10 from ground item (12514, 5187) — near miss; goal (12525, 5190), 0 nudge(s)
+  click audit: click (12524, 5190) landed 10 from ground item (12514, 5187) — near miss; goal (12525, 5190), 0 nudge(s)
+  click audit: click (12525, 5189) landed 11 from ground item (12514, 5187) — near miss; goal (12523, 5193), 0 nudge(s)
+  click audit: click (12525, 5189) landed 11 from ground item (12514, 5187) — near miss; goal (12523, 5193), 0 nudge(s)
+  click audit: click (12524, 5189) landed 10 from ground item (12514, 5187) — near miss; goal (12523, 5193), 0 nudge(s)
+  click audit: click (12523, 5193) landed 9 from ground item (12514, 5187) — near miss; goal (12523, 5193), 0 nudge(s)
+  click audit: click (12525, 5189) landed 11 from ground item (12514, 5187) — near miss; goal (12529, 5189), 0 nudge(s)
+  click audit: click (12525, 5188) landed 11 from ground item (12514, 5187) — near miss; goal (12518, 5190), 0 nudge(s)
+  click audit: click (12525, 5188) landed 11 from ground item (12514, 5187) — near miss; goal (12518, 5190), 0 nudge(s)
+  click audit: click (12518, 5190) landed 4 from ground item (12514, 5187) — near miss; goal (12518, 5190), 0 nudge(s)
+  click audit: click (12518, 5190) landed 4 from ground item (12514, 5187) — near miss; goal (12518, 5190), 0 nudge(s)
+  click audit: click (12524, 5185) landed 10 from ground item (12514, 5187) — near miss; goal (12518, 5190), 0 nudge(s)
+  click audit: click (12524, 5185) landed 10 from ground item (12514, 5187) — near miss; goal (12518, 5190), 0 nudge(s)
+  click audit: click (12524, 5185) landed 10 from ground item (12514, 5187) — near miss; goal (12518, 5190), 0 nudge(s)
+  click audit: click (12518, 5190) landed 4 from ground item (12514, 5187) — near miss; goal (12518, 5190), 0 nudge(s)
+  click audit: click (12518, 5190) landed 4 from ground item (12514, 5187) — near miss; goal (12518, 5190), 0 nudge(s)
+  left early: NavigationError: area 21 has no exit toward area 22 (1 exit(s) read: [(20, (12515, 5181))]) — the run file asks for a transition this map does not have
+
+cycles: 1, clean: 0
+  #1: [CV-L]  LEFT EARLY
+
+--- game 1: ticks: 118, reflex fires: 5, steps done: town_preamble, waypoint, traverse, traverse ---
+  reflex upkeep: armor absorb 0% < 75%
+  step town_preamble done: heal: vitals read full; repair: nothing damaged (8 worn item(s) checked); belt: 0 moved; cleanse: KEEP kind 564 quality 2 sockets None at (0, 0) — unmovable (the Horadric Cube — right-click opens it); cleanse: KEEP kind 533 quality 2 sockets 0 at (0, 2) — unmovable (a Tome of Town Portal — right-click opens a portal); cleanse: KEEP kind 534 quality 2 sockets 0 at (2, 0) — unmovable (a Tome of Identify — right-click arms the identify cursor); cleanse: 3 item(s) in the inventory, 0 judged junk, 3 kept; nothing to drop; belt: minimums hold; stash: nothing left to deposit; skipped 3 unmovable (cube/quest); merc: alive
+  step waypoint done: arrived at (15218, 5788), stepped off to (15208, 5798)
+  reflex upkeep: combat-module upkeep
+  step traverse: send did not land — CastInFlight: a cast is still resolving; MoveTo would land inside the animation and spend it — re-deciding next tick instead
+  reflex upkeep: combat-module upkeep
+  step traverse: send did not land — CastInFlight: a cast is still resolving; MoveTo would land inside the animation and spend it — re-deciding next tick instead
+  reflex upkeep: combat-module upkeep
+  step traverse: send did not land — CastInFlight: a cast is still resolving; MoveTo would land inside the animation and spend it — re-deciding next tick instead
+  reflex upkeep: combat-module upkeep
+  step traverse: send did not land — CastInFlight: a cast is still resolving; MoveTo would land inside the animation and spend it — re-deciding next tick instead
+  step traverse: clicked the staircase (attempt 1)
+  step traverse: clicked the staircase (attempt 2)
+  step traverse: clicked the staircase (attempt 3)
+  step traverse done: arrived in Forgotten Tower at (10006, 8002)
+  step traverse: clicked the staircase (attempt 1)
+  step traverse: clicked the staircase (attempt 2)
+  step traverse: clicked the staircase (attempt 3)
+  step traverse done: arrived in Tower Cellar Level 1 at (12517, 5183)
+chat> [claude] TEST T70 CONCLUDED — FAILED
+chat> (never delivered)
+chat> [claude] T70 reason: RuntimeError: no clean cycle: 140s; cycles: 1, clean: 0
+  #1: [CV-L]  LEFT EARLY; game 1: ticks: 118, reflex fires: 5, steps done: town_preamble, waypoint, trav
+chat> (never delivered)
+
+TEST T70 CONCLUDED — FAILED: RuntimeError: no clean cycle: 140s; cycles: 1, clean: 0
+  #1: [CV-L]  LEFT EARLY; game 1: ticks: 118, reflex fires: 5, steps done: town_preamble, waypoint, traverse, traverse; ended: not in a game (the run left, as designed)
+
+--- stderr ---
+

@@ -144,7 +144,7 @@ dormant alternative for maps the bot has never walked; it is blocked on
 this machine by PD2's modified DLLs. History and unblock path: the
 map-knowledge ADR and the M3 planning dir's `generator-status.md`.
 
-## Planning and walking (`pathing.py`, `navigate.py`)
+## Planning and walking (`nav/pathing.py`, `nav/navigate.py`)
 
 `pathing.py` is pure logic (no game, no OS, fully unit-tested): A* over
 anything with `is_walkable`/`is_known` — 8-directional, integer costs
@@ -155,7 +155,20 @@ width and the game wall-slides where pointsized math would clip).
 cap keeps every hop clickable on screen. `OverlayGrid` merges the
 generated base with live patches (live wins where known).
 
-`navigate.py` follows waypoints with gated clicks and watches the
+**The search is budgeted** (R257 P2, ADR
+`2026-08-14-bounded-pathfinding`): production callers give A* a
+distance-scaled node budget (floor 2 000, cap 25 000 expansions), and a
+search that exhausts it returns None — the same honest no-route answer
+an exhausted open set gives, which callers already confirm with a
+second ask and then write off with expiry-on-movement. The measurement
+that forced it: two atlas cells eight subtiles apart but in different
+connected components (the real link ran through unrecorded ground) made
+unbounded A* flood every recorded cell for **20.15 s per ask**, twice
+back to back — a 47 s live freeze that the budget answers in 0.057 s.
+Every plan's price is on the record as a `nav.plan` run-log event
+(duration, nodes, outcome, `budget_exhausted`).
+
+`nav/navigate.py` follows waypoints with gated clicks and watches the
 player's actual position. The escalation ladder when position stops
 changing: re-click → re-plan from where we really are (fresh grids) →
 after 5 *no-progress* plan cycles, raise `NavigationError` with the
@@ -171,6 +184,50 @@ cross-area *walking* (area transitions on foot) remain deferred — the
 navigator's world is still one area with static walls, and M6's
 Countess route (Black Marsh → Forgotten Tower → five cellar levels)
 is where that changes.
+
+## Where a travel click may land (`nav/navigate.py`, the nudge)
+
+A click's only job is to make the character walk that way, so landing a
+few subtiles off costs nothing — the loop re-plans freely, and arrival is
+judged by position, against the point actually clicked. Landing ON
+something interactive costs the whole walk: an NPC's dialog, a waypoint
+menu or the stash blocks all further input until something closes it. The
+trade is therefore always worth taking, and travel clicks are nudged off
+anything clickable before being sent.
+
+**Two shapes, because the game has two.** Floor things — ground items,
+objects — are avoided by a world-space Chebyshev radius (`AVOID_RADIUS`,
+4). Standing units are not: the client hit-tests a **sprite**, in screen
+space, and a sprite is tall and narrow. T83 measured it (2026-08-08).
+Three clicks, all already nudged, all at world distance 6 from an ally:
+the two drawn 120 px to her side were harmless, and the one drawn **0 px
+sideways and 120 px above her feet** opened her dialog. Same world
+distance, opposite outcomes. The projection above is why — 20 px per
+(dx − dy), 10 px per (dx + dy) — so a world delta of (−6, −6) is straight
+up her body while (−6, +6), the identical Chebyshev distance, is 240 px
+away across the floor.
+
+So units carry a screen-space box (80 px half-width, 150 px above the
+feet, 40 below — sized to the measurement, with margin only on the side
+the evidence says is dangerous), checked **in addition to** the radius,
+and only in town, where allies are NPCs whose dialogs block input. The
+escape is chosen in screen space too, and never up-screen: up is behind
+the unit, it is the far wall of the tallest side of the box, and it is
+what the old world-space push produced — the nudge was not failing to
+prevent that click, it was creating it. The clean axes fall out of the
+projection: a world step of (k, −k) moves a click purely sideways on
+screen, (k, k) purely toward the camera.
+
+Being boxed in still produces a click (the roomiest candidate, sprites
+weighed above floor clearance): one click that might interact is
+recoverable, whereas refusing to click is a walk that cannot finish.
+
+`drills/town_click_clearance.py` re-measures all of this in ~40 s and
+reports every click in both spaces — the tool to re-run after any
+resolution, window-size or renderer change, since the box is display
+geometry like the constants under it. It also reports how many clicks
+were actually nudged, because a route where nobody was standing in the
+way passes without testing anything.
 
 ## Waypoint travel (`waypoint.py` + the `waypoint` run step, M5)
 
@@ -189,7 +246,7 @@ border cannot flip which area's grid plans the next walk (T55 run 2's
 lesson).
 
 All timing is injected, so the whole ladder is tested against a scripted
-fake world in `tests/test_navigate.py` — the game is only needed for the
+fake world in `tests/nav/test_navigate.py` — the game is only needed for the
 acceptance walks (`python -m pd2bot.navigate --demo`).
 
 ## The route service: steps ask the map too (R181)

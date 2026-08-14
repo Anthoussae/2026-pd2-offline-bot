@@ -80,6 +80,19 @@ first observation at-or-below the line, which after a burst of damage
 can be well below it. First seen in
 [the game cycle](2026-07-29-the-game-cycle.md).
 
+**CI (continuous integration)** — a server that automatically runs your
+checks (tests, linter) on every push, and marks each commit or pull
+request pass/fail. It replaces "I remembered to run pytest before
+pushing" with a machine that never forgets, and it checks the code as
+committed — catching the classic "works on my machine because of an
+uncommitted file" failure. The common implementation is **GitHub
+Actions**: a small YAML file in `.github/workflows/` tells GitHub what
+to run. This project added CI on 2026-08-09: every push runs the full
+pytest suite and ruff on a Windows **runner** (the machine GitHub rents
+you per run) — Windows because the code imports Win32 APIs at module
+load, so a Linux machine cannot even import it. *(See:
+2026-08-09, continuous integration.)*
+
 **complement guard** — a second guarded path whose allowed condition is
 the logical opposite of the first's, so between them every state has
 exactly one legal actor and a bypass flag never needs to exist. Our
@@ -132,12 +145,54 @@ was at (x, y)"), a later one reads it, and neither knows the other
 exists. How our run steps cooperate without coupling. *(First seen:
 2026-08-03, layers, reflexes, and guards.)*
 
+**branch** — a named line of commits inside one repository, letting
+work-in-progress accumulate snapshots without touching the official
+line (`main`). This project runs one branch per milestone
+(`m5-trial-run`), merged into main when the milestone's acceptance
+passes. *(First seen: 2026-08-03, in chat, explaining the M5 merge.)*
+
 **blocking (call)** — a function that does not return until its work is
 finished, so nothing else in that thread runs meanwhile. Harmless where
 nothing else needs to happen, dangerous where something does: the bot
 approaches monsters in short hops rather than one blocking walk, so the
 survival checks keep running between them. First seen in
-[simulating the game](2026-07-31-simulating-the-game.md).
+[simulating the game](2026-07-31-simulating-the-game.md). **The 24-second
+death of 2026-08-07 was this exact hazard realised**, and the two
+standard remedies both landed then: give the blocking call a *callback*
+so safety runs during the wait, and *cap* it so the caller's other
+duties resume regardless. *(See: 2026-08-07, starvation and defence in
+depth.)*
+
+**BaseException (and the exception hierarchy)** — exceptions are
+arranged in a family tree, and almost everything a program raises
+inherits from `Exception`. A few things sit deliberately *above* it,
+inheriting from `BaseException` directly — `KeyboardInterrupt`,
+`SystemExit` — so that a broad `except Exception` cannot swallow them.
+When you press Ctrl-C you mean it, and a stray error handler should not
+get a vote. Our safety signal was given the same treatment for the same
+reason. *(First seen: 2026-08-07, starvation and defence in depth.)*
+
+**callback** — a function you hand to another function so it can call
+you back at the right moment. Here: `walk_to` is given a safety check to
+call between its waits, so the monitor effectively runs *during* a
+blocking call rather than only after it. *(First seen: 2026-08-07,
+starvation and defence in depth.)*
+
+**dead-man's switch** — a control that acts when the operator *stops*
+signalling, rather than when they signal. A safety layer that is
+silently not running is worse than none, because everyone assumes it is
+on — so our watchdog process writes a timestamp every loop (a
+**heartbeat**) and the bot refuses to start when that timestamp is
+stale. *(First seen: 2026-08-07, starvation and defence in depth.)*
+
+**defence in depth** — independent safety layers arranged so that one
+failure does not defeat all of them. The layers are not copies: each
+covers what the others cannot. Our in-process safety poll is fast and
+precise but dies with the process it lives in; the separate watchdog
+process survives anything but knows less and can do only one crude
+thing. A related rule of thumb: **the backstop fires second** — give the
+outer layer a slacker threshold, so the graceful inner one wins whenever
+it can. *(First seen: 2026-08-07, starvation and defence in depth.)*
 
 **flaky test** — a test that sometimes passes and sometimes fails with no code change in between. Usually a symptom of a race condition, a timing assumption, or a fragile selector in the test itself; professionals treat flakiness as a bug in the test harness to be fixed, not ignored. *(First seen: 2026-07-31, when the tools lie.)*
 
@@ -195,12 +250,25 @@ fragile; out-of-process is more limited and more robust. This project is
 out-of-process; kolbot is in-process, which is why a version mismatch
 stopped it dead.
 
+**honest absence** — a rule for instruments: a value that could not be
+read is recorded as *unknown*, never as a plausible-looking default. A
+log that quietly writes 0 for "couldn't tell" is worse than one that
+says nothing, because you will trust the invented number. *(First seen:
+2026-08-06, instrumenting for questions you can't predict.)*
+
 **instrumentation** — measurement code living inside a real system:
 probes, counters, and logs that observe behavior while changing none of
 it. The rule is that a broken probe must never break the system (our
 click audit swallows its own failures). Professionals instrument first
 and change code second. *(First seen: 2026-08-01, measuring what the
 bot can see.)*
+
+**JSONL (JSON Lines)** — a file format where each line is one complete
+JSON record. Because every event is its own labelled line, the file can
+be *queried* (filter by kind, correlate two event types) rather than
+merely read — the difference between the run event log and a wall of
+`print()` output. *(First seen: 2026-08-06, instrumenting for questions
+you can't predict.)*
 
 **interface / protocol** — a named shape of methods ("anything with
 `engage()` and `upkeep()`") that code can depend on without knowing the
@@ -222,6 +290,21 @@ job needs, so a bug or abuse of it is bounded. Our chat channel can
 trigger exactly two commands (a whitelist), only while a test is
 active; it cannot become a general remote control by accident. *(First
 seen: 2026-08-01, building the workflow itself.)*
+
+**lockfile / pinning** — pinning is declaring exact dependency versions
+(`pytest==9.1.1`) instead of "whatever is newest"; a lockfile is the
+file recording the exact version of *everything* the project installs,
+transitives included, so every machine reproduces the validated
+environment. Must be curated, not dumped from a venv (which accumulates
+unrelated tools). Ours is `requirements.txt`. *(First seen: 2026-08-09,
+dependency pinning.)*
+
+**canary** — a small, expendable check exposed to danger first so the
+real thing doesn't find it the hard way: a deployment to 1% of users, or
+our weekly CI job that installs the latest *unpinned* dependencies and
+runs the suite. Red canary = upstream moved and broke us; nothing else
+is blocked. Named for the mine bird. See also *staged rollout*.
+*(First seen: 2026-08-09, dependency pinning.)*
 
 **linter / formatter** — a linter reads source code and flags likely mistakes and
 style violations; a formatter rewrites layout into one consistent shape so the
@@ -252,6 +335,17 @@ is enough to read another program's live data. Offsets are true for one
 build of a program and can shift when it is patched. First seen in
 [reading a program from the outside](2026-07-28-reading-a-program-from-outside.md).
 
+**mixin** — a class holding a slice of methods, never used on its own,
+composed with others by inheritance into one working class. The
+practical use here: splitting a sixty-method class (`TownLayer`) across
+one-concern files without redesigning it — the class the rest of the
+code sees is unchanged. *(First seen: 2026-08-09, package restructure.)*
+
+**merge** — folding one branch's commits into another, usually a work
+branch into `main`. After the merge both lines are identical; nothing
+is deleted and all history survives. Accepting a pull request is a
+merge. *(First seen: 2026-08-03, in chat, explaining the M5 merge.)*
+
 **modal dialog** — a pop-up window that freezes the rest of its program
 until a human clicks a button ("OK", "Retry"). Fine on a desktop; fatal for
 automation, because a headless program that pops one has no human to click
@@ -266,6 +360,14 @@ these may run". A second elevated bridge tries to take the named mutex,
 fails, and exits instead of racing the first for queue commands. Inside
 one program the same tool is called a lock. *(First seen: 2026-08-01,
 building the workflow itself.)*
+
+**observability** — how well you can tell what a running system is
+actually doing from the record it leaves. High observability means a
+misbehaviour can be diagnosed from the logs alone, without re-running or
+guessing. The run event log is the project's observability: it records
+*every* decision, because you can't predict which one you'll need to
+ask about. *(First seen: 2026-08-06, instrumenting for questions you
+can't predict.)*
 
 **package / module** — a module is a single `.py` file; a package is a directory
 of modules imported under one name (here, `pd2bot`). The boundaries you draw
@@ -330,7 +432,36 @@ high-priority need is pending, the low-priority work does not get the
 resource. *(First seen: 2026-08-02, livelocks, margins, and the kill
 switch.)*
 
+**pull request (PR)** — a proposal hosted on GitHub to merge one
+branch into another, presented as a page where the changes can be
+read, discussed, and accepted. The convention it encodes: the author
+of changes does not accept their own proposal — a reviewer signs off.
+In this project, that reviewer is the user, at milestone boundaries.
+*(First seen: 2026-08-03, in chat, explaining the M5 merge.)*
+
+**push / pull (git)** — push uploads your local commits to the
+repository's copy on a server (GitHub); pull downloads commits made
+elsewhere into your local copy. Committing alone saves only on your
+machine — pushing is what makes work survive the machine and reach
+other clones. *(First seen: 2026-08-03, in chat, explaining the M5
+merge.)*
+
 **race condition** — a bug where two events arrive so close together that the processing order is effectively random, and one order is wrong. Notoriously hard to find because the wrong order may be rare, and harmless in most places it occurs. Fixed by forcing the order (waits, locks, sequencing). *(First seen: 2026-07-31, when the tools lie.)*
+
+**reasoning from silence** — the failure of explaining a behaviour you
+have no record of. With a sparse log the mind supplies a plausible
+story, and a plausible story is indistinguishable from a true one until
+checked — four confident explanations of one stuck run were all wrong.
+The discipline: read the log, and if it can't answer, add the
+instrument, not a story. *(First seen: 2026-08-06, instrumenting for
+questions you can't predict.)*
+
+**refactoring** — restructuring code without changing what it does, so
+future work is easier and bugs have fewer hiding places. The discipline
+is proving the "without changing" half: checks green at every step, no
+behavior edits mixed in, and ideally one real end-to-end run at the end.
+The reckless opposite — everything at once, no checkpoints — is a "big
+bang" refactor. *(First seen: 2026-08-09, package restructure.)*
 
 **registry (pattern)** — a lookup table mapping names to
 implementations, populated at startup: our step registry maps a run
@@ -354,6 +485,13 @@ Our agent-toolkit repo is the SSOT for agent workflow: the installed
 skills under `~/.claude/skills/` are copies made by the installer, never
 edited directly. Most sync bugs in any system are two "sources of truth"
 disagreeing.
+
+**shim** — a thin forwarding layer kept at an old address so existing
+callers keep working after the real thing moves: our root `navigate.py`
+is five lines that hand off to `nav/navigate.py`, keeping
+`python -m pd2bot.navigate` and every script that types it unchanged.
+A shim that grows logic of its own is a smell. *(First seen:
+2026-08-09, package restructure.)*
 
 **short-circuit** — evaluating an ordered list of options and stopping at
 the first that applies, so nothing below it runs at all. The survival
@@ -413,6 +551,12 @@ treats a keypress as a request whose effect must be read back — and it
 found two real bugs on its first run. First seen in
 [simulating the game](2026-07-31-simulating-the-game.md).
 
+**transitive dependency** — a dependency of your dependency: install
+pytest and pip silently brings five more packages pytest needs. They are
+part of your real environment whether or not you name them, which is why
+a lockfile pins them too — three declared packages here are eight
+installed ones. *(First seen: 2026-08-09, dependency pinning.)*
+
 **transient vs persistent state** — data with a short lifetime (a
 monster's position this instant) versus data that stays true (a wall).
 Persisting transient state is a classic cache bug: our first survey
@@ -432,8 +576,140 @@ same library without conflict. It is derived data: never commit it to git or
 put it in cloud-synced storage. First seen in
 [from script to package](2026-07-28-from-script-to-package.md).
 
+**starvation** — when a task that is ready to run, and permitted to run,
+simply never gets a turn, because something else will not yield. It is
+not a crash and produces no error, which is what makes it hard: the code
+is correct and merely never reached. Our chicken check ran at the top of
+every tick, and a walk that blocked for 24 seconds meant the top of the
+tick never came round again — the character died at full logged health.
+*(First seen: 2026-08-07, starvation and defence in depth.)*
+
+**thread vs process** — a *thread* is a parallel line of execution
+inside one program, sharing that program's memory and its fate: if the
+process hangs or dies, so does every thread in it. A *process* is a
+separate program with its own memory, scheduled independently by the
+operating system. This is why our chicken watchdog is a process and not
+a thread — it has to survive the very failures it exists to catch.
+*(First seen: 2026-08-07, starvation and defence in depth.)* See also
+*in-process vs out-of-process*.
+
+**mutation testing** — a technique that deliberately introduces small
+bugs ("mutations") into your code and checks that some test starts
+failing. Any mutation that no test notices marks a gap. It is the
+automated form of the manual habit that catches *vacuous tests*: break
+it on purpose and confirm you see red. *(First seen: 2026-08-07,
+starvation and defence in depth.)*
+
+**vacuous test (tautological test)** — a test whose assertions hold
+whether or not the code works, so it can never fail. Worse than no test,
+because a missing test is an honest gap while this one is false
+reassurance that stops anyone looking. Two appeared in a single cycle
+here: a threshold a healthy character could never cross, and a check
+that set its pass flag in *both* branches of a try/except. The defence
+is a habit, not a tool — **make the test fail on purpose at least
+once**. *(First seen: 2026-08-07, starvation and defence in depth.)*
+
 **watchdog** — a timer that fires when a system stops *making progress*,
 as opposed to visibly failing. It catches the unforeseen bug whose only
 symptom is standing still. Our never-idle rule is one: outside town,
 nothing sent and no progress for ten seconds means leave the game.
 First seen in [the behavior engine](2026-07-31-the-behavior-engine.md).
+The word also names the *separate process* added 2026-08-07 that watches
+the character's health and presses ESC — same idea (notice trouble that
+produces no error), different mechanism.
+
+**bisect (`git bisect`)** — finding which commit introduced a bug by
+checking out old versions and testing each one, halving the range each
+time. Cheap in theory, slow when a test means launching the real system —
+which is why good **instrumentation** often beats it: if every run
+already records the number that changed, the culprit falls out of a log
+query instead of an afternoon of rebuilds. *(First seen: 2026-08-08,
+classification and coordinate spaces.)*
+
+**classification (and test order)** — routing each thing into one of
+several categories with a chain of if/else tests. Because the first
+matching test wins, **the order of the tests is part of the logic**, and
+moving one test up the chain silently changes the answer for every case
+it now sees first. Ours filed town NPCs as decorative scenery after a
+"is it scenery?" check was hoisted above "is it friendly?", and
+everything that looks for an NPC looks in the ally category. *(First
+seen: 2026-08-08, classification and coordinate spaces.)*
+
+**coordinate space** — the frame of reference that gives coordinates
+meaning. A program that draws things usually has at least two: the
+world's own units, and pixels on screen. Distances do not survive the
+trip between them, so a rule written in one space cannot answer a
+question asked in the other — the source of a whole family of bugs in
+graphical software. *(First seen: 2026-08-08, classification and
+coordinate spaces.)*
+
+**isometric projection** — the fixed camera angle that draws a
+grid-based world as diamonds rather than squares, giving depth without
+real 3D. Diablo II's projection moves a point 20 pixels sideways and 10
+pixels down per subtile here (measured, not assumed), so screen distance
+depends on *direction*: two points equally far away in the world can be
+adjacent or a screen apart. *(First seen: 2026-08-08, classification and
+coordinate spaces.)*
+
+**regression (and regression test)** — a bug that breaks something which
+previously worked, most often introduced by a fix to something else. A
+regression test is written specifically to fail if that old bug returns;
+it is the standard way a fixed bug is prevented from coming back a third
+time. *(First seen: 2026-08-08, classification and coordinate spaces.)*
+
+**sprite / hit box** — a sprite is the flat image drawn for a character
+or object; the hit box is the region that counts as "you clicked it".
+The two need not match the thing's footprint in the world: a standing
+character occupies about one tile of ground but is drawn tall, so a
+click well clear of their feet in world terms can still land on their
+body on screen. *(First seen: 2026-08-08, classification and coordinate
+spaces.)*
+
+**baseline** — a recorded "before" measurement, kept permanently, so a
+later change is judged against evidence instead of memory. This
+project's speed pass kept every run's numbers and compared each change
+against both the original bot run and the human benchmark. *(First
+seen: 2026-08-14, measuring before fixing.)*
+
+**benchmark** — a reference standard you measure toward, often a
+known-good implementation of the same task. Here: a human playing the
+bot's exact Cold Plains job (53 s) while a read-only recorder watched,
+making every difference attributable to *how* the bot plays. *(First
+seen: 2026-08-14, measuring before fixing.)*
+
+**budget (computational)** — an explicit cap on what a piece of work
+may spend (time, memory, search steps) before it must return with
+whatever answer it has. Converts "rarely, catastrophically slow" into
+"occasionally, cheaply wrong in a recoverable way" — the shape behind
+timeouts everywhere in production software. Our A* search may expand a
+distance-scaled number of squares before answering "no route". *(First
+seen: 2026-08-14, measuring before fixing.)*
+
+**premature optimization** — changing code for speed before measuring
+where the time actually goes. One of the industry's most-quoted sins,
+because careful reasoning about performance is wrong often enough that
+measurement is the only arbiter; this cycle's two same-night reverts
+are the case study. *(First seen: 2026-08-14, measuring before
+fixing.)*
+
+**revert** — undoing a change, as a first-class engineering act rather
+than an admission of failure. A healthy revert records WHY (ours carry
+the measurement that falsified the change, in a comment at the scene)
+so the dead end is documented and nobody retries it blind. *(First
+seen: 2026-08-14, measuring before fixing.)*
+
+**telemetry** — the running program continuously writing down what it
+does, so behavior is observable after the fact without a debugger
+attached. Sibling of *instrumentation* (the act of adding such
+measurement) and *observability* (the property of having enough of
+it). Our run event log, `nav.plan` costs, and the locomotion report
+are all telemetry. *(First seen: 2026-08-14, measuring before
+fixing.)*
+
+**worst case** — an algorithm's cost on the most unfavorable input,
+which can be thousands of times its typical cost. Engineering for the
+worst case (budgets, timeouts, caps) is different work from making the
+typical case fast, and production code needs both. A* asked for a
+route that does not exist must flood everything reachable to prove
+"no" — 20 seconds against a 3 ms typical ask, until it was budgeted.
+*(First seen: 2026-08-14, measuring before fixing.)*

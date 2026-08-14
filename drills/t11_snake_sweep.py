@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
-from pd2bot.items import read_carried_items  # noqa: E402
+from pd2bot.perception.items import read_carried_items  # noqa: E402
 
 POLL_S = 0.05  # 20 Hz — the cursor barely moves between samples
 IDLE_FINISH_S = 20.0

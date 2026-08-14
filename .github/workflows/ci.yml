@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * 1"  # Mondays 09:00 UTC — the unpinned canary
+  workflow_dispatch:
+
+# Superseded runs on the same branch are cancelled; the event name is in
+# the group so a canary run and a push run never cancel each other.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Not a preference: pd2bot touches ctypes.windll at import time,
+    # so the suite cannot even be collected on Linux (see
+    # docs/archive/plans/2026-08-09-ci-github-actions/notes.md).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      # The locked set — reproducible by construction. Deliberately NOT an
+      # editable install; pyproject.toml has no build system, by design.
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q
+      - run: python -m ruff check .
+
+  # The early-warning half of the bargain: pinning (above) buys
+  # reproducibility but would silence the signal that a new upstream
+  # release breaks us. This job installs UNPINNED latest weekly and runs
+  # the same checks. Red canary = time to test an upgrade and move the
+  # pins; it never blocks merges (branch protection requires `checks`).
+  canary:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install pymem pytest ruff
+      - run: python -m pytest -q
+      - run: python -m ruff check .

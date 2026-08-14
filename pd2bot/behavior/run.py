@@ -64,6 +64,9 @@ class RunStep:
 class RunDefinition:
     name: str
     steps: tuple[RunStep, ...]
+    # The mandatory-pickup pilot flag (R241 item 7): per-run, default
+    # off. Cold Plains pilots it; the census gate promotes it further.
+    mandatory_pickup: bool = False
 
     def with_radius(self, radius: int) -> RunDefinition:
         """A copy whose `clear_radius` steps use `radius` instead.
@@ -88,7 +91,10 @@ class RunDefinition:
                 f"--radius {radius} has nothing to apply to: run "
                 f"{self.name!r} has no clear_radius step"
             )
-        return RunDefinition(name=self.name, steps=steps)
+        return RunDefinition(
+            name=self.name, steps=steps,
+            mandatory_pickup=self.mandatory_pickup,  # must survive the copy
+        )
 
     @property
     def radius(self) -> int | None:
@@ -129,6 +135,15 @@ def default_registry() -> StepRegistry:
     registry = StepRegistry()
     registry.register(StepSpec("town_preamble"))
     registry.register(
+        StepSpec(
+            "deplete_belt",  # TEST FIXTURE (R241); must mirror build_registry
+            params=(
+                ParamSpec("count", int, required=False, default=3),
+                ParamSpec("potion", str, required=False, default="healing"),
+            ),
+        )
+    )
+    registry.register(
         StepSpec("waypoint", params=(ParamSpec("dest", int),))
     )
     registry.register(
@@ -142,6 +157,37 @@ def default_registry() -> StepRegistry:
                 # two vocabularies that disagree would pass a run file here
                 # that the bot then refuses in Hell.
                 ParamSpec("patrol", bool, required=False, default=False),
+                # M6 P3: the combat posture for this step. The NAME is
+                # only checkable against a loaded class config, so this
+                # registry validates the type and build_registry's
+                # factory validates the value.
+                ParamSpec("posture", str, required=False, default=None),
+            ),
+        )
+    )
+    registry.register(
+        # Must stay in step with build_registry's copy (the standing
+        # rule): the linter validates run files against THIS vocabulary.
+        StepSpec(
+            "traverse",
+            params=(
+                ParamSpec("dest", int),
+                ParamSpec("posture", str, required=False, default=None),
+                ParamSpec("line", bool, required=False, default=False),
+            ),
+        )
+    )
+    registry.register(
+        # Must stay in step with build_registry's copy (the standing
+        # rule): this schema is what the run linter validates against.
+        StepSpec(
+            "clear_countess",
+            params=(
+                ParamSpec("chamber_x", int),
+                ParamSpec("chamber_y", int),
+                ParamSpec("neighborhood_radius", int, required=False, default=30),
+                ParamSpec("chamber_radius", int, required=False, default=25),
+                ParamSpec("posture", str, required=False, default=None),
             ),
         )
     )
@@ -151,6 +197,22 @@ def default_registry() -> StepRegistry:
     # validates against, and a survey run that lints here but is unknown
     # to the live registry would refuse to start in Hell.
     registry.register(StepSpec("survey"))
+    registry.register(
+        StepSpec(
+            "tagmode_battery",  # TEST KIT (R248/R250); must mirror build_registry
+            params=(
+                ParamSpec("rounds", int, required=False, default=5),
+                ParamSpec("blocks", str, required=False, default="ABC"),
+                ParamSpec("round_seconds", int, required=False, default=30),
+                ParamSpec("radius", int, required=False, default=30),
+                ParamSpec("min_wanted", int, required=False, default=2),
+                ParamSpec(
+                    "filter_initially_on", bool, required=False, default=False
+                ),
+                ParamSpec("confirm_seconds", int, required=False, default=6),
+            ),
+        )
+    )
     registry.register(StepSpec("done"))
     return registry
 
@@ -202,7 +264,7 @@ def load_run(path: str | Path, registry: StepRegistry) -> RunDefinition:
         data = tomllib.load(fh)
     where = path.name
 
-    unknown = sorted(set(data) - {"name", "step"})
+    unknown = sorted(set(data) - {"name", "step", "mandatory_pickup"})
     if unknown:
         raise RunError(
             f"{where}: unknown top-level key(s) {', '.join(map(repr, unknown))}"
@@ -210,6 +272,9 @@ def load_run(path: str | Path, registry: StepRegistry) -> RunDefinition:
     name = data.get("name")
     if not isinstance(name, str) or not name:
         raise RunError(f"{where}: a run needs a non-empty string 'name'")
+    mandatory_pickup = data.get("mandatory_pickup", False)
+    if not isinstance(mandatory_pickup, bool):
+        raise RunError(f"{where}: mandatory_pickup must be true or false")
     raw_steps = data.get("step")
     if not isinstance(raw_steps, list) or not raw_steps:
         raise RunError(f"{where}: a run needs at least one [[step]]")
@@ -224,7 +289,9 @@ def load_run(path: str | Path, registry: StepRegistry) -> RunDefinition:
             step_name, {k: v for k, v in raw.items() if k != "name"}, spec, where
         )
         steps.append(RunStep(name=step_name, params=params))
-    return RunDefinition(name=name, steps=tuple(steps))
+    return RunDefinition(
+        name=name, steps=tuple(steps), mandatory_pickup=mandatory_pickup
+    )
 
 
 def build_states(run: RunDefinition, registry: StepRegistry) -> list[StepState]:

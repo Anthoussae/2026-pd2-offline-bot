@@ -13,7 +13,7 @@ executor owns those translations; nothing above it may bypass them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 
@@ -54,6 +54,32 @@ class CastAtPoint:
 
 
 @dataclass(frozen=True)
+class InteractObject:
+    """Left-click a world object — a staircase, a level-exit doorway.
+
+    The M6 traversal gesture (R212 Q3: cellar connections are a single
+    click). Distinct from `MoveTo` because the click must land ON the
+    object's position (the client walks the character there and takes
+    the transition), and distinct from `AttackUnit` because SHIFT would
+    turn it into an attack on the spot.
+    """
+
+    position: tuple[int, int]
+
+
+@dataclass(frozen=True)
+class ParkSkill:
+    """A verified right-skill SWITCH with no cast (M6 P3).
+
+    Executor-internal: the parking housekeeping records these in the
+    trace so a park never reads as a cast. Deciders (ladder, combat
+    module, steps) never emit one.
+    """
+
+    skill_id: int
+
+
+@dataclass(frozen=True)
 class MoveTo:
     """Walk toward a world position (disengage, retreat, repositioning)."""
 
@@ -76,10 +102,21 @@ class MoveTo:
 @dataclass(frozen=True)
 class AttackUnit:
     """Left-click a monster: the necro's whole offense (R47 — the left
-    skill is permanently Poison Strike and never switches)."""
+    skill is permanently Poison Strike and never switches).
+
+    `walk_in` False = SHIFT held, attack in place — the skirmish rule,
+    where a bare click out of melee range would walk the character into
+    the pack. `walk_in` True (R259, the charge style) drops SHIFT and
+    WANTS that walk: the client paths the character to the target
+    around bodies natively and swings on arrival — the human mechanism,
+    and the answer to the T92 battery's blocked dashes (88 capped walks
+    burning 183 s against monster collision that manual move-clicks
+    cannot push through).
+    """
 
     unit_id: int
     position: tuple[int, int]
+    walk_in: bool = False
 
 
 @dataclass(frozen=True)
@@ -102,6 +139,42 @@ class PickUpItem:
     unit_id: int
     position: tuple[int, int]
     attempt: int = 0
+    # The item's type number, carried purely so the run log can NAME what
+    # was reached for (the run-event-log plan, P3). The executor cannot
+    # resolve it — it only has a unit id — and a log that says "picked up
+    # something" answers none of the questions a log exists for. Optional
+    # so every existing construction site keeps working; unset renders as
+    # an honest "unknown" rather than a guess.
+    #
+    # `compare=False` for the same reason `MoveTo.toward` is informational:
+    # the kind does not change what this action DOES, so two pickups of
+    # the same item at the same aim are the same action whether or not
+    # the caller happened to know its type. Equality is about the deed.
+    kind: int | None = field(default=None, compare=False)
+
+
+# Where an item is actually CLICKABLE, relative to the projection of its
+# ground tile — measured by T63 (2026-08-03), the drill that ended a
+# five-drill hunt: position clicks DO pick items (no hover state needed;
+# the hover pointer was a red herring for clicks), but the sprite draws
+# UPWARD from its tile, so the tile projection itself misses ~29 times in
+# 30 (T57). T63's direct-click matrix landed at (0, -28) with labels off
+# and (-16, -40) with labels on. One offset per retry, best guesses
+# first: the schedule is what makes retry N differ from retry N-1.
+#
+# It lives HERE rather than in the executor because `PickUpItem.attempt`
+# is an index into it — the action's own contract — and because the step
+# that writes an item off has to report WHICH aim points were spent
+# (P1 of the pickup-reliability plan). A schedule only the executor
+# could see made "all 8 attempts failed" an unanswerable statement.
+PICKUP_AIM_POINTS: tuple[tuple[int, int], ...] = (
+    (0, -28), (-16, -40), (16, -28), (0, -16), (-16, -28), (0, -40),
+    (16, -40), (0, -48),  # the LABEL band (T65 v4): small classes —
+    # runes, gems, charms — are effectively label-clicked; their ground
+    # sprites survived 58-147 direct probes while both v4 hits landed
+    # at y=-48. Labels are ensured ON by the executor, so the tail can
+    # reach them.
+)
 
 
 Action = (

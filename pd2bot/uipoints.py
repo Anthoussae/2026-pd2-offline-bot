@@ -164,6 +164,22 @@ def default_points() -> dict[str, UIPoint]:
             ),
         ),
         UIPoint(
+            "akara.trade",
+            offsets.UI_NPCMENU,
+            opens=offsets.UI_NPCSHOP,
+            anchor_npc=offsets.NPC_AKARA,
+            keyboard_row=2,
+            row_count=3,
+            note=(
+                "Akara's menu is Talk / Trade / Cancel (operator-confirmed, "
+                "2026-08-10), the same three-row shape as Charsi's "
+                "trade/repair: 1 Down then Enter selects TRADE (row 2) and "
+                "opens the shop. Same discipline as charsi.trade_repair — "
+                "the row INDEX is stable while its pixels move as she paces; "
+                "verified by effect (UI_NPCSHOP opens)."
+            ),
+        ),
+        UIPoint(
             "charsi.repair_all",
             offsets.UI_NPCSHOP,
             (0.4648, 0.7650),
@@ -206,6 +222,40 @@ def default_points() -> dict[str, UIPoint]:
         # The waypoint list. A destination click raises no panel — it closes
         # the one you are in and loads an area — so `opens` stays None and
         # the proof is the area id read back (waypoint.py's `await_arrival`).
+        # The act TABS of the waypoint list (M6 P2). Screen-anchored
+        # furniture like the rows. Clicking a tab swaps the destination
+        # list and raises no panel; travel on a subsequently-clicked row
+        # is the proof the tab click took.
+        UIPoint(
+            "waypoint.tab_act1",
+            offsets.UI_WPMENU,
+            (0.2363, 0.1308),  # T69, 2026-08-05, window 1536x864
+        ),
+        UIPoint(
+            "waypoint.tab_act2",
+            offsets.UI_WPMENU,
+            (0.2930, 0.1319),  # T69, 2026-08-05, window 1536x864
+        ),
+        UIPoint(
+            "waypoint.tab_act5",
+            offsets.UI_WPMENU,
+            (0.4720, 0.1250),  # T69, 2026-08-05, window 1536x864
+        ),
+        UIPoint(
+            "waypoint.black_marsh",
+            offsets.UI_WPMENU,
+            (0.2370, 0.4664),  # T69, 2026-08-05, window 1536x864
+        ),
+        UIPoint(
+            "waypoint.arcane_sanctuary",
+            offsets.UI_WPMENU,
+            (0.3503, 0.6400),  # T69, 2026-08-05, window 1536x864
+        ),
+        UIPoint(
+            "waypoint.halls_of_pain",
+            offsets.UI_WPMENU,
+            (0.2318, 0.5255),  # T69, 2026-08-05, window 1536x864
+        ),
         UIPoint(
             "waypoint.cold_plains",
             offsets.UI_WPMENU,

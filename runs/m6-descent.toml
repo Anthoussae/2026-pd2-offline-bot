@@ -1,0 +1,53 @@
+# M6 P2 drill run: the full descent — town to Tower Cellar Level 5.
+#
+# Seven transitions in a row, each proven by its own area id: nothing
+# counts floors, so a missed or wrong transition fails the step that
+# expected it rather than silently continuing one level out of place.
+# Brisk throughout: the objective is the Countess, and everything else
+# en route is only fought when it obstructs (R212 Q4).
+#
+# The Countess herself is NOT engaged here — this run stops on arrival
+# in Cellar 5. Her chamber (clear-nearby, the north approach, the kill,
+# the careful pickup) is P4's `clear_countess` step.
+
+name = "m6-descent"
+
+[[step]]
+name = "town_preamble"
+
+[[step]] # act I tab -> Black Marsh row (T69 calibration)
+name = "waypoint"
+dest = 6
+
+[[step]] # Black Marsh -> Forgotten Tower
+name = "traverse"
+dest = 20
+posture = "brisk"
+
+[[step]] # Tower -> Cellar 1
+name = "traverse"
+dest = 21
+posture = "brisk"
+
+[[step]]
+name = "traverse"
+dest = 22
+posture = "brisk"
+
+[[step]]
+name = "traverse"
+dest = 23
+posture = "brisk"
+
+[[step]]
+name = "traverse"
+dest = 24
+posture = "brisk"
+
+[[step]] # Cellar 4 -> Cellar 5, the Countess's floor
+name = "traverse"
+dest = 25
+posture = "brisk"
+
+[[step]]
+name = "done"

@@ -32,10 +32,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import offsets  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.snapshot import Perception  # noqa: E402
-from pd2bot.town import TownConfig  # noqa: E402
-from pd2bot.units import (  # noqa: E402
+from pd2bot.behavior.town import TownConfig  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.snapshot import Perception  # noqa: E402
+from pd2bot.perception.units import (  # noqa: E402
     PERCEPTION_RADIUS,
     iter_units_of_type,
     player_unit,

@@ -54,19 +54,36 @@ in `docs/instruction-log.md` and appended one-line to
 
 Perception, navigation, the game cycle, and the behavior layer are done
 and live-verified.
+
+**When a run misbehaves, read the run event log first — do not reason
+from silence.** Every run writes `logs/runs/<stamp>-<runname>/events.jsonl`
+(always on, schema'd, append-only); read it with `python -m pd2bot.runlog`
+(add `--pickup` for the wanted-vs-collected census). The schema and every
+event kind are documented in `docs/architecture/run-log.md`. This method
+note has been paid for repeatedly: confident hypotheses about the
+Forgotten Tower were all wrong; the log answered it on the first run.
+ADR: `docs/adr/2026-08-05-run-event-log.md` (accepted).
 Input goes through guarded send paths with **no bypass**: world input
 via `pd2bot.input.GatedInput` (guard: `can_act()` AND foreground),
-menu input via `pd2bot.menuinput.MenuInput` (guard: the complement —
-not in a game, or the ESC menu open), chat via `pd2bot.chat.Chat`
+menu input via `pd2bot.input.menu.MenuInput` (guard: the complement —
+not in a game, or the ESC menu open), chat via `pd2bot.input.chat.Chat`
 (types only while the chat console is verified open), and in-game
-panel clicks via `pd2bot.panelinput.PanelInput` (clicks only while the
+panel clicks via `pd2bot.input.panel.PanelInput` (clicks only while the
 panel the caller names is verified open — the waypoint list, stash,
 NPC dialogs; M5's addition, Chat's construction generalized). M4 and
 M5 both kept the M1 contract: `GatedInput`'s guard was not touched. Safety invariant: after
 a detected death the bot sends no input of any kind, permanently
 (`pd2bot.safety`, the death latch) — do not add recovery behavior
 without an explicit user decision (see
-`docs/architecture/game-cycle.md`). Live checks against the
+`docs/architecture/game-cycle.md`). **Second safety invariant, added
+2026-08-07 after a chicken-starvation death: nothing may starve the
+monitor.** A blocking call must poll safety (`SafetyMonitor.poll`,
+raising `SafetyInterrupt` — a `BaseException`, so no `except Exception`
+can swallow it) and must be bounded; `nav/navigate.py`'s `_wait` is the
+pattern — sleep in poll-sized pieces, never flat. A separate elevated
+process (`pd2bot.watchdog`) presses ESC independently, and the launcher
+refuses to start a real run without it. ADR:
+`docs/adr/2026-08-07-unstarvable-safety.md`. Live checks against the
 game need **Administrator rights** (the client runs elevated; UIPI also
 blocks synthetic input from normal processes). The agent runs elevated
 commands itself via the **bridge**: the user starts

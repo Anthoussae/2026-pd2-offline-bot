@@ -1,0 +1,84 @@
+# The Countess run — M6's flagship (plan: docs/plans/2026-08-03-m6-countess).
+#
+# The descent is m6-descent.toml's proven spine: seven transitions, each
+# verified by its own area id, brisk throughout — the objective is the
+# Countess, and everything en route is fought only when it obstructs
+# (R212 Q4). Warm descents are staircase-to-staircase over the exits
+# banked in maps/exits.json (T70 run 5); wanted drops on traversal
+# floors are collected opportunistically since P4 (the T70 Thul lesson).
+#
+# The endgame encodes the user's tactics (R212 Q4 exception, Q7): clear
+# the arrival neighborhood so the encounter has no gaggle, stage NORTH
+# of her chamber, advance in short legs behind the revive wall, and
+# prove the kill — her pinned identity dead on the ground, or provably
+# absent after the budgeted (<15 s) chamber sweep. Chicken for proper
+# runs is 35% (R212 Q8, config default).
+
+name = "countess"
+# The order book (R241 item 7), PROMOTED here by the R246 census gate
+# (operator ruling 2026-08-14): the three-game cold-plains pilot proved
+# the full order lifecycle — open, resight-through-combat, id-churn
+# rebind, expiry, full-inventory, queued + mid-field cleanse, budget
+# close — with every miss either an honest refusal (belt full) or a
+# mode since fixed (labels-OFF pickup R254, the locomotion pass R257).
+# Runes are this run's point; a wanted drop on any floor becomes an
+# order the run must resolve before it ends.
+mandatory_pickup = true
+
+[[step]]
+name = "town_preamble"
+
+[[step]] # act I tab -> Black Marsh row (T69 calibration)
+name = "waypoint"
+dest = 6
+
+[[step]] # Black Marsh -> Forgotten Tower
+name = "traverse"
+dest = 20
+posture = "brisk"
+
+[[step]] # Tower -> Cellar 1
+name = "traverse"
+dest = 21
+posture = "brisk"
+
+[[step]]
+name = "traverse"
+dest = 22
+posture = "brisk"
+
+[[step]]
+name = "traverse"
+dest = 23
+posture = "brisk"
+
+[[step]]
+name = "traverse"
+dest = 24
+posture = "brisk"
+
+[[step]] # Cellar 4 -> Cellar 5, her floor
+name = "traverse"
+dest = 25
+posture = "brisk"
+
+[[step]]
+name = "clear_countess"
+# The chamber anchor: where T68's read-only probe read her standing
+# (kind 734 / unique_no 6, 2026-08-05, this seed 4e52715f). A HINT, not
+# a promise — the step swaps in the live boss read the moment she is in
+# perception, so a wander (or a different seed's layout, at the cost of
+# a longer search) degrades gracefully.
+chamber_x = 12548
+chamber_y = 11036
+# The arrival-pocket clearance (the champion pack at the stairs) and
+# the chamber circle the sweep walks and pickup adopts.
+neighborhood_radius = 30
+chamber_radius = 25
+posture = "aggressive"
+
+[[step]] # adopts the chamber circle off the blackboard; labels ensured
+name = "pickup"  # OFF for pickup clicks since R254 (the T90 measurement)
+
+[[step]]
+name = "done"

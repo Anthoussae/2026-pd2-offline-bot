@@ -30,8 +30,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pd2bot import offsets  # noqa: E402
 from pd2bot.drill import Drill, DrillAborted, DrillRun, run_drill  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
-from pd2bot.snapshot import Perception  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.snapshot import Perception  # noqa: E402
 
 # The two M5 needs plus the neighbours most likely to be confused with them;
 # naming more costs the user only a few seconds each and settles the table.

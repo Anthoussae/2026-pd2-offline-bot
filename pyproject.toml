@@ -3,6 +3,9 @@ name = "pd2bot"
 version = "0.1.0"
 description = "Out-of-process bot for Project Diablo 2 (offline single player)"
 requires-python = ">=3.12"
+# These floors are the human-readable INTENT (direct dependencies only).
+# The authoritative, exact install set is requirements.txt — change
+# versions there; the update ritual is in the README.
 dependencies = ["pymem>=1.14"]
 
 [project.optional-dependencies]

@@ -1,7 +1,7 @@
 ﻿# Request index
 
 One line per user request, newest last, appended when the request is
-issued. Scanning and counting only â€” details and outcomes live in
+issued. Scanning and counting only — details and outcomes live in
 [instruction-log.md](instruction-log.md).
 
 Backfilled 2026-08-01 from the instruction log; entries before the
@@ -23,7 +23,7 @@ headings, noted in parentheses, say roughly where they fell).
 - R13 [execute] Survey walk, post-fix (Live verification (elevated terminal, user at the machine))
 - R14 [execute] Atlas persistence checks (Live verification (elevated terminal, user at the machine))
 - R15 [execute] Acceptance demo, first attempt (Live verification (elevated terminal, user at the machine))
-- R16 [execute] Survey current spot, then demo Ã—5 (Live verification (elevated terminal, user at the machine))
+- R16 [execute] Survey current spot, then demo ×5 (Live verification (elevated terminal, user at the machine))
 - R17 [execute] Ground-item live check (M2 leftover) (M3 closeout)
 - R18 [decision] Commit M3? (Post-milestone housekeeping)
 - R19 [execute] Ground-item re-check after mode filter (M3 closeout)
@@ -34,131 +34,131 @@ headings, noted in parentheses, say roughly where they fell).
 - R24 [execute] Verify locality filter; locate the merc (M3 closeout)
 - R25 [execute] Confirm de-duplication (M3 closeout)
 - R26 [decision] Relocate agent-toolkit to `C:\dev\agent-toolkit`? (Post-milestone housekeeping)
-- R27 [decision] M4 planning confirmations (Q1â€“Q8) (Planning discovery)
+- R27 [decision] M4 planning confirmations (Q1–Q8) (Planning discovery)
 - R28 [decision] How to live-test death handling (Planning discovery)
 - R29 [decision] Approve the M4 phase table (Planning discovery)
 - R30 [execute] Open an elevated terminal, verify attach (M4 live-session setup)
 - R31 [decision] Choose the agent's elevated-access mechanism (M4 live-session setup)
 - R32 [execute] Start the elevated bridge (M4 live-session setup)
 - R33 [execute] Restart the bridge (exit-code fix) (M4 live-session setup)
-- R34 [execute] Walk the menu screens for the OOG watcher (M4 implementation â€” P1 (OOG perception))
-- R35 [execute] ESC-menu probe, then hands-off click test (M4 implementation â€” P2 (menu input))
-- R37 [execute] Hover "Save and Exit Game" for calibration (M4 implementation â€” P3 (game cycle))
-- R38 [execute] Hands off for the first autonomous cycle (M4 implementation â€” P3 (game cycle))
-- R39 [execute] Acceptance run: 3 unattended cycles (M4 implementation â€” P3 (game cycle))
-- R40 [decision] P3 review gate (M4 implementation â€” P3 (game cycle))
-- R41 [execute] Chicken demo + inert run (pre-chat version) (M4 implementation â€” P4 (safety monitor) + chat channel)
-- R42 [execute] Chat probe (M4 implementation â€” P4 (safety monitor) + chat channel)
-- R43 [execute] Chicken demo with in-game instructions, then inert run (M4 implementation â€” P4 (safety monitor) + chat channel)
+- R34 [execute] Walk the menu screens for the OOG watcher (M4 implementation — P1 (OOG perception))
+- R35 [execute] ESC-menu probe, then hands-off click test (M4 implementation — P2 (menu input))
+- R37 [execute] Hover "Save and Exit Game" for calibration (M4 implementation — P3 (game cycle))
+- R38 [execute] Hands off for the first autonomous cycle (M4 implementation — P3 (game cycle))
+- R39 [execute] Acceptance run: 3 unattended cycles (M4 implementation — P3 (game cycle))
+- R40 [decision] P3 review gate (M4 implementation — P3 (game cycle))
+- R41 [execute] Chicken demo + inert run (pre-chat version) (M4 implementation — P4 (safety monitor) + chat channel)
+- R42 [execute] Chat probe (M4 implementation — P4 (safety monitor) + chat channel)
+- R43 [execute] Chicken demo with in-game instructions, then inert run (M4 implementation — P4 (safety monitor) + chat channel)
 - R44 [decision] Commit M4? (M4 closeout)
 - R45 [inform] Carried-vitals chicken loop risk (M4 closeout)
-- R46 [decision] M5 planning confirmations (Q1â€“Q8) (Planning discovery)
+- R46 [decision] M5 planning confirmations (Q1–Q8) (Planning discovery)
 - R47 [inform] Character kit questionnaire (Planning discovery)
 - R48 [decision] Belt refill strategy for M5 (Planning discovery)
 - R49 [decision] Reflex-ladder thresholds (incl. chicken) (Planning discovery)
 - R50 [decision] Approve the M5 phase table (Planning discovery)
-- R51 [execute] Start the bridge + enter a Hell town game (M5 implementation â€” P1 (perception extensions))
-- R52 [execute] P1 live-verification drills (in-town) (M5 implementation â€” P1 (perception extensions))
-- R53 [inform] Name the PD2 potion kinds (M5 implementation â€” P1 (perception extensions))
-- R54 [execute] Potion-type proof drill (M5 implementation â€” P1 (perception extensions))
-- R55 [execute] P2 live drills (town, chat-guided) (M5 implementation â€” P2 (input extensions))
-- R56 [inform] Kashya's menu is state-dependent (M5 implementation â€” P2 (input extensions))
-- R57 [execute] P3 hover calibration (5 targets, chat-guided) (M5 implementation â€” P3 (town layer + waypoint))
-- R58 [execute] P3 hover calibration, re-run after the re-arm fix (M5 implementation â€” P3 (town layer + waypoint))
-- R59 [execute] P3 calibration with memory-identified anchors (M5 implementation â€” P3 (town layer + waypoint))
-- R60 [execute] Four-corner inventory calibration (user-designed) (M5 implementation â€” P3 (town layer + waypoint))
-- R61 [execute] Snake-sweep inventory calibration (T11, dense pass) (M5 implementation â€” P3 (town layer + waypoint))
-- R62 [decision] Approve the bot-control town drills (T12-T14) (M5 implementation â€” P3 (town layer + waypoint))
-- R63 [execute] Run the T12-T14 town-step suite (M5 implementation â€” P3 (town layer + waypoint))
-- R64 [inform] PD2 shift+right-click semantics and the materials tab (M5 implementation â€” P3 (town layer + waypoint))
-- R65 [execute] Next battery: T12/T13 re-run + T15/T16 materials tab (M5 implementation â€” P3 (town layer + waypoint))
-- R66 [inform] T12 walked to Kashya, not Akara (M5 implementation â€” P3 (town layer + waypoint))
-- R67 [inform] The Horadric Cube cannot be shift-clicked (M5 implementation â€” P3 (town layer + waypoint))
-- R68 [execute] Battery: T17 NPC identification, then materials tab, then T12/T13 re-run (M5 implementation â€” P3 (town layer + waypoint))
-- R69 [execute] Re-run T12/T13, then the materials tab suite (M5 implementation â€” P3 (town layer + waypoint))
-- R70 [inform] Add repairing to the town chores (M5 implementation â€” P3 (town layer + waypoint))
-- R71 [decision] Repair every game rather than on a durability threshold (M5 implementation â€” P3 (town layer + waypoint))
-- R72 [execute] Pending battery: T13 re-run, T18/T19 repair, T15/T16 materials (M5 implementation â€” P3 (town layer + waypoint))
-- R73 [decision] Merc resurrection drills built (T20/T21) (M5 implementation â€” P3 (town layer + waypoint))
-- R74 [execute] T19 needs worn gear (M5 implementation â€” P3 (town layer + waypoint))
-- R75 [decision] Inventory-management loop design (M5 implementation â€” P3 (town layer + waypoint))
-- R76 [decision] Gold reserve policy (raised by the agent) (M5 implementation â€” P3 (town layer + waypoint))
-- R77 [execute] Two new probes: T22 stash-tab signal, T23 gold deposit (M5 implementation â€” P3 (town layer + waypoint))
-- R78 [inform] T19 never clicked Charsi; T21 looped chatting to Kashya (M5 implementation â€” P3 (town layer + waypoint))
-- R79 [execute] Cancel the running drills (M5 implementation â€” P3 (town layer + waypoint))
-- R80 [inform] T19 still never opened the trade screen; T21 resurrected the merc then looped (M5 implementation â€” P3 (town layer + waypoint))
-- R81 [execute] Restart the bridge (M5 implementation â€” P3 (town layer + waypoint))
-- R82 [execute] Restart the bridge (corrected command) (M5 implementation â€” P3 (town layer + waypoint))
-- R83 [inform] Conversation handoff (M5 implementation â€” P3 (town layer + waypoint))
-- R84 [verify] Window in for T19 (repair) with worn gear (M5 implementation â€” P3 (town layer + waypoint))
-- R85 [inform] Name the test in the in-game failure line; T19's two causes as watched (M5 implementation â€” P3 (town layer + waypoint))
-- R86 [verify] Run the T24 Charsi battery (user's suggestion) (M5 implementation â€” P3 (town layer + waypoint))
-- R87 [decision] Redesign the calibration: full human control, and transferable abstractions (M5 implementation â€” P3 (town layer + waypoint))
-- R88 [verify] Run T25 charsi (M5 implementation â€” P3 (town layer + waypoint))
-- R89 [inform] Chat into an open NPC dialog selects a dialog option (M5 implementation â€” P3 (town layer + waypoint))
-- R90 [decision] Waypoint calibration in Hell Cold Plains: go or hold? (M5 implementation â€” P3 (town layer + waypoint))
-- R91 [execute] Calibrate the resurrect row in the dead-merc window (M5 implementation â€” P3 (town layer + waypoint))
-- R92 [execute] Restart the elevated bridge (M5 implementation â€” P3 (town layer + waypoint))
-- R93 [execute] Stage the world for T27 and run the full routine (M5 implementation â€” P3 (town layer + waypoint))
-- R94 [inform] Announce test conclusions in-game (M5 implementation â€” P3 (town layer + waypoint))
-- R104 [inform] NPC dialogs are keyboard-navigable (M5 implementation â€” P3 (town layer + waypoint))
-- R105 [inform] Read Kashya's dead-merc menu aloud (M5 implementation â€” P3 (town layer + waypoint))
-- R106 [inform] T35 run 2: dialog opened en route killed the stash step (M5 implementation â€” P3 (town layer + waypoint))
-- R107 [inform] T35: the belt did not fill before drinking (M5 implementation â€” P3 (town layer + waypoint))
-- R108 [inform] T35 run 3: 'cannot identify the stash tab' with 29 items in it (M5 implementation â€” P3 (town layer + waypoint))
-- R109 [decision] Detect the stash tab directly rather than by toggling? (M5 implementation â€” P3 (town layer + waypoint))
-- R110 [verify] Two stash reads, one per tab (M5 implementation â€” P3 (town layer + waypoint))
-- R111 [inform] T27: bot stuck in a loop misclicking the waypoint (M5 implementation â€” P3 (town layer + waypoint))
-- R112 [inform] What is the item stuck in the inventory (kind 534)? (M5 implementation â€” P3 (town layer + waypoint))
-- R113 [inform] The shift race (M5 implementation â€” P3 (town layer + waypoint))
-- R114 [decision] The P3 review gate (M5 implementation â€” P3 (town layer + waypoint))
-- R115 [decision] IdleBail wiring at the frozen cycle boundary (M5 implementation â€” P4 (behavior engine, sim-only))
-- R115 [decision] Should `IdleBail` share the cycle's chicken counter? (M5 implementation â€” P6 stage B review fixes)
-- R116 [decision] **The P5 review gate â€” go/no-go for live** (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R117 [inform] The real pickup spec, the potion-cap town rule, and the inventory cleanse (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R118 [decision] Pickup-spec confirmation batch (Q1â€“Q5) (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R119 [execute] Run the T38 + T39 discovery drills (bridge) (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R120 [execute] Run T40: two marker rounds in the chat line (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R121 [execute] Run T41: chat call-and-response (3 rounds) (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R122 [execute] Run S1: simulate a Claude coding-session exchange in-game (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R123 [execute] Run S2: the same exchange, solo-project framing, gated on a real submission (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R124 [verify] T38: confirm the socket read, by dropping the item (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R125 [inform] The loot filter is a naming source â€” mine it (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R126 [verify] T39 run 1 â€” ABORTED by the user, and worth more than a pass (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R127 [decision] How to resolve the last ~45 names (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R128 [decision] The R127 option-A review table (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R129 [decision] P6 stage A â€” go (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R130 [decision] GitHub rejected the push: email privacy (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R131 [inform] "We can try again â€” just make sure to ctrl+right click" (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R132 [decision] Cleanse strictness + fullness handling (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R133 [verify] **P6 stage B â€” the first supervised fight** (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R134 [decision] The stash tab is unreadable on this character (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R135 [execute] Set up and run T45 (materials auto-route) (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R137 [execute] Enter a game so the waypoint state can be read (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R143 [execute] Enter a game to read the inventory (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R146 [execute] Run T47, the hotkey audit (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R147 [inform] "2 screens in each direction around the waypoint" (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R148 [verify] Stage B runs 6-9, and four behavioural notes (M5 implementation â€” P5 (combat + pickit, sim-only))
-- R149 [execute] Reboot to reshuffle ASLR, and close the stuck `Game.exe` (Out-of-band â€” the game stopped launching (host environment, not the bot))
-- R150 [execute] Start the elevated bridge for this session (M5 implementation â€” P6 stage B review fixes)
-- R151 [verify] Watch T48 â€” cast animation length, and when input is accepted again (M5 implementation â€” P6 stage B review fixes)
-- R152 [execute] Run T47, the hotkey audit (the offer R146 declined) (M5 implementation â€” P6 stage B review fixes)
-- R153 [verify] Supervised stage-B run, with the three review fixes in it (M5 implementation â€” P6 stage B review fixes)
-- R154 [inform] "We got waypoint locked again" â€” and the recovery to build in (M5 implementation â€” P6 stage B review fixes)
-- R155 [verify] Re-run stage B with the waypoint fixes (M5 implementation â€” P6 stage B review fixes)
-- R156 [decision] Patrol plan: six confirmation questions (Q1-Q6) (M5 implementation â€” P6 stage B review fixes)
-- R157 [decision] Is the patrol a new step, or does `clear_radius` grow it? (M5 implementation â€” P6 stage B review fixes)
-- R158 [verify] Supervised live run of the patrol clearance (M5 implementation â€” P6 stage B review fixes)
-- R159 [verify] Re-run the patrol after the `_walk_near` fix (M5 implementation â€” P6 stage B review fixes)
-- R160 [verify] Run T49, the waypoint click probe (M5 implementation â€” P6 stage B review fixes)
-- R161 [verify] Re-run the patrol, instrumented (M5 implementation â€” P6 stage B review fixes)
-- R162 [verify] Re-run the patrol with misclick recovery (M5 implementation â€” P6 stage B review fixes)
-- R163 [decision] Combat aggression numbers, after watching the patrol run (M5 implementation â€” P6 stage B review fixes)
-- R164 [execute] Get the character into Cold Plains for T50's field half (M5 implementation â€” P6 stage B review fixes)
-- R165 [execute] Run T51 â€” the walk-away visibility test (the user's own idea) (M5 implementation â€” P6 stage B review fixes)
-- R166 [decision] Re-run T51 for a clean artifact, or move on? (M5 implementation â€” P6 stage B review fixes)
-- R167 [verify] Supervised live run of the instrumented patrol + sweep (M5 implementation â€” P6 stage B review fixes)
-- R168 [decision] Three follow-ups from the first instrumented patrol run (M5 implementation â€” P6 stage B review fixes)
+- R51 [execute] Start the bridge + enter a Hell town game (M5 implementation — P1 (perception extensions))
+- R52 [execute] P1 live-verification drills (in-town) (M5 implementation — P1 (perception extensions))
+- R53 [inform] Name the PD2 potion kinds (M5 implementation — P1 (perception extensions))
+- R54 [execute] Potion-type proof drill (M5 implementation — P1 (perception extensions))
+- R55 [execute] P2 live drills (town, chat-guided) (M5 implementation — P2 (input extensions))
+- R56 [inform] Kashya's menu is state-dependent (M5 implementation — P2 (input extensions))
+- R57 [execute] P3 hover calibration (5 targets, chat-guided) (M5 implementation — P3 (town layer + waypoint))
+- R58 [execute] P3 hover calibration, re-run after the re-arm fix (M5 implementation — P3 (town layer + waypoint))
+- R59 [execute] P3 calibration with memory-identified anchors (M5 implementation — P3 (town layer + waypoint))
+- R60 [execute] Four-corner inventory calibration (user-designed) (M5 implementation — P3 (town layer + waypoint))
+- R61 [execute] Snake-sweep inventory calibration (T11, dense pass) (M5 implementation — P3 (town layer + waypoint))
+- R62 [decision] Approve the bot-control town drills (T12-T14) (M5 implementation — P3 (town layer + waypoint))
+- R63 [execute] Run the T12-T14 town-step suite (M5 implementation — P3 (town layer + waypoint))
+- R64 [inform] PD2 shift+right-click semantics and the materials tab (M5 implementation — P3 (town layer + waypoint))
+- R65 [execute] Next battery: T12/T13 re-run + T15/T16 materials tab (M5 implementation — P3 (town layer + waypoint))
+- R66 [inform] T12 walked to Kashya, not Akara (M5 implementation — P3 (town layer + waypoint))
+- R67 [inform] The Horadric Cube cannot be shift-clicked (M5 implementation — P3 (town layer + waypoint))
+- R68 [execute] Battery: T17 NPC identification, then materials tab, then T12/T13 re-run (M5 implementation — P3 (town layer + waypoint))
+- R69 [execute] Re-run T12/T13, then the materials tab suite (M5 implementation — P3 (town layer + waypoint))
+- R70 [inform] Add repairing to the town chores (M5 implementation — P3 (town layer + waypoint))
+- R71 [decision] Repair every game rather than on a durability threshold (M5 implementation — P3 (town layer + waypoint))
+- R72 [execute] Pending battery: T13 re-run, T18/T19 repair, T15/T16 materials (M5 implementation — P3 (town layer + waypoint))
+- R73 [decision] Merc resurrection drills built (T20/T21) (M5 implementation — P3 (town layer + waypoint))
+- R74 [execute] T19 needs worn gear (M5 implementation — P3 (town layer + waypoint))
+- R75 [decision] Inventory-management loop design (M5 implementation — P3 (town layer + waypoint))
+- R76 [decision] Gold reserve policy (raised by the agent) (M5 implementation — P3 (town layer + waypoint))
+- R77 [execute] Two new probes: T22 stash-tab signal, T23 gold deposit (M5 implementation — P3 (town layer + waypoint))
+- R78 [inform] T19 never clicked Charsi; T21 looped chatting to Kashya (M5 implementation — P3 (town layer + waypoint))
+- R79 [execute] Cancel the running drills (M5 implementation — P3 (town layer + waypoint))
+- R80 [inform] T19 still never opened the trade screen; T21 resurrected the merc then looped (M5 implementation — P3 (town layer + waypoint))
+- R81 [execute] Restart the bridge (M5 implementation — P3 (town layer + waypoint))
+- R82 [execute] Restart the bridge (corrected command) (M5 implementation — P3 (town layer + waypoint))
+- R83 [inform] Conversation handoff (M5 implementation — P3 (town layer + waypoint))
+- R84 [verify] Window in for T19 (repair) with worn gear (M5 implementation — P3 (town layer + waypoint))
+- R85 [inform] Name the test in the in-game failure line; T19's two causes as watched (M5 implementation — P3 (town layer + waypoint))
+- R86 [verify] Run the T24 Charsi battery (user's suggestion) (M5 implementation — P3 (town layer + waypoint))
+- R87 [decision] Redesign the calibration: full human control, and transferable abstractions (M5 implementation — P3 (town layer + waypoint))
+- R88 [verify] Run T25 charsi (M5 implementation — P3 (town layer + waypoint))
+- R89 [inform] Chat into an open NPC dialog selects a dialog option (M5 implementation — P3 (town layer + waypoint))
+- R90 [decision] Waypoint calibration in Hell Cold Plains: go or hold? (M5 implementation — P3 (town layer + waypoint))
+- R91 [execute] Calibrate the resurrect row in the dead-merc window (M5 implementation — P3 (town layer + waypoint))
+- R92 [execute] Restart the elevated bridge (M5 implementation — P3 (town layer + waypoint))
+- R93 [execute] Stage the world for T27 and run the full routine (M5 implementation — P3 (town layer + waypoint))
+- R94 [inform] Announce test conclusions in-game (M5 implementation — P3 (town layer + waypoint))
+- R104 [inform] NPC dialogs are keyboard-navigable (M5 implementation — P3 (town layer + waypoint))
+- R105 [inform] Read Kashya's dead-merc menu aloud (M5 implementation — P3 (town layer + waypoint))
+- R106 [inform] T35 run 2: dialog opened en route killed the stash step (M5 implementation — P3 (town layer + waypoint))
+- R107 [inform] T35: the belt did not fill before drinking (M5 implementation — P3 (town layer + waypoint))
+- R108 [inform] T35 run 3: 'cannot identify the stash tab' with 29 items in it (M5 implementation — P3 (town layer + waypoint))
+- R109 [decision] Detect the stash tab directly rather than by toggling? (M5 implementation — P3 (town layer + waypoint))
+- R110 [verify] Two stash reads, one per tab (M5 implementation — P3 (town layer + waypoint))
+- R111 [inform] T27: bot stuck in a loop misclicking the waypoint (M5 implementation — P3 (town layer + waypoint))
+- R112 [inform] What is the item stuck in the inventory (kind 534)? (M5 implementation — P3 (town layer + waypoint))
+- R113 [inform] The shift race (M5 implementation — P3 (town layer + waypoint))
+- R114 [decision] The P3 review gate (M5 implementation — P3 (town layer + waypoint))
+- R115 [decision] IdleBail wiring at the frozen cycle boundary (M5 implementation — P4 (behavior engine, sim-only))
+- R115 [decision] Should `IdleBail` share the cycle's chicken counter? (M5 implementation — P6 stage B review fixes)
+- R116 [decision] **The P5 review gate — go/no-go for live** (M5 implementation — P5 (combat + pickit, sim-only))
+- R117 [inform] The real pickup spec, the potion-cap town rule, and the inventory cleanse (M5 implementation — P5 (combat + pickit, sim-only))
+- R118 [decision] Pickup-spec confirmation batch (Q1–Q5) (M5 implementation — P5 (combat + pickit, sim-only))
+- R119 [execute] Run the T38 + T39 discovery drills (bridge) (M5 implementation — P5 (combat + pickit, sim-only))
+- R120 [execute] Run T40: two marker rounds in the chat line (M5 implementation — P5 (combat + pickit, sim-only))
+- R121 [execute] Run T41: chat call-and-response (3 rounds) (M5 implementation — P5 (combat + pickit, sim-only))
+- R122 [execute] Run S1: simulate a Claude coding-session exchange in-game (M5 implementation — P5 (combat + pickit, sim-only))
+- R123 [execute] Run S2: the same exchange, solo-project framing, gated on a real submission (M5 implementation — P5 (combat + pickit, sim-only))
+- R124 [verify] T38: confirm the socket read, by dropping the item (M5 implementation — P5 (combat + pickit, sim-only))
+- R125 [inform] The loot filter is a naming source — mine it (M5 implementation — P5 (combat + pickit, sim-only))
+- R126 [verify] T39 run 1 — ABORTED by the user, and worth more than a pass (M5 implementation — P5 (combat + pickit, sim-only))
+- R127 [decision] How to resolve the last ~45 names (M5 implementation — P5 (combat + pickit, sim-only))
+- R128 [decision] The R127 option-A review table (M5 implementation — P5 (combat + pickit, sim-only))
+- R129 [decision] P6 stage A — go (M5 implementation — P5 (combat + pickit, sim-only))
+- R130 [decision] GitHub rejected the push: email privacy (M5 implementation — P5 (combat + pickit, sim-only))
+- R131 [inform] "We can try again — just make sure to ctrl+right click" (M5 implementation — P5 (combat + pickit, sim-only))
+- R132 [decision] Cleanse strictness + fullness handling (M5 implementation — P5 (combat + pickit, sim-only))
+- R133 [verify] **P6 stage B — the first supervised fight** (M5 implementation — P5 (combat + pickit, sim-only))
+- R134 [decision] The stash tab is unreadable on this character (M5 implementation — P5 (combat + pickit, sim-only))
+- R135 [execute] Set up and run T45 (materials auto-route) (M5 implementation — P5 (combat + pickit, sim-only))
+- R137 [execute] Enter a game so the waypoint state can be read (M5 implementation — P5 (combat + pickit, sim-only))
+- R143 [execute] Enter a game to read the inventory (M5 implementation — P5 (combat + pickit, sim-only))
+- R146 [execute] Run T47, the hotkey audit (M5 implementation — P5 (combat + pickit, sim-only))
+- R147 [inform] "2 screens in each direction around the waypoint" (M5 implementation — P5 (combat + pickit, sim-only))
+- R148 [verify] Stage B runs 6-9, and four behavioural notes (M5 implementation — P5 (combat + pickit, sim-only))
+- R149 [execute] Reboot to reshuffle ASLR, and close the stuck `Game.exe` (Out-of-band — the game stopped launching (host environment, not the bot))
+- R150 [execute] Start the elevated bridge for this session (M5 implementation — P6 stage B review fixes)
+- R151 [verify] Watch T48 — cast animation length, and when input is accepted again (M5 implementation — P6 stage B review fixes)
+- R152 [execute] Run T47, the hotkey audit (the offer R146 declined) (M5 implementation — P6 stage B review fixes)
+- R153 [verify] Supervised stage-B run, with the three review fixes in it (M5 implementation — P6 stage B review fixes)
+- R154 [inform] "We got waypoint locked again" — and the recovery to build in (M5 implementation — P6 stage B review fixes)
+- R155 [verify] Re-run stage B with the waypoint fixes (M5 implementation — P6 stage B review fixes)
+- R156 [decision] Patrol plan: six confirmation questions (Q1-Q6) (M5 implementation — P6 stage B review fixes)
+- R157 [decision] Is the patrol a new step, or does `clear_radius` grow it? (M5 implementation — P6 stage B review fixes)
+- R158 [verify] Supervised live run of the patrol clearance (M5 implementation — P6 stage B review fixes)
+- R159 [verify] Re-run the patrol after the `_walk_near` fix (M5 implementation — P6 stage B review fixes)
+- R160 [verify] Run T49, the waypoint click probe (M5 implementation — P6 stage B review fixes)
+- R161 [verify] Re-run the patrol, instrumented (M5 implementation — P6 stage B review fixes)
+- R162 [verify] Re-run the patrol with misclick recovery (M5 implementation — P6 stage B review fixes)
+- R163 [decision] Combat aggression numbers, after watching the patrol run (M5 implementation — P6 stage B review fixes)
+- R164 [execute] Get the character into Cold Plains for T50's field half (M5 implementation — P6 stage B review fixes)
+- R165 [execute] Run T51 — the walk-away visibility test (the user's own idea) (M5 implementation — P6 stage B review fixes)
+- R166 [decision] Re-run T51 for a clean artifact, or move on? (M5 implementation — P6 stage B review fixes)
+- R167 [verify] Supervised live run of the instrumented patrol + sweep (M5 implementation — P6 stage B review fixes)
+- R168 [decision] Three follow-ups from the first instrumented patrol run (M5 implementation — P6 stage B review fixes)
 - M5 P6 R169 [decision] Workflow overhaul: four confirmation questions Â· 2026-08-01 19:39
 - M5 P6 R170 [decision] Q3 clarified: does the done-alert fire on every terminal turn end? Â· 2026-08-01 19:39
 - M5 P6 R172 [decision] The two baseline-protected inventory items: hand-clear or policy change? Â· 2026-08-01 20:17
@@ -234,3 +234,94 @@ headings, noted in parentheses, say roughly where they fell).
 - M5 P6 R210 [execute] STAGE E: 3 unattended games (user go) · 2026-08-03
 - M6 R211 [decision] Approve the M5 closeout commit · 2026-08-03 06:31
 - M6 R212 [decision] M6 plan: Q1-Q10 + phase table · 2026-08-03 06:31
+- M6 P1 R213 [decision] Merge PR #1 into main? · 2026-08-03 17:12
+- M6 P1 R214 [decision] Commit P1 and continue with P3? · 2026-08-03 20:00
+- M6 P2 R215 [inform] Hold-left-click moves without interacting · 2026-08-04
+- M6 P2 R216 [verify] Confirm the Countess candidate by eye · 2026-08-05 06:20
+- M6 P2 R217 [decision] Standing mandate for the P2 live batch · 2026-08-05 06:20
+- M6 P2 R218 [execute] Clear stash space (preamble halts) · 2026-08-05 18:40
+- M6 P4 R219 [decision] Go/no-go: the countess run (sim + staging) · 2026-08-05 21:21
+- M6 P4 R220 [decision] Run-log design confirmations Q1-Q11 · 2026-08-05 22:30
+- M6 P4 R221 [execute] Stand in the Forgotten Tower for the hostile census (T73) · 2026-08-06 01:35
+- M6 P4 R222 [execute] Second census with real monsters (T73 run 2) · 2026-08-06 01:52
+- M6 P4 R223 [verify] Launch the first live Countess run (T71 run 3) + judge the staging approach · 2026-08-06 02:51
+- M6 P4 R224 [decision] Approve the pickup-reliability plan: phase table + measure-first gate · 2026-08-06 05:21
+- M6 P4 R225 [decision] Re-run T76 after the drill's own defects were fixed · 2026-08-06 19:16
+- M6 P4 R226 [execute] Drop ten different PD2 maps for T77 to read · 2026-08-06 19:16
+- M6 P4 R226 resolved (T77 PASS) · 2026-08-06 19:28
+- M6 P4 R227 [decision] Approve item-acquisition plan + command-by-GID spike (branch) · 2026-08-06 20:36
+- M6 P4 R228 [decision] Choose the chicken-starvation fix: interruptible walk_to, watchdog process, or both · 2026-08-07 04:02
+- M6 P4 R228 resolved (option b: in-process fix now, watchdog before the battery) · 2026-08-07 04:05
+- M6 P4 R229 [decision] Approve the safety-starvation phase table + five design questions · 2026-08-07 04:22
+- M6 P4 R229 resolved (all yes; P1+P2 authorized) · 2026-08-07 04:25
+- M6 P4 R230 [decision] P2 review gate: Track A done, may the acceptance battery resume? · 2026-08-07 05:04
+- M6 P4 R230 resolved (option b: watchdog first, battery waits) · 2026-08-07 05:12
+- M6 P4 R231 [verify] Run the two safety canaries: T80 (in-process interrupt) and T81 (watchdog) · 2026-08-07 21:27
+- M6 P4 R231 resolved (T80 run 2 + T81 PASS, unattended) · 2026-08-07 22:50
+- M6 P4 R232 [inform] What the unattended canary cost, and the production bug it found · 2026-08-07 22:52
+- M6 P4 R233 [execute] Launch the P5 Stage A descent run (agent launch path permission-blocked) · 2026-08-08 01:45
+- M6 P5 R234 [execute] Re-run the Akara probe to confirm the NPC classification fix · 2026-08-08 04:12
+- M6 P5 R234 resolved (self-run via the bridge: classification fixed and proven, allies 1->11; clearance rule measured as the second cause)
+- M6 P4 R235 [decision] Fix the cleanse gap before the Countess run, or run first? (numbered at closeout; R234 taken concurrently) · 2026-08-08 03:05
+- M6 P4 R235 resolved (a then b: cleanse fixed, Countess attempted twice, not yet successful) · 2026-08-08 05:10
+- R236 [decision] CI plan: confirmations Q1–Q5 · 2026-08-09 02:43
+- R236 resolved (all yes; plan written, sm) · 2026-08-09 03:05
+- R237 [decision] Approve the CI commit + push (the push IS the validation) · 2026-08-09 03:11
+- R237 resolved (all yes; CI live, first run green 40s) · 2026-08-09 03:18
+- R238 [decision] Dependency-pinning plan: confirmations Q1–Q5 · 2026-08-09 03:35
+- R238 resolved (all yes; lockfile + canary live, CI green) · 2026-08-09 03:51
+- R239 [decision] Package-restructure plan: timing + confirmations Q1–Q7 · 2026-08-09 04:01
+- R239 resolved (now + all yes; 7-phase md plan, branch restructure) · 2026-08-09 05:06
+- R240 [execute] Clear the client for the restructure smoke run · 2026-08-09 05:33
+- R240 resolved (go; smoke PASSED, restructure merged 410b7b1) · 2026-08-09 06:35
+- R241 [decision] Combat & logistics plan: confirmations Q1–Q8 + phase table · 2026-08-09 21:37
+- R241 resolved (all yes + Q4 stock-cells refinement; md plan P1–P6, branch combat-logistics) · 2026-08-09 21:44
+- R242 [execute] The R241 live batch: line, leash, berserk, shop, pilot · 2026-08-09 23:21
+- R243 [decision] Chat may type while the TRADE screen is open · 2026-08-10 00:39
+- R243 resolved (opt-in Chat allow_panels; T85 uses it; address bug fixed too) · 2026-08-10 00:39
+- R244 [decision] Resume live testing: verification batch + P5 census · 2026-08-13 01:39
+- R244 resolved ((a) approved, per-run logs kept; (b) deferred — operator will define the pickup battery) · 2026-08-13 01:54
+- R245 [execute] Relaunch R244 game 1 after the restock over-buy fix · 2026-08-13 02:08
+- R245 resolved (go; game 1 relaunched after the truncation + restock fixes) · 2026-08-13 02:28
+- R246 [verify] P5 census gate: review the batch and rule on mandatory_pickup · 2026-08-13 03:07
+- R247 [decision] Hotkey-config plan (md, P1-P4) - pre-approved with implementation authorization · 2026-08-13 04:42
+- R248 [inform] Specify the pickup-calibration detour (deferred R244 (b) folds in) · 2026-08-13 05:24
+- R248 resolved (three-mode name-tag pickup battery specified; review-edit-run authorized) · 2026-08-13 05:35
+- R249 [execute] Launch the tag-mode battery: T91 F-probe, then T90 (15 rounds) · 2026-08-13 06:12
+- R249 resolved (T91 PASS/flag wired; T90 launch 1 aborted: 1A clean 4/4 in 5.7s, then re-collect + stash-wedge defects; nothing lost) · 2026-08-13 07:07
+- R250 [execute] Relaunch the rebuilt tag-mode battery (operator redesign) · 2026-08-13 07:07
+- R250 resolved (go; 4 clean A-rounds 20/20, then the 4th watchdog silent-freeze ended it; dead-man race found+fixed) · 2026-08-13 07:20
+- R251 [execute] Relaunch the battery after the watchdog freeze (attempt 3) · 2026-08-13 07:20
+- R251 resolved (go; round 1A clean 6/6, then self-stop: a ctrl slip DRANK a potion mid-drop - detection right, severity wrong) · 2026-08-13 07:38
+- R252 [execute] Relaunch: operator-gathered rounds + loss-tolerant census (attempt 4) · 2026-08-13 07:38
+- R252 resolved (go; A+B complete - A 100% vs B 10%!; C eaten by stall #5, now REFRAMED as transient-with-recovery) · 2026-08-13 07:53
+- R253 [decision] Watchdog staleness grace (safety policy), then the C-only run · 2026-08-13 07:53
+- R253 resolved (OK go; grace shipped 1298 green; C-only run COMPLETE - battery done: A 100% / B 10% / C 36%) · 2026-08-13 08:25
+- R254 [verify] Rule on the tag-mode results: which mode becomes the standing pickup policy · 2026-08-13 08:25
+- R254 resolved (approved+inverted; field run COMPLETE, census 1/1 first-click; commit/review/push ordered) · 2026-08-13 08:45
+- R255 [decision] Approve the human-run recorder design (human-vs-bot Cold Plains) · 2026-08-13 18:15
+- R255 resolved (go; recording COMPLETE T92: human 58s vs bot 481s (8.3x); culprit = clear_radius locomotion ~330s of the 401s CP gap) · 2026-08-13 19:28
+- R256 [decision] Locomotion speed-pass plan: discovery questions + phase shape · 2026-08-13 19:36
+- R256 resolved (Q1-3 yes; QA: BERSERK becomes the default posture henceforth, skirmish shelved; QB: CP<180s, 0 ticks>4s, idle<45s) · 2026-08-13 19:42
+- R257 [decision] Approve the locomotion-pass phase table (md, 5 phases) · 2026-08-13 19:44
+- R257 resolved (lgtm; plan.md + phases 01-05 written) · 2026-08-13 19:48
+- R258 [execute] P4 live acceptance battery: confirm presence and say go · 2026-08-13 20:56
+- R258 resolved (commit+go; P1-P3 at 13d0c6b; run 1: floods GONE but CP 473s/idle 162s MISS - 88 blocked dashes = 183s -> R259) · 2026-08-13 21:28
+- R259 [decision] Charge should attack at range, not walk-then-stab · 2026-08-13 21:26
+- R259 resolved (approved; walk-in AttackUnit + charge_attack_range 16 shipped, 1339 green; battery resumes) · 2026-08-13 21:32
+- R260 [decision] Combat must not chase across the area seam · 2026-08-13 21:52
+- R260 resolved (approved; seam gate in _hostiles + clear in_radius, 1340 green; acceptance series restarts) · 2026-08-13 21:58
+- R261 [verify] P4 gate: judge the battery, rule on the swing-contention fix · 2026-08-13 22:08
+- R261 resolved (approved; bucketed stall family + shake-first shipped, 1343 green; battery resumes run 6, operator spectating) · 2026-08-13 22:24
+- R261 progressed (runs 6b 277s/88s + 7 215s/71s; census 1/1, 0 junk; wandering window explained -> R262 tuning ordered) · 2026-08-14 00:02
+- R262 [decision] Speed tuning: chase gate, faster ring give-up, 1s walk budget · 2026-08-14 00:05
+- R262 amended (1s walk budget REVERTED - run 8 died in town: budget expired before the walk's graceful blocked-by-NPC exits; chase gate + ring give-up stay) · 2026-08-14 00:20
+- R262 resolved (validated: runs 9-10 CP 178/149 PASS; 11b 246 with by-design sighting re-walk) · 2026-08-14 00:55
+- R261 resolved (operator: "Looked pretty good"; "accept and close" - P4 accepted at revised idle, P5 closeout run) · 2026-08-14 01:02
+- R246 resolved (promote: mandatory_pickup armed in countess.toml; every census since the batch perfect; P5 gate CLOSED) · 2026-08-14 01:35
+- M6 P5 R263 [execute] The fresh Countess run under the merged improvements (go pre-given: "client is ready whenever you are") · 2026-08-14 02:05
+- M6 P5 R263 resolved (LEFT EARLY 457s: descent CRUSHED baseline (C5 at ~365s vs ~543); census 2/2; ruby order deadlocked vs a silent stuck write-off -> R264) · 2026-08-14 03:56
+- M6 P5 R264 [decision] Orders must reconcile with write-offs (the ruby deadlock) · 2026-08-14 03:56
+- M6 P5 R264 resolved (approved; evented write-offs + unreachable-order closure, regression test, 1350 green; Countess relaunched) · 2026-08-14 04:05
+- M6 P5 R265 [execute] Top up HP (potion or Akara), then go: relaunch the Countess run around the latent heal-walk defect · 2026-08-14 04:24
+- M6 P5 R265 resolved (go; RUN 3 CLEAN [CVRL] 521.6s, COUNTESS DOWN - 44% faster than baseline; census 1/1; caveat: her perfect diamond dropped at t+516 and the sweep ended without consulting the order book) · 2026-08-14 04:45

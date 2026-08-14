@@ -1,5 +1,7 @@
 # 2026-pd2-offline-bot
 
+[![CI](https://github.com/Anthoussae/2026-pd2-offline-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/Anthoussae/2026-pd2-offline-bot/actions/workflows/ci.yml)
+
 A from-scratch Python bot for Project Diablo 2, targeting the offline
 single-player client on Windows. It reads the running game's memory
 out-of-process and drives it with synthetic input — it never injects code into
@@ -65,7 +67,7 @@ python -m pd2bot.chat "hello"         # post a message to the in-game chat
 
 `pd2bot.cycle` takes `--dwell`, `--life-chicken`, `--mana-chicken`, and
 `--chicken-in-town` (the last is a live-test aid). Menu clicking relies on
-two calibrations recorded in `pd2bot/cycle.py` and `pd2bot/menuinput.py`
+two calibrations recorded in `pd2bot/cycle.py` and `pd2bot/input/menu.py`
 (the pillarboxed menu scale is derived from the window; the Save-and-Exit
 position was hover-measured) — re-check them after changing window size or
 resolution.
@@ -118,7 +120,7 @@ they accumulate under `maps/` (gitignored save-data, regenerable by
 walking). Walk each new area once with `--survey` (you steer, the bot
 records); from then on the bot plans routes across the whole area. A
 dormant offline map generator exists for maps never walked
-(`pd2bot/mapdata.py`; blocked on this machine by PD2's modified DLLs) —
+(`pd2bot/nav/mapdata.py`; blocked on this machine by PD2's modified DLLs) —
 see `docs/adr/2026-07-28-hybrid-map-knowledge.md`.
 
 ## Development setup
@@ -129,8 +131,15 @@ and putting thousands of venv files there makes every install crawl.
 
 ```bash
 py -3.12 -m venv "$HOME/.venvs/pd2bot"
-"$HOME/.venvs/pd2bot/Scripts/python.exe" -m pip install pytest ruff pymem
+"$HOME/.venvs/pd2bot/Scripts/python.exe" -m pip install -r requirements.txt
 ```
+
+`requirements.txt` is the locked dependency set: every install (yours,
+CI's, a new machine's) gets exactly the versions validated here. To
+upgrade a dependency: `pip install --upgrade <package>` in the venv, run
+the tests and lint, edit the pin in `requirements.txt` to match, and
+push — CI re-proves the new set on a fresh machine. Never regenerate the
+file with a bare `pip freeze` (the venv carries unrelated build tools).
 
 The package is imported from the repo root rather than installed, so run
 commands from there.
@@ -147,6 +156,16 @@ Tests run without the game: they exercise the decoding and traversal logic
 against fixed byte buffers. They cannot tell you an offset still points at the
 right thing after a game patch — only running `pd2bot.dump` next to the live
 game can.
+
+CI runs both checks automatically on every push: GitHub Actions
+(`.github/workflows/ci.yml`) runs the full pytest suite and `ruff check` on a
+Windows runner (the code imports Win32 APIs at module load, so Linux runners
+cannot collect it). A separate weekly canary job runs the same checks against
+the *latest unpinned* dependency versions, so upstream breakage is noticed on
+schedule rather than during setup on a new machine — a red canary never blocks
+merges. Green CI means the offline half is sound; it verifies nothing about
+the live game — offsets and calibrations remain the job of `pd2bot.dump` and
+the drills.
 
 ## Setting up a new machine
 

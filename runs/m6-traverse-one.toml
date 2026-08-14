@@ -1,0 +1,25 @@
+# M6 P2 drill run: ONE area transition, the smallest honest test of the
+# traverse step. Town chores, waypoint to Black Marsh, walk to the
+# Forgotten Tower entrance and go in — then stop.
+#
+# Deliberately not the whole descent: the first autonomous transition
+# this project has ever made deserves its own supervised look, and a
+# failure here is unambiguous (one transition, one exit read, one click).
+
+name = "m6-traverse-one"
+
+[[step]] # heal, repair, deposit, refill, merc
+name = "town_preamble"
+
+[[step]] # the new act-tab-aware travel; area 6 verified on arrival (T69)
+name = "waypoint"
+dest = 6
+
+[[step]] # Black Marsh -> Forgotten Tower, through the entrance warp
+# Brisk: fight only what obstructs the corridor to the exit (R212 Q4/Q5).
+name = "traverse"
+dest = 20
+posture = "brisk"
+
+[[step]]
+name = "done"

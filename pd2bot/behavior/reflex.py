@@ -80,10 +80,10 @@ from pd2bot.behavior.actions import (
     GiveMercPotion,
     MoveTo,
 )
-from pd2bot.items import CarriedItem, CarriedItems
-from pd2bot.memory import GameSession
-from pd2bot.snapshot import GameSnapshot
-from pd2bot.units import player_unit, read_stats
+from pd2bot.perception.items import CarriedItem, CarriedItems
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.snapshot import GameSnapshot
+from pd2bot.perception.units import player_unit, read_stats
 
 
 @dataclass(frozen=True)
@@ -312,11 +312,16 @@ class ReflexLadder:
         armor_ratio: Callable[[], float | None],
         is_walkable: Callable[[tuple[int, int]], bool],
         combat_upkeep: Callable[[GameSnapshot], Action | None] | None = None,
+        # Posture-aware armor threshold (R241 berserk): a callable
+        # answering "recast below what percent RIGHT NOW?" — wired to the
+        # combat module's active posture. None = [reflex]'s number.
+        armor_threshold: Callable[[], float | None] | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.config = config if config is not None else ReflexConfig()
         self._carried = carried
         self._armor_ratio = armor_ratio
+        self._armor_threshold = armor_threshold
         self._is_walkable = is_walkable
         self._combat_upkeep = combat_upkeep
         self._clock = clock
@@ -606,8 +611,13 @@ class ReflexLadder:
             # whenever the player was hit since the last look.
             return was_hit, "armor stat unreadable; player was hit"
         pct = ratio * 100.0
-        if pct < self.config.armor_recast_below_pct:
-            return True, f"armor absorb {pct:.0f}% < {self.config.armor_recast_below_pct:.0f}%"
+        threshold = self.config.armor_recast_below_pct
+        if self._armor_threshold is not None:
+            override = self._armor_threshold()
+            if override is not None:
+                threshold = override
+        if pct < threshold:
+            return True, f"armor absorb {pct:.0f}% < {threshold:.0f}%"
         return False, ""
 
     def _armor_down_and_cooling(self, now: float) -> bool:

@@ -94,7 +94,7 @@ bot moves. Steps communicate through a shared blackboard
 `clear_radius` reads it back, `pickup` adopts the clearance circle — no
 step knows another. A second run is a new file, not new code.
 
-**Step handlers** (`behavior/steps.py`) come in two shapes, and the
+**Step handlers** (`behavior/steps/`) come in two shapes, and the
 difference is load-bearing. *Blocking* steps (`town_preamble`,
 `waypoint`) do their whole job in one tick, safe exactly where they run:
 town is where the ladder has nothing to say, and the waypoint trip is a
@@ -103,6 +103,19 @@ thing per tick — everything that happens in Hell is one of these, so
 the ladder gets a look between every decision. Field movement happens
 in short capped legs (`_hop`) along the atlas's route answer (R181),
 never one blocking walk.
+
+**That contract was aspiration until 2026-08-07.** `_hop` capped the
+legs a *step* asked for, but `walk_to` itself had no cap on the call —
+its per-waypoint (20 s) and plan-cycle (5) budgets multiplied — and a
+single blocked walk held the tick loop for 24 s while a pack killed the
+character. It is now enforced at the walk layer: `walk_to` takes a
+safety poll it calls from every loop it waits in, and returns on a 2 s
+wall clock whatever it has achieved. A capped return is not a failure —
+`WalkResult.capped` says so, every caller already re-checks distance,
+and the give-up ladder counts across calls so "this cannot be walked"
+is still eventually said. See `docs/adr/2026-08-07-unstarvable-safety.md`
+and the safety section of `game-cycle.md`; the events to read afterwards
+are `nav.capped` and `safety.interrupt`.
 
 **Class modules** (`behavior/combat.py`, `behavior/necro.py`) implement
 the `CombatModule` protocol: `engage` (one decision of the fight) and
@@ -138,6 +151,20 @@ ALT label display ensured on (read from memory, pressed only when
 provably off) so small classes — runes, gems, charms — can be clicked
 at their label band. Every send lands in a trace: when a live run does
 something surprising, the trace says which decision produced it.
+
+**Pile collection order (pickup-reliability P3).** When several wanted
+items are on the ground, `_PickupMixin` collects them in **draw order** —
+front sprite first, `wx + wy` descending — not nearest-to-player. A
+click at one item's aim offset lands on whatever sprite is drawn *over*
+that screen point (T71 run 4: nine of thirteen misses picked the
+neighbour instead), so lifting the front item first uncovers the one
+behind it and gives the next click a clear target. This is the surviving
+half of the pickup work: the calibration (T76/T79) found the click path
+itself **noise-dominated** — a dense pile's pick rate swings 1/8–8/8 and
+no aim-offset schedule reorder is stable — so the aim schedule is left
+as-is and the frame-perfect command path was ruled out (operator
+decision: no memory writes / injection). Draw-order collection reduces
+the occlusion misses; the residual erraticism is accepted.
 
 ## The reflex ladder, with rationale
 
@@ -230,33 +257,99 @@ loudly when they have nothing to apply to), `--dry-run` to print the
 assembled wiring without sending anything. `tools/live-run.ps1` wraps
 it through the elevated bridge.
 
-## Combat posture: where "cautious" lives
+## Combat postures (M6 P3: implemented)
 
-The shipped posture is best described as **cautious**: hold until a
-revive tank is in front, strike-and-retreat, drift rather than press.
-The user intends two more postures later — **aggressive** (attack more,
-back off less) and **brisk** (fight only what obstructs the path to the
-target, brush past the rest when safe) — ideally switchable at runtime.
-The posture is not one setting today; it is distributed across three
-places, listed here so the change stays small:
+Three named postures ship as config presets, selectable **per run
+step** (`posture = "brisk"` on a `clear_radius`/`traverse` step) and
+swappable mid-run — the module changes only its config dataclass, so
+every piece of fight bookkeeping survives the swap. Loading is strict
+as ever: `[combat.postures.<name>]` tables override only behavior knobs
+(never skills), unknown keys and unknown posture names fail before the
+bot moves, and "cautious" cannot be redefined because it *is* the base
+`[combat]` numbers — a run naming no posture behaves exactly as M5 did.
 
-- **Config numbers** (`config/necro.toml [combat]`): `restrike_s` (how
-  passive between strikes), `retreat_subtiles` (how far out after each
-  strike), `approach_with_revives` (how much wall before advancing),
-  `wait_for_revives_s`, `engage_radius` (what counts as "in a fight" —
-  brisk would shrink this toward the path corridor). A posture could be
-  a named preset over exactly these keys.
-- **Code shape** (`behavior/necro.py`): the retreat-after-strike beat
-  (`_retreat_after_strike` in `engage`) and the hold-until-wall gate
-  (the `approach_with_revives`/`_building_wall` check) are the cautious
-  skeleton; `approach()` refusing while a fight exists is what makes
-  every hostile en route a full stop — brisk would relax precisely that
-  refusal, plus `clear_radius`'s insistence on clearing rather than
-  passing.
-- **Unaffected by posture**: the reflex ladder, the safety monitor,
-  and the executor's rules do not move. A posture changes offense, not
-  survival — that boundary is the architecture's whole point, and it is
-  what makes a runtime-switchable posture safe to build.
+- **cautious** (the base): hold until a revive tank is in front,
+  strike-and-retreat after every strike, drift rather than press.
+- **brisk** (the descent posture, R212 Q4/Q5): fight only what
+  obstructs passage — a tight `engage_radius` bubble around the moving
+  character is the route corridor, and `linger = false` makes the
+  module hand the tick back when everything nearby is already poisoned,
+  so the run keeps walking. "Brush past them toward the target, as long
+  as that is safe" — and safety is unchanged: the ladder stands above.
+- **aggressive** (the Cellar 5 posture): `retreat_group_size = 3` makes
+  the post-strike retreat group-conditioned — an isolated enemy is
+  struck without the back-out, a closing group still triggers the full
+  retreat (the user's own definition); `restrike_s` drops to 0.5.
+- **berserk** (the charge style, R241; **the standing DEFAULT since
+  R256 QA**, operator ruling 2026-08-13): always attack the nearest
+  strikeable hostile — at range via a walk-in click the client paths
+  itself (R259, `AttackUnit.walk_in`) — no dash-out, no waiting for
+  the wall; armor recast tightened to 60%; the reflex ladder owns
+  survival. `default_posture = "berserk"` in `[combat]` applies it at
+  module construction, so every run inherits it with no run-file
+  edits; a step naming a posture still overrides per step. The T92
+  battery is the measured basis (Cold Plains 454 s → ~150-180 s across
+  the R257 pass), and combat never engages a hostile standing in
+  another area (the R260 seam gate — run 3 chased a border pack into
+  Blood Moor for 202 s before it existed).
+
+Two companion defaults landed with the postures (both user notes,
+2026-08-03):
+
+- **Right-skill parking** (`execute.py::maintain`, engine-granted once
+  per tick): after the last cast of a burst resolves and `park_grace_s`
+  (2 s) passes with no further cast, the executor switches the right
+  skill back to bone armor — a verified SWITCH, no click, paced on
+  failure. While Revive stays the active right skill, ground corpses
+  are selectable and interfere with pathing and pickup; the grace lets
+  a 3-revive burst finish without thrashing the switch.
+- **Revive urgency** (`necro.py`): while the wall is short and a wall
+  cast is actively in the pipeline (a recent desecrate/revive), strikes
+  and dashes hold — drift only — so the desecrate→revive casts never
+  share the cast pipeline with strike clicks (the T55 armor lesson one
+  rung down). Keyed to a *recent cast*, not to wall-shortness, so it
+  cannot re-create the pre-R163 full-wall passivity; and a desecrate
+  budget burned against the skill's own cooldown now refreshes on time
+  (`desecrate_budget_refresh_s`, in combat only — the quiet-field gate
+  is untouched).
+
+**Unaffected by posture**: the reflex ladder, the safety monitor, and
+the executor's safety rules do not move. A posture changes offense, not
+survival — that boundary is the architecture's whole point, and it is
+what made runtime switching safe to build.
+
+## The Countess endgame (M6 P4: `clear_countess`)
+
+One ticked step (`behavior/steps/countess.py::ClearCountessStep`) encodes the user's
+tactics for the Cellar 5 chamber, in four beats: a **neighborhood
+clearance** around the arrival staircase (a composed `ClearRadiusStep`
+— the same machinery and budgets, a modest radius, no patrol) so the
+encounter has no gaggle; a **staging point screen-north of the chamber
+anchor**, derived from the atlas at run time (`_screen_north_point`:
+walkable candidates bearing-north-first, distance descending) and
+recorded on the blackboard under `countess` for the drill to display;
+a **short-leg advance** through the combat module's own `approach`,
+held by the revive brake (no advancing while the wall is shorter than
+`approach_with_revives`, bounded by `advance_revive_patience` so a
+cellar with nothing to raise cannot hang the run); and the **kill
+condition** — her pinned identity (kind 734 / unique_no 6, T68+R216)
+read with a dead mode, or *provably absent* after the budgeted
+(`sweep_budget_s`, 15 s) chamber sweep, one in-and-out pass that runs
+in both outcomes (after a seen kill it doubles as drop
+reconnaissance). The chamber anchor comes from the run file
+(T68-measured, per seed) and yields to the live boss read the moment
+she is in perception — the exits' memory-first/live-authority rule
+again. **Alive and unreachable is a loud stop**, never a write-off:
+the step is the run's objective, so it alerts and raises rather than
+finishing around her. On confirmation the chamber region (her corpse's
+position when seen) is published as the `cleared` circle, which the
+existing `pickup` step adopts unchanged.
+
+The same phase also settled the T70 Thul lesson: `traverse` now
+collects wanted items en route through the shared pickup mixin —
+bounded by `pickup_radius`, only on ticks combat declined, holding the
+walk only while a click is resolving — so a rune on a traversal floor
+is no longer invisible to behavior while perception lists it.
 
 ## Re-verification drill after a patch
 
@@ -293,17 +386,13 @@ behavior layer adds, in order of likelihood to move:
   ground.
 - **Vendor UI** is still out of scope: below-minimum potions after a
   refill is a notice-and-continue (Stage D policy) and a manual restock.
-- **Right-skill parking** (user note, 2026-08-03): after any
-  right-skill cast — revive especially — toggle back to the bone armor
-  hotkey. While Revive is the active right skill, enemy corpses on the
-  ground are selectable and may interfere with pathing and pickup. A
-  short grace (a couple of seconds) avoids thrashing when several
-  revives are queued.
-- **Revive wall priority** (user note, 2026-08-03): keeping 3 revives
-  up should be bumped in priority — not an emergency, but the
-  desecrate→revive loop is quick and materially increases run safety
-  and speed; the bot has been observed dilly-dallying over it.
-- **Combat postures**: build "aggressive" and "brisk" over the seams
-  in the posture section above, runtime-switchable.
+- ~~Right-skill parking, revive priority, combat postures~~ — all
+  three landed at M6 P3 (see the postures section above); their live
+  proof rides the M6 battery.
 - **The navigator label-band nudge** (optional polish, from the pickup
   arc): left as a bookmark; the offset schedule made it moot for M5.
+- **Hold-to-move** (user discovery, 2026-08-04): holding the left
+  button moves the character without interacting with the world — no
+  accidental pickups. Candidate input primitive for travel legs; needs
+  a drill first, and a guard design for an input that spans ticks. See
+  the M6 plan's notes.md future-work entry.

@@ -1,0 +1,189 @@
+  pickup: kind 702 quality 2 sockets None at (1615, 1612) -> keep (runes)
+  countess: sighted live at (12548, 11036) — the anchor (12548, 11036) yields to the read
+  sweep: covering the cleared circle — centre (12548, 11036), radius 25, patrol on
+  pickup: kind 999 quality 7 sockets None at (12548, 11036) -> keep (quality loot)
+  pickup: kind 702 quality 2 sockets None at (12548, 11036) -> keep (runes)
+# Sim decision trace
+
+ticks: 85
+steps completed: town_preamble, waypoint, traverse, traverse, traverse, traverse, traverse, traverse, clear_countess, pickup, done
+reflex fires: 12
+
+## Engine log
+- step town_preamble done: heal; repair; inventory; merc
+- step waypoint done: arrived at (1000, 1000)
+- step traverse: clicked the staircase (attempt 1)
+- step traverse done: arrived in Forgotten Tower at (1200, 1200)
+- step traverse: clicked the staircase (attempt 1)
+- step traverse done: arrived in Tower Cellar Level 1 at (1400, 1400)
+- step traverse: clicked the staircase (attempt 1)
+- step traverse done: arrived in Tower Cellar Level 2 at (1600, 1600)
+- step traverse: clicked the staircase (attempt 1)
+- reflex upkeep: combat-module upkeep
+- step traverse done: arrived in Tower Cellar Level 3 at (1800, 1800)
+- reflex upkeep: combat-module upkeep
+- step traverse: clicked the staircase (attempt 1)
+- step traverse done: arrived in Tower Cellar Level 4 at (2000, 2000)
+- step traverse: clicked the staircase (attempt 1)
+- step traverse done: arrived in Tower Cellar Level 5 at (12635, 11061)
+- reflex upkeep: combat-module upkeep
+- reflex upkeep: combat-module upkeep
+- reflex upkeep: combat-module upkeep
+- reflex upkeep: combat-module upkeep
+- reflex upkeep: combat-module upkeep
+- reflex upkeep: combat-module upkeep
+- reflex upkeep: combat-module upkeep
+- step clear_countess: radius reads clear
+- reflex upkeep: combat-module upkeep
+- step clear_countess: neighborhood clear
+- step clear_countess: staging north
+- step clear_countess: staging north
+- step clear_countess: staging north
+- step clear_countess: staging north
+- reflex upkeep: combat-module upkeep
+- reflex upkeep: combat-module upkeep
+- step clear_countess: sweeping via (12573, 11061)
+- step clear_countess: sweeping via (12573, 11061)
+- step clear_countess: sweeping via (12548, 11036)
+- step clear_countess: sweeping via (12548, 11036)
+- step clear_countess done: the countess is down; drop zone (12548, 11036) r25
+- step pickup done: nothing left to pick — every sighting accounted for, ring walk skipped
+- step done done: run complete
+
+## Actions sent
+- MoveTo  to (1012, 1012)
+- MoveTo  to (1024, 1024)
+- InteractObject  object at (1035, 1035)
+- MoveTo  to (1212, 1212)
+- MoveTo  to (1224, 1224)
+- InteractObject  object at (1235, 1235)
+- MoveTo  to (1412, 1412)
+- MoveTo  to (1424, 1424)
+- InteractObject  object at (1435, 1435)
+- MoveTo  to (1615, 1612)
+- PickUpItem  item 880 at (1615, 1612) sprite click (0, -28), attempt 0
+- MoveTo  to (1625, 1624)
+- InteractObject  object at (1635, 1635)
+- CastAtPoint  skill 83 verified, at (1804, 1800)
+- CastAtPoint  skill 83 verified, at (1804, 1800)
+- MoveTo  to (1812, 1812)
+- MoveTo  to (1820, 1818)
+- AttackUnit  unit 40 at (1820, 1818)
+- MoveTo  to (1828, 1818)
+- MoveTo  to (1820, 1818)
+- AttackUnit  unit 40 at (1820, 1818)
+- InteractObject  object at (1835, 1835)
+- MoveTo  to (2012, 2012)
+- MoveTo  to (2024, 2024)
+- InteractObject  object at (2035, 2035)
+- MoveTo  to (12627, 11055)
+- MoveTo  to (12620, 11050)
+- AttackUnit  unit 64 at (12620, 11050)
+- CastAtPoint  skill 83 verified, at (12624, 11050)
+- MoveTo  to (12623, 11047)
+- CastAtPoint  skill 83 verified, at (12627, 11047)
+- CastAtPoint  skill 95 verified, at (12620, 11050)
+- CastAtPoint  skill 83 verified, at (12627, 11047)
+- MoveTo  to (12626, 11044)
+- CastAtPoint  skill 83 verified, at (12630, 11044)
+- MoveTo  to (12618, 11052)
+- MoveTo  to (12614, 11056)
+- AttackUnit  unit 65 at (12614, 11056)
+- AttackUnit  unit 65 at (12614, 11056)
+- AttackUnit  unit 65 at (12614, 11056)
+- AttackUnit  unit 65 at (12614, 11056)
+- CastAtPoint  skill 95 verified, at (12614, 11056)
+- CastAtPoint  skill 83 verified, at (12618, 11056)
+- CastAtPoint  skill 83 verified, at (12618, 11056)
+- MoveTo  to (12602, 11050)
+- MoveTo  to (12590, 11044)
+- MoveTo  to (12578, 11038)
+- MoveTo  to (12566, 11032)
+- MoveTo  to (12558, 11034)
+- MoveTo  to (12550, 11036)
+- CastAtPoint  skill 83 verified, at (12554, 11036)
+- MoveTo  to (12554, 11036)
+- CastAtPoint  skill 83 verified, at (12558, 11036)
+- MoveTo  to (12548, 11036)
+- AttackUnit  unit 66 at (12548, 11036)
+- AttackUnit  unit 66 at (12548, 11036)
+- AttackUnit  unit 66 at (12548, 11036)
+- AttackUnit  unit 66 at (12548, 11036)
+- MoveTo  to (12560, 11048)
+- MoveTo  to (12572, 11060)
+- MoveTo  to (12560, 11048)
+- MoveTo  to (12548, 11036)
+- PickUpItem  item 501 at (12548, 11036) sprite click (0, -28), attempt 0
+- PickUpItem  item 502 at (12548, 11036) sprite click (0, -28), attempt 0
+
+## What the world did
+- t0: town preamble (healed, inventory emptied)
+- t1: waypoint to area 6
+- t4: took the stairs to area 20
+- t8: took the stairs to area 21
+- t12: took the stairs to area 22
+- t15: picked up kind 702
+- t17: took the stairs to area 23
+- t18: desecrate cast
+- t20: desecrate cast
+- t23: struck 40
+- t27: monster 40 died of poison
+- t27: took the stairs to area 24
+- t31: took the stairs to area 25
+- t35: struck 64
+- t36: desecrate cast
+- t38: desecrate cast
+- t39: monster 64 died of poison
+- t39: revived 64 (1 up)
+- t40: desecrate cast
+- t42: desecrate cast
+- t45: struck 65
+- t49: monster 65 died of poison
+- t49: revived 65 (2 up)
+- t50: desecrate cast
+- t52: desecrate cast
+- t68: desecrate cast
+- t70: desecrate cast
+- t72: struck 66
+- t76: monster 66 died of poison
+- t81: picked up kind 999
+- t82: picked up kind 702
+
+## Narrative (R179)
+- run: town_preamble -> waypoint -> traverse -> traverse -> traverse -> traverse -> traverse -> traverse -> clear_countess -> pickup -> done
+- town_preamble: done after 0s — heal; repair; inventory; merc
+- waypoint: done after 0s — arrived at (1000, 1000)
+- combat posture: brisk
+- traverse: exit toward Forgotten Tower at (1035, 1035)
+- traverse: done after 2s — arrived in Forgotten Tower at (1200, 1200)
+- combat posture: brisk
+- traverse: exit toward Tower Cellar Level 1 at (1235, 1235)
+- traverse: done after 2s — arrived in Tower Cellar Level 1 at (1400, 1400)
+- combat posture: brisk
+- traverse: exit toward Tower Cellar Level 2 at (1435, 1435)
+- traverse: done after 2s — arrived in Tower Cellar Level 2 at (1600, 1600)
+- combat posture: brisk
+- pickup: kind 702 at (1615, 1612) (runes)
+- pickup: kind 702 at (1615, 1612) came up
+- traverse: exit toward Tower Cellar Level 3 at (1635, 1635)
+- traverse: done after 3s — arrived in Tower Cellar Level 3 at (1800, 1800)
+- combat posture: brisk
+- traverse: exit toward Tower Cellar Level 4 at (1835, 1835)
+- traverse: done after 4s — arrived in Tower Cellar Level 4 at (2000, 2000)
+- combat posture: brisk
+- traverse: exit toward Tower Cellar Level 5 at (2035, 2035)
+- traverse: done after 2s — arrived in Tower Cellar Level 5 at (12635, 11061)
+- combat posture: aggressive
+- countess: neighborhood clear (clear for 5s) — staging north
+- countess: staging north of the chamber at (12523, 11011) (anchor (12548, 11036))
+- countess: DOWN — her corpse reads at (12548, 11036)
+- countess: sweeping the chamber (15s budget) — [(12548, 11036), (12573, 11061), (12548, 11036)]
+- countess: the countess is down; drop zone (12548, 11036) r25
+- clear_countess: done after 24s — the countess is down; drop zone (12548, 11036) r25
+- pickup: kind 999 at (12548, 11036) (quality loot)
+- pickup: kind 999 at (12548, 11036) came up
+- pickup: kind 702 at (12548, 11036) (runes)
+- pickup: kind 702 at (12548, 11036) came up
+- pickup: done after 2s — nothing left to pick — every sighting accounted for, ring walk skipped
+- done: done after 0s — run complete
+- run complete (ticks: 85, reflex fires: 12, steps done: town_preamble, waypoint, traverse, traverse, traverse, traverse, traverse, traverse, clear_countess, pickup, done)

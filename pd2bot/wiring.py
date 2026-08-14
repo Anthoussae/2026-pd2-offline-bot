@@ -35,7 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from pd2bot import offsets, survey
+from pd2bot import offsets
 from pd2bot.behavior.combat import ClassConfig, load_class_config
 from pd2bot.behavior.engine import BehaviorEngine, EngineConfig
 from pd2bot.behavior.execute import GameActionExecutor
@@ -44,25 +44,32 @@ from pd2bot.behavior.reflex import ReflexLadder, read_armor_ratio
 from pd2bot.behavior.run import build_states, default_registry, load_run
 from pd2bot.behavior.runner import BehaviorRunner
 from pd2bot.behavior.steps import RunServices, build_registry
-from pd2bot.chat import Chat
+from pd2bot.behavior.steps.orders import OrderBook
+from pd2bot.behavior.town import PreambleReport, TownConfig, TownLayer
 from pd2bot.cycle import GameCycle
-from pd2bot.input import GatedInput
-from pd2bot.items import read_carried_items
-from pd2bot.mapstore import MapStore
-from pd2bot.memory import GameSession
-from pd2bot.menuinput import MenuInput
-from pd2bot.narrate import Narrator
-from pd2bot.navigate import live_navigator
-from pd2bot.panelinput import PanelInput
-from pd2bot.pathing import astar, nearest_walkable, simplify
+from pd2bot.input import keys
+from pd2bot.input.chat import Chat
+from pd2bot.input.gated import GatedInput
+from pd2bot.input.menu import MenuInput
+from pd2bot.input.panel import PanelInput
+from pd2bot.nav import mapframe, survey
+from pd2bot.nav.mapstore import MapStore
+from pd2bot.nav.navigate import live_navigator
+from pd2bot.nav.pathing import astar, nearest_walkable, simplify
+from pd2bot.nav.routeline import line_service
+from pd2bot.nav.waypoint import WaypointTravel
+from pd2bot.perception.exits import ExitMemory, read_level_exits
+from pd2bot.perception.items import read_carried_items
+from pd2bot.perception.memory import GameSession
+from pd2bot.perception.player import read_player
+from pd2bot.perception.snapshot import Perception
+from pd2bot.perception.uistate import find_ui_array
+from pd2bot.perception.units import default_tags_on, label_display_on
+from pd2bot.perception.world import read_area, read_map_seed
 from pd2bot.pickit import Pickit, cleanse_keep, load_item_table, load_pickit
-from pd2bot.player import read_player
-from pd2bot.safety import SafetyConfig, SafetyMonitor
-from pd2bot.snapshot import Perception
-from pd2bot.town import PreambleReport, TownConfig, TownLayer
-from pd2bot.uistate import find_ui_array
-from pd2bot.waypoint import WaypointTravel
-from pd2bot.world import read_area, read_map_seed
+from pd2bot.runlog import RunLog
+from pd2bot.runlog.narrate import Narrator
+from pd2bot.safety import SafetyConfig, SafetyInterrupt, SafetyMonitor, Verdict, watchdog
 
 REPO = Path(__file__).resolve().parent.parent
 CONFIG = REPO / "config"
@@ -115,6 +122,7 @@ def town_config_for(class_config: ClassConfig, base: TownConfig | None = None) -
 
 def route_service(
     navigator,
+    on_plan: Callable[..., None] | None = None,
 ) -> Callable[[tuple[int, int]], list[tuple[int, int]] | None]:
     """`route_to(target)` for RunServices (R181): the same A* the
     navigator walks with, exposed READ-ONLY so steps can ask "is there a
@@ -141,16 +149,36 @@ def route_service(
             return cache["route"]
         # The grid is assembled only on a cache MISS: stitching live
         # collision over the atlas is the expensive half of a plan.
+        plan_started = time.monotonic()
         try:
             grid = navigator.grid()
         except Exception:
             return [target]
         route: list[tuple[int, int]] | None = None
         goal = nearest_walkable(grid, *target)
+        search_stats: dict = {}
         if goal is not None:
-            path = astar(grid, start, goal)
+            path = astar(grid, start, goal, stats=search_stats)
             if path is not None:
                 route = simplify(grid, path)
+        # Plan-cost telemetry (T92): the same instrument the navigator's
+        # walks carry, because this astar is the same worst case — a
+        # 20 s flood here would hide inside a step's tick just as well.
+        if on_plan is not None:
+            try:
+                on_plan(
+                    source="route_service", start=start,
+                    goal=goal, target=target,
+                    duration_s=round(time.monotonic() - plan_started, 3),
+                    outcome=(
+                        "path" if route is not None
+                        else ("no_path" if goal is not None else "no_walkable_cell")
+                    ),
+                    **({"waypoints": len(route)} if route is not None else {}),
+                    **search_stats,
+                )
+            except Exception:  # noqa: BLE001 - measurement never breaks a route
+                pass
         if route is not None:
             # None is deliberately NOT cached (T55 run 1): a torn live
             # collision read walled the origin in for ~a second and five
@@ -256,6 +284,10 @@ class BotPaths:
     pickit: Path = CONFIG / "pickit.toml"
     item_table: Path = CONFIG / "item_ids.toml"
     run: Path = RUNS / "cold-plains.toml"
+    # The character's .key file (R247). None = discover it from the
+    # running client's install; set it explicitly when the save dir
+    # holds several characters.
+    keyfile: Path | None = None
 
 
 @dataclass
@@ -290,7 +322,15 @@ class LiveBot:
     # points it at the fresh run's narrator. build_bot wires the closure;
     # engine_factory swaps the target.
     narrate_ref: dict = field(default_factory=lambda: {"fn": None})
+    # The nav.plan emitter and its per-run runlog holder (T92): the
+    # navigator holds the closure for the session; each engine build
+    # repoints the holder at the fresh run's log, `narrate_ref`-style.
+    plan_sink: dict = field(default_factory=lambda: {"runlog": None})
+    on_plan: Callable[..., None] | None = None
     _engines: list[BehaviorEngine] = field(default_factory=list)
+    # Every run log opened this session, newest last — so a drill can name
+    # the file it just produced instead of the operator hunting for it.
+    _runlogs: list[object] = field(default_factory=list)
 
     @property
     def cleanse_enabled(self) -> bool:
@@ -298,6 +338,49 @@ class LiveBot:
         the whitelist cannot recognise what it must protect, so dropping is
         disabled outright rather than run with a hole in it."""
         return cleanse_keep(self.pickit) is not None
+
+    def pickit_item_name(self, kind: int) -> str | None:
+        """kind -> the verified item name, or None (never a guess).
+
+        Routed through the pickit's own `ItemTable`, which is anchored to
+        D2 item CODES rather than to numbers (R144). A second naming path
+        is precisely how a Wire Fleece came to be picked up as a Kraken
+        Shell, so the log gets the same table or nothing.
+        """
+        table = getattr(self.pickit, "item_table", None)
+        if table is None:
+            return None
+        try:
+            return table.name_for(kind)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def run_header(self, session: GameSession) -> dict:
+        """What the run.json header records: enough to tell two runs apart
+        and to know what the bot believed when it started."""
+        header: dict = {
+            "run_file": str(self.paths.run),
+            "class_config": str(self.paths.class_config),
+            "chicken_life_pct": self.class_config.chicken_life_pct,
+            "tick_interval_s": self.engine_config.tick_interval_s,
+            "idle_bail_s": self.engine_config.idle_bail_s,
+            "wait_bail_s": self.engine_config.wait_bail_s,
+        }
+        # Best effort, and labelled when it fails: a header that guessed
+        # the seed would make two different maps look like one.
+        try:
+            header["map_seed"] = read_map_seed(session)
+        except Exception:  # noqa: BLE001
+            header["map_seed"] = None
+            header["map_seed_unread"] = True
+        try:
+            player = read_player(session)
+            if player is not None:
+                header["character"] = player.name
+                header["level"] = player.level
+        except Exception:  # noqa: BLE001
+            header["character"] = None
+        return header
 
     def engine_factory(self, session: GameSession) -> BehaviorEngine:
         """Build one game's engine. Everything stateful is fresh here."""
@@ -307,13 +390,67 @@ class LiveBot:
         # no empty log behind.
         narrator = Narrator(REPO / "logs", clock=self.clock)
         self.narrate_ref["fn"] = narrator.narrate
+        # The run event log (R220 Q11: MANDATORY, never opt-in). Opened
+        # per run alongside the narrative, which keeps its own job: the
+        # narrative is the story a human skims, this is the record a tool
+        # queries. Optional instrumentation means the one run you most
+        # need to explain is the one where somebody forgot the flag —
+        # which is not hypothetical, it is T71.
+        runlog = RunLog(
+            self.paths.run.stem,
+            root=REPO / "logs" / "runs",
+            clock=self.clock,
+            header=self.run_header(session),
+        )
+        self._runlogs.append(runlog)
+        # The monitor is SESSION-scoped (the death latch lives in it), so
+        # it cannot be constructed per run — repoint its log instead, the
+        # same treatment `narrate_ref` gets for the town layer.
+        self.monitor.runlog = runlog
+        # The nav.plan emitter reads this holder per event (T92).
+        self.plan_sink["runlog"] = runlog
+        # The town layer is session-scoped too (its cleanse baseline must
+        # be), so it takes the same treatment. The waypoint layer reads
+        # the log through it rather than holding a second reference —
+        # one holder, one place to repoint.
+        self.town.runlog = runlog
+        # The area frame the log's coordinates are relative to. Read per
+        # call rather than cached: the area changes under the bot, and a
+        # stale frame would silently shift every local coordinate.
+        def frame():
+            try:
+                return mapframe.MapFrame.from_area(read_area(session))
+            except Exception:  # noqa: BLE001 - honest fallback, never a guess
+                return mapframe.MapFrame.unknown()
+
         combat = NecroCombat(
             config=self.class_config.combat,
             is_walkable=self.is_walkable,
             clock=self.clock,
+            # The named presets (M6 P3): run steps select per step, the
+            # module swaps configs, bookkeeping survives the swap.
+            postures=self.class_config.postures,
+            # Where the module STARTS (R256 QA): berserk by standing
+            # operator ruling, carried by the class config so every run
+            # inherits it without run-file edits.
+            default_posture=self.class_config.default_posture,
         )
+        # Futile-strike write-offs reach the run log (T72/T74). Recorded
+        # rather than acted on across runs, deliberately: the "immune"
+        # signature belongs to THIS spawn (Hell rolls immunities per
+        # pack), so generalising it to the monster's kind would teach the
+        # bot to skip killable monsters. Only the "no-contact" signature
+        # is a candidate for a durable per-kind rule, and promoting one
+        # is a human decision — the item_ids.learned.toml precedent.
+        def note_write_off(**fields):
+            runlog.event("combat.write_off", **fields)
+
+        combat.note_write_off = note_write_off
         ladder = ReflexLadder(
             self.class_config.reflex,
+            # Posture-aware (R241 berserk): the active posture may tighten
+            # the armor recast; None defers to [reflex]'s number.
+            armor_threshold=lambda: combat.config.armor_recast_below_pct,
             # with_sockets=False: this runs EVERY TICK and only ever reads
             # the belt, so it must not pay for a stat read per inventory
             # item. The cleanse is the only consumer that needs sockets and
@@ -324,12 +461,50 @@ class LiveBot:
             combat_upkeep=lambda snap: combat.upkeep(snap),
             clock=self.clock,
         )
+        # The character's REAL keybindings (R247), re-read per game so a
+        # mid-session rebind is honored (the client rewrites the file on
+        # the spot). Drift between the class config's skill keys and the
+        # client's layout refuses HERE, before a game is created around
+        # it. The town layer is session-scoped, so it takes the repoint
+        # treatment runlog gets.
+        bindings = keys.resolve_bindings(
+            getattr(session, "process_id", None),
+            override=self.paths.keyfile,
+            notice=lambda text: print(text, flush=True),
+        )
+        keys.verify_skill_hotkeys(
+            self.class_config.hotkeys,
+            bindings,
+            skill_names={
+                skill_id: name
+                for name, skill_id in self.class_config.skills.items()
+            },
+        )
+        self.town.bindings = bindings
         executor = GameActionExecutor(
             session=session,
             gated=self.gated,
             walk_to=self.navigator.walk_to,
             hotkeys=self.class_config.hotkeys,
+            bindings=bindings,
             clock=self.clock,
+            # Right-skill parking (M6 P3, user note 1): after a cast
+            # burst, switch back to the armor skill so Revive never stays
+            # the active right skill (selectable corpses interfere with
+            # pathing and pickup).
+            park_skill_id=self.class_config.reflex.armor_skill_id,
+            park_grace_s=self.class_config.combat.park_grace_s,
+            # Instrumentation (the run-event-log plan, P3): every action
+            # that reaches the game becomes an event with all three
+            # coordinate frames. The name tables are the EXISTING
+            # code-anchored ones — never a second guessing path (R144).
+            runlog=runlog,
+            frame=frame,
+            skill_names={
+                skill_id: name
+                for name, skill_id in self.class_config.skills.items()
+            },
+            item_names=self.pickit_item_name,
         )
         def field_cleanse() -> int:
             """The town cleanse, run in the field — and its report SURFACED.
@@ -348,11 +523,27 @@ class LiveBot:
                 print(f"  field {line}", flush=True)
             return dropped
 
+        # The battery's operator channel (R248): in-game chat. Refusals
+        # propagate — the step's `_say` catches them and falls back to
+        # `alert`, so a dropped announcement never ends a run. The
+        # inventory allowance (tagmode review, issue 003): the battery
+        # announces a consumed item MID-DROP, with the inventory open,
+        # and R243's guard silently downgraded exactly the message the
+        # operator most wants in the moment ("a potion was drunk") to
+        # the console. The inventory grid has no Enter-activated
+        # default, so the allowance costs one inert Enter at worst —
+        # the same analysis that opened the shop grid for T85.
+        # `registered_say` (issue 001): abort-safe, echo-safe.
+        battery_chat = Chat(session, allow_panels={offsets.UI_INVENTORY})
+        battery_say = registered_say(battery_chat.say, self.should_stop)
+
         # The survey service (R175/R176): frontier targets and coverage over
         # the shared atlas, behind closures so the step never learns what a
         # MapStore is. The target list is cached per (seed, area,
-        # room-count): frontier extraction walks every stored room edge,
-        # and recomputing that on a tick where nothing new was recorded
+        # content REVISION — not room count, which a re-recorded room with
+        # changed terrain leaves unchanged; session-review issue 003):
+        # frontier extraction walks every stored room edge, and
+        # recomputing that on a tick where nothing new was recorded
         # would be pure heat.
         survey_cache: dict = {"key": None, "targets": []}
 
@@ -367,7 +558,7 @@ class LiveBot:
             area, explored = _survey_area()
             if area is None:
                 return []  # mid-transition: nothing to walk toward yet
-            key = (explored.seed, explored.area_id, explored.room_count)
+            key = (explored.seed, explored.area_id, explored.revision)
             if survey_cache["key"] != key:
                 survey_cache["key"] = key
                 survey_cache["targets"] = survey.frontier_targets(
@@ -390,10 +581,34 @@ class LiveBot:
             escape_stamp["at"] = self.clock()
             self.town.close_panels()
 
+        # The traverse services (M6 P2): the live exit reader, and the
+        # exit memory keyed by (seed, difficulty, area, dest) — the seed
+        # read live per call so the closures never go stale across games.
+        exit_memory = ExitMemory(self.store.root / "exits.json")
+
+        def exit_recall(area: int, dest: int) -> tuple[int, int] | None:
+            seed = read_map_seed(session)
+            if seed is None:
+                return None
+            return exit_memory.recall(seed, self.difficulty, area, dest)
+
+        def exit_remember(
+            area: int, dest: int, position: tuple[int, int]
+        ) -> None:
+            seed = read_map_seed(session)
+            if seed is not None:
+                exit_memory.remember(
+                    seed, self.difficulty, area, dest, position
+                )
+
         services = RunServices(
             run_preamble=self.town.run_preamble,
             travel_to=self.waypoint.take,
             combat=combat,
+            postures=frozenset(self.class_config.postures),
+            level_exits=lambda: read_level_exits(session),
+            exit_recall=exit_recall,
+            exit_remember=exit_remember,
             pickit=self.pickit,
             carried=lambda: read_carried_items(session, with_sockets=False),
             clock=self.clock,
@@ -410,10 +625,45 @@ class LiveBot:
             # refused until it closes.
             clear_panels=clear_panels_tracked,
             narrate=narrator.narrate,
-            route_to=route_service(self.navigator),
+            route_to=route_service(self.navigator, on_plan=self.on_plan),
+            # The route leash (R241): recorded lines live beside the
+            # atlas, keyed the same way; missing line = no leash.
+            route_line_for=line_service(
+                session, self.difficulty, self.store.root
+            ),
+            route_stray_subtiles=self.class_config.route.stray_subtiles,
+            route_return_hostile_radius=(
+                self.class_config.route.return_hostile_radius
+            ),
+            runlog=runlog,
+            frame=frame,
+            # The tag-mode battery's kit (R248, TEST KIT). Wired
+            # unconditionally — the closures are inert until the one run
+            # file that names the step is loaded, and a battery that
+            # discovers a missing service refuses at its first tick.
+            drop_item=self.town.drop_item,
+            open_inventory=self.town.press_inventory_open,
+            carried_with_sockets=lambda: read_carried_items(session),
+            label_state=lambda: label_display_on(session),
+            press_show_items=lambda: self.gated.press_key(
+                bindings.show_items
+            ),
+            # "F" is bound nowhere on disk (see input/keys.py at VK_F),
+            # but its state flag was pinned by T91 (offsets.BH_FILTER_STYLE)
+            # — so the press is blind and the STATE is read, same deal as
+            # Show Items.
+            press_filter_toggle=lambda: self.gated.press_key(keys.VK_F),
+            filter_state=lambda: default_tags_on(session),
+            set_label_enforcement=lambda on: setattr(
+                executor, "enforce_label_display", on
+            ),
+            say=battery_say,
         )
         registry = build_registry(services)
         run = load_run(self.paths.run, registry)
+        if run.mandatory_pickup:
+            services.order_book = OrderBook()
+            runlog.event("pickup.orders_armed", run=run.name)
         if self.radius_override is not None:
             run = run.with_radius(self.radius_override)
         return BehaviorEngine(
@@ -435,6 +685,14 @@ class LiveBot:
             # The Enter/ESC kill switch (R189): the operator's own keys
             # stop the run, correlated against the stamp above.
             bot_escape_at=lambda: escape_stamp["at"],
+            # The out-of-process chicken watchdog: its dead-man switch
+            # (only enforced when the run requires it) and its latch,
+            # which is the other thing besides a human that can open the
+            # ESC menu — so the kill switch can name the right actor.
+            watchdog_alive=watchdog.watchdog_is_alive,
+            watchdog_latch=watchdog.active_latch,
+            runlog=runlog,
+            frame=frame,
         )
 
     def engines(self) -> list[BehaviorEngine]:
@@ -457,11 +715,48 @@ class LiveBot:
         # The operator watches the GAME, not the console (R164). A run that
         # simply stops leaves them guessing whether it is thinking, stuck,
         # or done — the same reason drills have announced themselves in
-        # chat since R95.
-        return BehaviorRunner(factory, announce=Chat(self.session).say)
+        # chat since R95. `registered_say` (tagmode review, issue 001):
+        # between-game announcements share the same one-line buffer as a
+        # typed abort, and must neither eat one nor echo back as human.
+        return BehaviorRunner(
+            factory,
+            announce=registered_say(Chat(self.session).say, self.should_stop),
+        )
 
     def cycle(self) -> GameCycle:
         return GameCycle(self.session, MenuInput(self.session))
+
+
+def safety_poll_for(
+    monitor: SafetyMonitor, should_stop: Callable[[], bool] | None
+) -> Callable[[], None]:
+    """What a blocking call must ask before it goes on blocking.
+
+    Two duties in one call, because the same 24 seconds starved both
+    (2026-08-07): the vitals, and the operator's abort order — which the
+    engine otherwise hears only between ticks, so during that walk there
+    was no way to stop the bot either.
+
+    **Death first, always.** The ordering rule from review 2026-08-02
+    issue 001: a stop rides `ChickenExit` into the cycle's leave-game
+    path, which SENDS INPUT, so it must never be able to preempt a
+    death. Asking the monitor first gets that for free, exactly as the
+    engine's own tick order does.
+
+    The abort travels as a `SafetyInterrupt` too, and has to: a plain
+    `StopRequested` is a `RuntimeError`, and the broad `except Exception`
+    handlers between a walk and the tick loop would eat it. The engine
+    converts both back at its boundary.
+    """
+
+    def poll() -> None:
+        monitor.poll()
+        if should_stop is not None and should_stop():
+            raise SafetyInterrupt(
+                Verdict("stop", "stopped by outside request (abort)")
+            )
+
+    return poll
 
 
 def build_bot(
@@ -498,7 +793,42 @@ def build_bot(
     # closures) because the survey service reads coverage from it — one
     # store, or the survey would report on an atlas nobody is writing to.
     store = MapStore()
-    navigator = live_navigator(session, store, difficulty)
+
+    # The monitor is built BEFORE the navigator, and that order is the
+    # whole point: the navigator polls it from inside every waiting loop
+    # it has, so a blocking walk cannot starve the chicken (the
+    # 2026-08-07 death — docs/reviews/2026-08-07-chicken-starvation-death).
+    # A plain re-order rather than the `narrate_ref` holder trick below,
+    # because safety has no genuine cycle to break and should not borrow
+    # that indirection.
+    monitor = SafetyMonitor(
+        session,
+        SafetyConfig(
+            life_chicken_pct=(
+                class_config.chicken_life_pct
+                if chicken_life_pct is None
+                else chicken_life_pct
+            )
+        ),
+    )
+
+    # The nav.plan emitter (T92). The navigator is SESSION-scoped and the
+    # run log is PER-RUN, so the closure reads a holder that each engine
+    # build repoints — the same treatment `monitor.runlog` gets. Checking
+    # `enabled` first is the NullRunLog discipline: nothing is gathered
+    # for an event nobody will write.
+    plan_sink: dict = {"runlog": None}
+
+    def note_plan(**fields) -> None:
+        runlog = plan_sink["runlog"]
+        if runlog is not None and getattr(runlog, "enabled", False):
+            runlog.event("nav.plan", **fields)
+
+    navigator = live_navigator(
+        session, store, difficulty,
+        safety_poll=safety_poll_for(monitor, should_stop),
+        on_plan=note_plan,
+    )
     perception = Perception(session)
     baseline = SessionBaseline(session)
 
@@ -536,16 +866,6 @@ def build_bot(
         should_stop=should_stop,
         narrate=town_narrate,
     )
-    monitor = SafetyMonitor(
-        session,
-        SafetyConfig(
-            life_chicken_pct=(
-                class_config.chicken_life_pct
-                if chicken_life_pct is None
-                else chicken_life_pct
-            )
-        ),
-    )
     return LiveBot(
         session=session,
         class_config=class_config,
@@ -565,6 +885,8 @@ def build_bot(
         should_stop=should_stop,
         radius_override=radius_override,
         narrate_ref=narrate_ref,
+        plan_sink=plan_sink,
+        on_plan=note_plan,
     )
 
 
@@ -617,6 +939,12 @@ def describe(bot: LiveBot) -> list[str]:
             if "survey" in steps
             else []
         ),
+        # The standing default posture (R256 QA) — printed because it
+        # changes how every fight opens, and a pre-flight that said
+        # nothing about it would leave "which stance is this?" to be
+        # discovered from the game's behaviour.
+        f"posture    {bot.class_config.default_posture or 'cautious (base)'}"
+        " (default; run steps may override per step)",
         f"pickit     {len(bot.pickit.rules)} rules, "
         f"{len(bot.pickit.pending_names)} pending name(s)",
         f"cleanse    {'ENABLED' if bot.cleanse_enabled else 'disabled (pending names)'}",
@@ -630,13 +958,88 @@ def describe(bot: LiveBot) -> list[str]:
     ]
 
 
+def run_stop_channel(session: GameSession) -> Callable[[], bool]:
+    """The operator's abort order, for RUNS (R250): the drill-cancel file,
+    or an abort word ("abort" / "abort the test") typed in game chat.
+
+    Drills have had both channels since R79/R95; runs had NEITHER —
+    `main()` never wired `should_stop`, so a real run's only stops were
+    the ESC kill switch and killing the process. Found 2026-08-13 when
+    the tag-mode battery wedged on a stash panel and the agent's abort
+    had no way in. The engine polls this at the top of every tick and
+    `safety_poll_for` raises on it from inside every walk, so an abort
+    lands within a tick wherever the run is.
+
+    Sticky once tripped, like the drill's: an abort means abort. Chat
+    reading is best-effort — the FILE is the channel that always works.
+    """
+    from pd2bot.drill import ABORT_WORDS, CANCEL_FILE
+    from pd2bot.perception.chatread import ChatListener
+
+    try:
+        listener: ChatListener | None = ChatListener(session)
+    except Exception:  # noqa: BLE001 - no chat read: file cancel only
+        listener = None
+    state = {"stop": False}
+
+    def should_stop() -> bool:
+        if state["stop"]:
+            return True
+        if CANCEL_FILE.exists():
+            state["stop"] = True
+            return True
+        if listener is not None:
+            try:
+                line = listener.poll()
+            except Exception:  # noqa: BLE001 - a torn read is not an abort
+                line = None
+            if line is not None and line.strip().lower() in ABORT_WORDS:
+                state["stop"] = True
+                return True
+        return False
+
+    # The listener rides the closure (tagmode review, issue 001): run-side
+    # says must be able to register themselves with it (`remember`) so a
+    # bot line is never read back as human — and `registered_say` polls
+    # the channel BEFORE speaking, so a typed abort sitting in the
+    # client's ONE-line buffer is captured into the sticky state before
+    # the bot's own message overwrites it.
+    should_stop.listener = listener
+    return should_stop
+
+
+def registered_say(
+    say: Callable[[str], None], should_stop: Callable[[], bool] | None
+) -> Callable[[str], None]:
+    """A chat `say` that cannot eat an abort or echo back as human.
+
+    The client keeps ONE chat line. Before this wrapper (tagmode review,
+    issue 001), a run-side announcement could land between the operator
+    typing "abort" and the next `should_stop` poll — overwriting the
+    abort unread — and every run-side line was invisible to the
+    listener's own-echo filter (the `[claude]` prefix is partyline's,
+    not Chat's). So: poll first (the abort is sticky once seen),
+    register the text second, speak last.
+    """
+    listener = getattr(should_stop, "listener", None)
+
+    def speak(text: str) -> None:
+        if should_stop is not None:
+            should_stop()
+        if listener is not None:
+            listener.remember(text)
+        say(text)
+
+    return speak
+
+
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
     import argparse
     import sys
 
     from pd2bot.behavior.run import RunError
-    from pd2bot.memory import GameNotRunning, NeedsAdministrator
-    from pd2bot.window import WindowNotFound
+    from pd2bot.input.window import WindowNotFound
+    from pd2bot.perception.memory import GameNotRunning, NeedsAdministrator
 
     parser = argparse.ArgumentParser(
         description="Run the bot: create a Hell game, run the run, leave, repeat."
@@ -657,14 +1060,31 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
         "--dry-run", action="store_true",
         help="assemble and print the wiring, then exit without sending anything",
     )
+    parser.add_argument(
+        "--require-watchdog", action="store_true",
+        help="refuse to run unless the chicken watchdog is alive "
+             "(tools/live-run.ps1 sets this; drills and sims do not)",
+    )
     args = parser.parse_args(argv)
 
     try:
         paths = BotPaths() if args.run is None else replace(BotPaths(), run=args.run)
+        session = GameSession()
+        # The run abort channel (R250): 'abort' in chat or the cancel
+        # file, honored mid-walk. A STALE cancel file must not kill the
+        # launch — same rule the drill harness applies on its first run.
+        from pd2bot.drill import CANCEL_FILE, clear_cancel
+
+        if CANCEL_FILE.exists():
+            clear_cancel()
+            print("note: cleared a stale drill-cancel file before launch")
         bot = build_bot(
+            session,
             paths=paths,
             chicken_life_pct=args.chicken,
             radius_override=args.radius,
+            engine_config=EngineConfig(require_watchdog=args.require_watchdog),
+            should_stop=run_stop_channel(session),
         )
     except (GameNotRunning, NeedsAdministrator, WindowNotFound) as exc:
         print(exc, file=sys.stderr)
@@ -683,13 +1103,37 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
         print(line)
     if args.dry_run:
         return 0
+    if args.require_watchdog and not watchdog.watchdog_is_alive():
+        # Pre-flight, before a game is created. The engine enforces this
+        # per tick too, but catching it HERE is what stops a create/leave
+        # spin: a run that can never take a step should never take a game.
+        print(
+            "\nREFUSING TO RUN: the chicken watchdog is not answering.\n"
+            "  Start it (elevated) with:  python -m pd2bot.safety.watchdog\n"
+            "  Then launch again. Nothing has been sent to the game.",
+            file=sys.stderr,
+        )
+        return 1
     if not bot.cleanse_enabled:
         print(
             "\nnote: the inventory cleanse is OFF because the pickit still "
             "names unresolved items; junk will be stashed, not dropped."
         )
 
-    report = bot.cycle().run_games(bot.runner(), max_games=args.games)
+    # The stack watcher (T87, 2026-08-13): every real run samples the main
+    # thread so a silent stall attributes itself to a line. Always on, per
+    # the run log's rule 5 — the run that needs explaining is the one
+    # where an optional flag was forgotten.
+    from pd2bot.runlog.sampler import StackSampler
+
+    samples_path = Path("logs") / f"samples-{time.strftime('%Y%m%d-%H%M%S')}.log"
+    sampler = StackSampler(samples_path)
+    sampler.start()
+    print(f"stack samples -> {samples_path}")
+    try:
+        report = bot.cycle().run_games(bot.runner(), max_games=args.games)
+    finally:
+        sampler.stop()
     print(f"\n{report.summary() if hasattr(report, 'summary') else report}")
     for index, engine in enumerate(bot.engines(), start=1):
         print(f"\n--- game {index}: {engine.report.summary()} ---")

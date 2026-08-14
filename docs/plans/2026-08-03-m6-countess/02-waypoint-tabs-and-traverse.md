@@ -107,3 +107,55 @@ sim-tested (scripted world with a fake exit + area flip) and
 live-proven by T-descent reaching Cellar 5; exit store persisting;
 Countess's super-unique id captured if she was seen (else deferred to
 P5's first full run); review gate answered.
+
+## Implementation Result
+
+Status: **done — code and live halves both** (the review gate's
+question answered: the RoomTile read suffices WITH the seek fallback;
+the user's manual calibration survey was never needed)
+Completed: 2026-08-05
+Commit: d2e612f (and the arc before it: e4921b6 code half, 2407667
+calibrations, 0df707a tome fix, 613315c seek-and-remember)
+
+Live record (details in docs/drill-log.md and the captured logs):
+- **T69 PASS 4/4**: act tabs I/II/V + Black Marsh / Arcane Sanctuary /
+  Halls of Pain rows calibrated; tab-aware WaypointTravel shipped.
+  AREA_BLACK_MARSH=6 verified; HALLS_OF_PAIN=123 read live (contradicts
+  classic lore); ARCANE_SANCTUARY=74 still an expectation.
+- **T70 runs 1-4**: the failure ladder that shaped the final code —
+  announcement-not-foreground lesson; the tome misclick recurrence
+  (fixed in four layers + post-mortem in docs/reviews/); the Cellar 1
+  no-exit failure that exposed the preset-loading limit and produced
+  seek-and-remember.
+- **T70 run 5 PASS: the full descent**, town → Cellar 5, 796 s, all 7
+  transitions area-id proven, clean [CVRL]. maps/exits.json holds 11
+  staircases (the route in both directions) — every later descent is
+  staircase-to-staircase with zero searching.
+- Countess constants pinned: kind 734, unique_no 6 (T68 + R216).
+- Carried forward: performance-notes.md (warm-descent measurement
+  first; staircase pacing and CastInFlight contention priced), the
+  ignored-Thul-rune investigation (traverse has no pickup logic), and
+  the dithering/corners troubleshoot — all for P4/P5/optimization.
+
+- Changed: `actions.py` (`InteractObject` — the single-click staircase
+  gesture); `execute.py` (plain left click, no SHIFT, cast-in-flight
+  respected); `exits.py` (`ExitMemory` — persisted exit positions keyed
+  (seed, difficulty, area, dest) in `maps/exits.json`, corrupt-safe);
+  `steps.py` (`TraverseStep`: posture on first tick, arrival proven by
+  area id only, combat owns any tick it claims, exit from memory
+  first + live RoomTile read as authority with write-back, route legs
+  via `_route_leg`, paced + bounded staircase re-clicks, loud
+  `NavigationError` on no-exit / no-route; registry entries in both
+  vocabularies); `wiring.py` (exit closures, seed read live per call).
+- Validated: **899 tests** (7 new: traverse walk/click/arrival with
+  blackboard + memory write-back, memory-first + paced re-clicks,
+  loud no-exit, combat-owns-tick, exit-memory round-trip/corrupt-file,
+  InteractObject click shape), ruff clean.
+- Early live wins banked out of order (T68, read-only, 2026-08-05):
+  the exit read proven in Cellar 5 (area 25 named, staircase to 24
+  located); Countess candidate kind 734 / unique_no 6 pending the
+  user's eye (R216); the wName heuristic found dead and reworked.
+- Remaining for the live half: the calibration battery (act tabs II/V,
+  Black Marsh / Arcane Sanctuary / Halls of Pain rows), T-exit-read in
+  Black Marsh (Q1 area-id asserts), T-traverse-one, T-descent — all
+  under the R217 standing mandate; then this phase's review gate.

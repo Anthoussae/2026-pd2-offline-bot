@@ -25,19 +25,12 @@
 # (T39 placement drill). A rule naming a pending item loads fine and
 # matches nothing until the drill fills the id in.
 
-# -- potions (R118 Q1: belt first, then a reserve of 2 per type) ---------------
-
-[[rule]]
-name = "healing potions to belt and reserve"
-kinds = ["healing_potion"]
-potion_reserve = 2
-action = "belt"
-
-[[rule]]
-name = "mana potions to belt and reserve"
-kinds = ["mana_potion"]
-potion_reserve = 2
-action = "belt"
+# -- potions -------------------------------------------------------------------
+# Healing and mana potions are NO LONGER picked up (R241, 2026-08-10):
+# the Akara restock station buys them in town (live-proven: "bought 3
+# healing, 2 mana"), and chasing tiny potion sprites on the ground was a
+# measured time sink. REJUVS ARE THE EXCEPTION and stay: they cannot be
+# bought (R47.6), so the ground is their only source.
 
 [[rule]]
 name = "rejuvs to belt and reserve"
@@ -51,6 +44,14 @@ action = "belt"
 name = "flawless and perfect gems and skulls"
 kinds = ["gems_flawless_perfect"]
 action = "keep"
+
+# Low runes (El..Sol, plain AND stackable) are deliberately left on the
+# ground (R241): cheap, common, and the single worst pickup targets.
+# The skip must sit ABOVE "all runes" — first match wins.
+[[rule]]
+name = "skip low runes (El-Sol)"
+kinds = ["runes_low"]
+action = "skip"
 
 [[rule]]
 name = "all runes"
@@ -106,19 +107,9 @@ kinds = [
 qualities = ["unique"]
 action = "keep"
 
-# -- socketed bases (held back until T38 verifies the socket read) -------------
-
-[[rule]]
-name = "3-socket necro heads"
-kinds = ["necro_heads"]
-sockets = [3]
-action = "keep"
-
-[[rule]]
-name = "3- and 4-socket archon plate"
-kinds = ["archon_plate"]
-sockets = [3, 4]
-action = "keep"
+# (The 3-socket necro head and 3/4-socket Archon Plate rules were
+# removed 2026-08-09 at the user's request, R241 — T38 never ran, so
+# they had matched nothing since the day they were written.)
 
 # -- set bases -----------------------------------------------------------------
 

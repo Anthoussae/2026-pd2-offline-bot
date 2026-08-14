@@ -1,0 +1,29 @@
+# T90 — the tag-mode pickup calibration battery (R248/R250, TEST KIT).
+#
+# One town game, no travel, NO town_preamble — chores are suspended by
+# construction (R250: they would contaminate the measurement). The
+# battery step runs the operator's whole experiment: per round, drop
+# every inventory item EXCEPT the cube and the two tomes in one pile
+# where the character stands, announce the round, run the normal
+# whitelisted-pickup protocol for 30s, announce the score, gather
+# everything back and reconcile the census. Blocks in the operator's
+# order: rounds 1A..5A (no tags), one ALT press, 1B..5B (loot filter
+# tags), one F press, 1C..5C (default tags).
+#
+# Aborts: 'abort' / 'abort the test' in game chat, or
+# tools\drill-cancel.ps1 — both stop the RUN within a tick (R250).
+# Misclicked panels (stash, NPC dialogs) are closed and the battery
+# carries on. If it cannot recollect the floor it asks the operator to
+# lift the stragglers by hand and announces "resuming." when clear.
+#
+# Tabulate afterwards:  python -m pd2bot.runlog <run-dir> --tagmode
+
+name = "t90-tagmode-battery"
+
+[[step]] # 5 rounds x blocks A (no tags) / B (filter tags) / C (default tags)
+name = "tagmode_battery"
+rounds = 5
+round_seconds = 30
+
+[[step]] # run complete; the cycle takes it from here (leave, next game)
+name = "done"

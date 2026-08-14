@@ -27,11 +27,11 @@ from drills.t65_hitbox_map import (  # noqa: E402
 from pd2bot.behavior.actions import PickUpItem  # noqa: E402
 from pd2bot.behavior.execute import _PICKUP_OFFSETS, GameActionExecutor  # noqa: E402
 from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
-from pd2bot.input import VK_MENU, GatedInput, InputRefused  # noqa: E402
-from pd2bot.items import read_carried_items  # noqa: E402
-from pd2bot.memory import GameSession  # noqa: E402
+from pd2bot.input.gated import VK_MENU, GatedInput, InputRefused  # noqa: E402
+from pd2bot.perception.items import read_carried_items  # noqa: E402
+from pd2bot.perception.memory import GameSession  # noqa: E402
+from pd2bot.perception.units import label_display_on  # noqa: E402
 from pd2bot.pickit import load_item_table, load_pickit  # noqa: E402
-from pd2bot.units import label_display_on  # noqa: E402
 from pd2bot.wiring import (  # noqa: E402
     BotPaths,
     belt_capacity,

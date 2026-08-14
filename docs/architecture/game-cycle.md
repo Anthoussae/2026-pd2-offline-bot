@@ -137,10 +137,12 @@ carry unchanged — the behavior layer's own exits (`IdleBail`,
 had to change. M5's acceptance re-ran the same pattern with a real run
 inside: 3/3 clean unattended Cold Plains clearances (see behavior.md).
 
-## The safety monitor (`safety.py`)
+## The safety monitor (`safety/monitor.py`)
 
-A per-tick watchdog over the player's vitals, two reflexes, death
-always evaluated first:
+A watchdog over the player's vitals, two reflexes, death always
+evaluated first. It runs at the top of every tick **and from inside any
+call that blocks** — see "Nothing may starve the monitor" below, which
+is the correction a death on 2026-08-07 paid for.
 
 **Chicken** (kolbot's word): life at/below a percentage threshold
 outside town → leave the game *now*. Offline SP makes this stronger
@@ -158,7 +160,7 @@ after N consecutive chickens (default 2) — user-spotted during the live
 drill, whose "odd" instant trip was exactly this carried-vitals effect.
 The durable fix landed in M5 and closed R45's loop: every run opens
 with the town preamble (heal at the healer, repair, restock the belt
-from inventory, merc check — `town.py`), so a game entered with
+from inventory, merc check — `behavior/town/`), so a game entered with
 carried-down vitals heals before the field. The consecutive-chicken
 backstop stays as defense in depth, and non-vitals exits (`IdleBail`,
 `StopRequested`, `is_vitals = False`) no longer count against it —
@@ -180,6 +182,51 @@ watched the bot announce the trip in chat and evacuate. The death path
 is simulation-tested only, deliberately — its entire behavior is "send
 nothing and alert", which fakes cover completely, and dying in Hell to
 test it would cost real experience.
+
+## Nothing may starve the monitor (2026-08-07)
+
+The monitor above is necessary and was not sufficient. On 2026-08-07 the
+engine blocked inside one `walk_to` for **24 seconds** while a 29-hostile
+pack killed the character in Tower Cellar 4. The monitor only ran
+*between* ticks, so it never looked; the death latch worked, but the
+chicken — the reflex whose whole purpose is to act before HP reaches
+zero — was starved. Analysis:
+`docs/reviews/2026-08-07-chicken-starvation-death/`.
+
+Two independent defences now hold the invariant. Full rationale in
+`docs/adr/2026-08-07-unstarvable-safety.md` (accepted).
+
+**In-process.** `SafetyMonitor.poll()` runs the same evaluation as
+`tick()` (one shared `_evaluate`, so they cannot drift) and raises
+`SafetyInterrupt`, which derives from **`BaseException`** — because the
+path out of a blocking walk runs through several broad `except
+Exception` handlers that would otherwise swallow a chicken. The engine
+converts it back to `ChickenExit`/`DeathHalt` at one boundary, so
+everything here is reached by the types it was always written against.
+`walk_to` polls from every loop it waits in and is capped at 2 s per
+call. **The standing rule: any new blocking call must take the poll** —
+`nav/navigate.py`'s `_wait` is the pattern, sleeping in poll-sized pieces
+rather than flat.
+
+**Out-of-process.** `pd2bot/safety/watchdog.py` is a separate elevated process
+polling vitals at 0.2 s that presses ESC — and only ESC — when they
+cross, verifying the pause rather than assuming it, and sending
+**nothing at all** when the character reads dead. `cycle.leave_game`
+keeps its monopoly on the menu dance. It heartbeats, and a run launched
+with `--require-watchdog` refuses to start without one.
+
+**The latch asymmetry, which is deliberate**: once the watchdog fires,
+`GatedInput` refuses *world* input, while `MenuInput` does **not** — so
+the bot can still complete the clean Save-and-Exit that should follow a
+watchdog pause. Do not "fix" this into symmetry.
+
+Both layers were proven live and unattended (T80/T81,
+`drills/safety_canary.py`, 5/5 rounds, town-and-mana so nothing could be
+hurt). What that canary did **not** cover, and is worth knowing before
+trusting it too far: it never killed a bot mid-walk to watch the
+watchdog fire anyway, and everything ran in town at full health with no
+monsters — the death it exists to prevent happened in a Cellar under
+load.
 
 ## Re-verification after a patch
 

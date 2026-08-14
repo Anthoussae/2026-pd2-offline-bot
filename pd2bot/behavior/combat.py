@@ -17,15 +17,15 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from pd2bot.behavior.actions import Action
 from pd2bot.behavior.necro import CombatConfig
 from pd2bot.behavior.reflex import ReflexConfig
-from pd2bot.input import VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6
-from pd2bot.snapshot import GameSnapshot
+from pd2bot.input.gated import VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6
+from pd2bot.perception.snapshot import GameSnapshot
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from pd2bot.behavior.engine import EngineContext
@@ -133,6 +133,16 @@ class BeltConfig:
 
 
 @dataclass(frozen=True)
+class RouteConfig:
+    """The leash numbers (R241): when a run has a recorded route line,
+    how far off it counts as strayed, and how close a hostile must be
+    to make a non-brisk posture wait before walking back."""
+
+    stray_subtiles: float = 12.0
+    return_hostile_radius: int = 12
+
+
+@dataclass(frozen=True)
 class ClassConfig:
     """Everything class-specific, loaded from config/<class>.toml."""
 
@@ -144,6 +154,18 @@ class ClassConfig:
     combat: CombatConfig
     # Rung 2 — NOT the ladder's: handed to SafetyConfig by the cycle wiring.
     chicken_life_pct: float
+    route: RouteConfig = field(default_factory=RouteConfig)
+    # Named posture presets (M6 P3, R212 Q5): full CombatConfigs built
+    # from [combat.postures.<name>] override tables. "cautious" is always
+    # present and always IS `combat` — the base numbers are the cautious
+    # posture by definition, so it cannot be redefined.
+    postures: dict[str, CombatConfig] = field(default_factory=dict)
+    # The posture the combat module starts every game in (R256 QA,
+    # 2026-08-13: berserk, by operator ruling). None = the base
+    # [combat] numbers, exactly the pre-R256 behavior. Validated at
+    # load against the loaded posture names, so a typo refuses before a
+    # game is created around it.
+    default_posture: str | None = None
 
     @property
     def revive_target(self) -> int:
@@ -219,6 +241,7 @@ _COMBAT_NUMBERS: dict[str, type] = {
     "engage_radius": int,
     "melee_range": int,
     "dash_step": int,
+    "charge_attack_range": int,
     "retreat_subtiles": int,
     "reposition_subtiles": int,
     "object_clearance": int,
@@ -229,9 +252,32 @@ _COMBAT_NUMBERS: dict[str, type] = {
     "approach_with_revives": int,
     "revive_search_radius": int,
     "desecrate_rounds": int,
+    "futile_strikes": int,
     "desecrate_settle_s": float,
     "revive_settle_s": float,
+    # M6 P3 additions.
+    "retreat_group_size": int,
+    "retreat_group_radius": int,
+    "desecrate_budget_refresh_s": float,
+    "park_grace_s": float,
 }
+
+# [combat] boolean keys (same treatment as [reflex].armor_in_town).
+_COMBAT_BOOLS = ("linger", "revive_urgency_hold")
+
+# The fight styles the class module implements (R241; ADR
+# 2026-08-09-posture-fight-styles). A posture naming a style is the ONE
+# licensed crossing of "a posture is a manner, not a build": the enum is
+# bounded, the class module owns every implementation, skills stay out.
+_COMBAT_STYLES = ("skirmish", "charge")
+
+# What a [combat.postures.<name>] table may override: the behavior knobs,
+# NOT the skills (a posture is a manner, not a build) and NOT
+# park_grace_s (executor wiring reads it once at startup — a per-posture
+# value would look tunable and silently not be).
+_POSTURE_KEYS = (
+    set(_COMBAT_NUMBERS) | set(_COMBAT_BOOLS) | {"style", "armor_recast_below_pct"}
+) - {"park_grace_s"}
 
 
 def load_class_config(path: str | Path) -> ClassConfig:
@@ -243,7 +289,7 @@ def load_class_config(path: str | Path) -> ClassConfig:
     where = path.name
 
     _reject_unknown(
-        data, {"name", "skills", "hotkeys", "belt", "reflex", "combat"}, where
+        data, {"name", "skills", "hotkeys", "belt", "reflex", "combat", "route"}, where
     )
     name = _require(data, "name", str, where)
 
@@ -342,12 +388,19 @@ def load_class_config(path: str | Path) -> ClassConfig:
     combat_raw = _require(data, "combat", dict, where)
     _reject_unknown(
         combat_raw,
-        set(_COMBAT_NUMBERS) | {"desecrate_skill", "revive_skill"},
+        set(_COMBAT_NUMBERS)
+        | set(_COMBAT_BOOLS)
+        | {"desecrate_skill", "revive_skill", "postures", "style",
+           "default_posture"},
         f"{where}.combat",
     )
     combat_numbers = {
         key: _require(combat_raw, key, kind, f"{where}.combat")
         for key, kind in _COMBAT_NUMBERS.items()
+    }
+    combat_bools = {
+        key: _require(combat_raw, key, bool, f"{where}.combat")
+        for key in _COMBAT_BOOLS
     }
     for ref_key in ("desecrate_skill", "revive_skill"):
         ref = _require(combat_raw, ref_key, str, f"{where}.combat")
@@ -355,10 +408,86 @@ def load_class_config(path: str | Path) -> ClassConfig:
             raise ConfigError(
                 f"{where}.combat.{ref_key}: {ref!r} is not a [skills] entry"
             )
+    base_style = combat_raw.get("style", "skirmish")
+    if base_style not in _COMBAT_STYLES:
+        raise ConfigError(
+            f"{where}.combat.style: {base_style!r} is not one of "
+            f"{_COMBAT_STYLES}"
+        )
     combat = CombatConfig(
         desecrate_skill_id=skills[combat_raw["desecrate_skill"]],
         revive_skill_id=skills[combat_raw["revive_skill"]],
+        style=base_style,
         **combat_numbers,
+        **combat_bools,
+    )
+
+    # [combat.postures.<name>] — override tables over the base numbers
+    # (M6 P3). The base IS the cautious posture; a run step that names no
+    # posture gets it unchanged, so pre-M6 runs behave exactly as before.
+    postures: dict[str, CombatConfig] = {"cautious": combat}
+    postures_raw = combat_raw.get("postures", {})
+    if not isinstance(postures_raw, dict):
+        raise ConfigError(f"{where}.combat.postures: expected tables")
+    for posture_name, table in postures_raw.items():
+        p_where = f"{where}.combat.postures.{posture_name}"
+        if posture_name == "cautious":
+            raise ConfigError(
+                f"{p_where}: 'cautious' IS the base [combat] numbers and "
+                "cannot be redefined — tune the base instead"
+            )
+        if not isinstance(table, dict):
+            raise ConfigError(f"{p_where}: expected a table of overrides")
+        _reject_unknown(table, _POSTURE_KEYS, p_where)
+        overrides = {}
+        for key in table:
+            if key == "style":
+                value = _require(table, key, str, p_where)
+                if value not in _COMBAT_STYLES:
+                    raise ConfigError(
+                        f"{p_where}.style: {value!r} is not one of "
+                        f"{_COMBAT_STYLES}"
+                    )
+            elif key == "armor_recast_below_pct":
+                raw = table[key]
+                if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                    raise ConfigError(
+                        f"{p_where}.{key}: expected a number"
+                    )
+                value = float(raw)
+            else:
+                value = _require(
+                    table, key, _COMBAT_NUMBERS.get(key, bool), p_where
+                )
+            overrides[key] = value
+        postures[posture_name] = replace(combat, **overrides)
+
+    # [combat] default_posture (R256 QA): which posture the module
+    # STARTS in. Optional; absent = the cautious base, the pre-R256
+    # behavior. Validated against the names just loaded, because a
+    # default that only failed at module construction would fail after
+    # a Hell game already exists around it.
+    default_posture = combat_raw.get("default_posture")
+    if default_posture is not None:
+        if not isinstance(default_posture, str):
+            raise ConfigError(f"{where}.combat.default_posture: expected a string")
+        if default_posture not in postures:
+            raise ConfigError(
+                f"{where}.combat.default_posture: {default_posture!r} is not "
+                f"a loaded posture (loaded: {', '.join(sorted(postures))})"
+            )
+
+    # [route] — optional; absent means the defaults (leash still works,
+    # it just uses the stock numbers).
+    route_raw = data.get("route", {})
+    if not isinstance(route_raw, dict):
+        raise ConfigError(f"{where}.route: expected a table")
+    _reject_unknown(
+        route_raw, {"stray_subtiles", "return_hostile_radius"}, f"{where}.route"
+    )
+    route = RouteConfig(
+        stray_subtiles=float(route_raw.get("stray_subtiles", 12.0)),
+        return_hostile_radius=int(route_raw.get("return_hostile_radius", 12)),
     )
 
     return ClassConfig(
@@ -369,4 +498,7 @@ def load_class_config(path: str | Path) -> ClassConfig:
         reflex=reflex,
         combat=combat,
         chicken_life_pct=chicken_life_pct,
+        postures=postures,
+        default_posture=default_posture,
+        route=route,
     )

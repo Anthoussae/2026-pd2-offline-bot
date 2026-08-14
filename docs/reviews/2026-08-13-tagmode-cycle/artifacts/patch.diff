@@ -1,0 +1,3335 @@
+diff --git a/docs/architecture/run-log.md b/docs/architecture/run-log.md
+index 8877176..5bb7af4 100644
+--- a/docs/architecture/run-log.md
++++ b/docs/architecture/run-log.md
+@@ -414,3 +414,63 @@ cleanse path's decision points now speak (`docs/plans/
+   covered and the click waited for the pacer, `cleared` saying whether
+   she moved before `aim_blocker_wait_s` ran out), `blocker_kind`,
+   `blocker_position`, and the offsets involved.
++
++## Event kinds added by the tag-mode battery (2026-08-13, R248/R250 — TEST KIT)
++
++Emitted only by the `tagmode_battery` step (`runs/t90-tagmode-battery.toml`);
++tabulate with `python -m pd2bot.runlog <dir> --tagmode`. Rounds run in
++BLOCKS (the operator's R250 structure): 1A..5A no tags, 1B..5B loot
++filter tags, 1C..5C default tags.
++
++- `battery.begin` — the battery accepted its environment: `rounds`,
++  `round_seconds`, the droppable census (`droppable`, `whitelisted`,
++  `kept` — the cube and the two tomes), `wanted_kinds`,
++  `labels_initial`, `filter_on`, `filter_readable` (True since T91
++  pinned `offsets.BH_FILTER_STYLE`).
++- `battery.mode` — one block's mode set and flag-verified: `block`
++  (A/B/C), `mode` (1/2/3), `labels_on`, `filter_on`, `enforcement`
++  (False = the executor's label force-on is suspended, block A only).
++- `battery.round` — the round's phase boundaries, distinguished by
++  `stage`: `drop_end` (`dropped` — one pile at the feet), `test_start`
++  (`wanted_on_ground`, `junk_on_ground`, `wanted_kinds` — the
++  tabulator's window opener and wantedness key; kind-based because
++  ground unit ids churn), `test_end` (`elapsed_s`, `timed_out`,
++  `collected`, `wanted_left`, `junk_collected` — the announced score),
++  `gather_end` (`elapsed_s`, `reconciled`, `operator_assisted`). All
++  carry `block`/`round_no`/`mode`. The per-item evidence between
++  `test_start` and `test_end` is the ordinary item stream.
++- `battery.assist` — the between-round gather handed to the operator
++  (R251: it is THEIR job, immediately — the bot never collects between
++  rounds): `block`, `round_no`, `remaining`. The battery holds
++  hands-off until the floor clears, then says "resuming.".
++- `battery.consumed` — a drop left the inventory but never landed on
++  the floor (a slipped ctrl fires the bare right-click; launch 3 drank
++  a healing potion this way): `item_kind`, `block`, `round_no`. The
++  item is excluded from the census and the battery continues.
++- `battery.loss` — the floor read empty but the census (inventory +
++  belt) still did not reconcile: `missing`/`gained` kind counts.
++  Announced and RECORDED, never fatal (stackables merge on pickup,
++  which a count census reads as loss) — the battery continues; the
++  operator is present and `abort` is theirs.
++- `battery.end` — `completed` (False carries `why`), `rounds_done`.
++
++Same change set (R250): RUNS now honor the abort channel drills always
++had — `abort` / `abort the test` typed in game chat, or
++`tools\drill-cancel.ps1` — via `wiring.run_stop_channel`, polled every
++tick and from inside every walk.
++
++## Watchdog staleness grace (2026-08-13, R253 — operator-approved)
++
++The watchdog transiently stalls ~4–10 s and RECOVERS (five healthy
++runs died to instant declaration before the diagnosis; the T90 row 4
++teardown caught the recovery in the act). The engine now requires the
++heartbeat to read stale continuously for `watchdog_stale_grace_s`
++(15 s) before declaring the watchdog down. Track A (the in-process
++safety poll, ADR 2026-08-07) is untouched. New event kinds:
++
++- `watchdog.stale` — the first stale read; carries `grace_s`. The
++  transient stalls were invisible for five runs because nothing spoke
++  until the run was already being ended.
++- `watchdog.recovered` — the heartbeat came back inside the grace.
++- `watchdog.down` — staleness outlasted the grace (carries `stale_s`),
++  or no heartbeat channel is wired at all; the run stands down.
+diff --git a/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/01-offline-build.md b/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/01-offline-build.md
+new file mode 100644
+index 0000000..597c694
+--- /dev/null
++++ b/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/01-offline-build.md
+@@ -0,0 +1,130 @@
++# P1 — offline build (sm)
++
++Everything buildable without the game. Self-contained; read
++[plan.md](plan.md) and [notes.md](notes.md) for the why.
++
++## Scope
++
++1. **`tagmode_battery` step** (`pd2bot/behavior/steps/`, new module,
++   registered in the registry with params `cycles` (default 5),
++   `round_seconds` (default 30), `modes` (default `[1, 2, 3]`)).
++   Behavior per cycle, per mode:
++   - **Mode set**: read `label_display_on`; press `bindings.show_items`
++     only when the read disagrees with the target (parity-safe, the
++     T66 policy). For mode 3, press F (VK 0x46) and verify by the
++     probe's flag if `offsets` carries one, else `run.say` a chat
++     confirm ("mode 3 set — tags should read DEFAULT; 'abort' if
++     not") with a short patience window. Announce every switch.
++   - **Drop phase**: inventory open, stash closed; enumerate
++     `main_inventory`; drop every item that is movable, not in
++     `RIGHT_CLICK_HAZARD_KINDS`, via the town layer's `drop_item`
++     (its stop-on-first-failure policy stands). Record the manifest:
++     unit id at drop time is unreliable across the floor transition
++     (id churn is a known fact), so the manifest keys on (kind,
++     quality, sockets) multiset + count, and each entry carries the
++     pickit verdict (`cleanse_keep`-style, permissive) taken at drop
++     time. Close panels.
++   - **Test phase**: the engine's real pickup machinery aimed ONLY at
++     whitelisted ground items (the pickit's own `wants`), capped at
++     `round_seconds`, ending EARLY when no wanted droppable remains
++     on the floor. Walk-radius = the drop scatter is at the feet, so
++     the existing pickup step's enumeration radius is fine.
++   - **Reset phase**: gather EVERY ground item that matches the
++     manifest (direct `PickUpItem` actions, no pickit gate), until
++     the carried census accounts for the full manifest or nothing
++     eligible remains on the floor; discrepancies are announced, and
++     a shortfall REFUSES to start the next round (safety property —
++     see notes.md item 5).
++   - **Events**: emit `battery.round` (mode, cycle, manifest census,
++     phase timestamps) through the run-log envelope; the item stream
++     (`action.pickup_attempt`, `item.collected`, `item.abandoned`)
++     already carries the per-item record. Schema documented in
++     `docs/architecture/run-log.md`; envelope keys are inviolable
++     (yesterday's clobber lesson — no field named `kind`).
++2. **Run file** `runs/t90-tagmode-battery.toml`: steps =
++   `tagmode_battery`, `done`. NO `town_preamble` (chores suspended by
++   construction). `mandatory_pickup` absent.
++3. **Executor knob** (`pd2bot/behavior/execute.py`): the `_pick_up`
++   label force-on becomes conditional on an executor/config flag
++   (`enforce_label_display`, default True — every existing run
++   unchanged, pinned by test). The battery step sets it False for
++   mode-1 rounds only.
++4. **F-flag probe drill** (`drills/t91_filter_flag.py`): T66's
++   protocol verbatim with key F — snapshot BH.dll writable memory,
++   4 presses, keep bytes alternating in lockstep; report
++   module+offset+values ready for offsets.py. Autonomous, ends on its
++   own, standard abort paths. (Confirm free test id against
++   `docs/drill-log.md` before wiring: T90 is the battery, T91 the
++   probe, per project-state's next-test counter.)
++5. **Tabulator**: `python -m pd2bot.runlog <dir> --tagmode` — per
++   round: mode, whitelisted dropped/collected, time-to-last-wanted,
++   junk collected during test phase, abandonment reasons; per mode:
++   means over rounds. Unit-tested against a synthetic events.jsonl.
++6. **Tests**: step round/manifest/mode-sequencing logic against the
++   test fakes (the envelope-collision-detecting fake from yesterday);
++   executor knob default pinned; tabulator; run-file lint passes the
++   registry.
++7. **Docs**: run-log.md event section, steps README row, this plan
++   dir's notes updated with any deviation.
++
++## Out of scope
++
++Live anything; changing the default label policy; pickit rules.
++
++## Conventions
++
++- Bounded waits that poll safety (`_wait` pattern) — nothing may
++  starve the monitor (ADR 2026-08-07).
++- Step names in run files are API — pick `tagmode_battery` once.
++- Run-log rules: never raises, never blocks, honest absence.
++- Comment density/idiom: match the neighboring steps (clear.py,
++  services.py).
++
++## Validation
++
++```
++~\.venvs\pd2bot\Scripts\python.exe -m pytest
++```
++
++```
++ruff check .
++```
++
++## Definition of done
++
++Suite green, ruff clean, run file lints, no live contact. Report
++deviations. Do not commit unless asked; do not expand scope; stop on
++ambiguity.
++
++## Implementation Result
++
++Status: done
++Completed: 2026-08-13
++Commit: pending
++
++- Changed: `pd2bot/behavior/steps/tagmode.py` (new — the battery step,
++  a per-tick phase machine: begin/set_mode/drop/test/gather/final);
++  `pd2bot/behavior/steps/services.py` (+9 wired-closure fields, all
++  None-defaulted); `pd2bot/behavior/steps/registry.py` +
++  `pd2bot/behavior/run.py` (both registries, mirrored);
++  `pd2bot/behavior/steps/__init__.py` (export);
++  `pd2bot/behavior/execute.py` (`enforce_label_display`, default True);
++  `pd2bot/input/keys.py` (`VK_F` + why it is bound nowhere);
++  `pd2bot/wiring.py` (services wired: town drop/open-inventory,
++  label flag reader, key presses, executor knob, chat channel);
++  `runs/t90-tagmode-battery.toml` (new); `drills/t91_filter_flag.py`
++  (new — T66's protocol on key F); `pd2bot/runlog/events.py`
++  (`tagmode_report` + `--tagmode`); docs (run-log.md event section,
++  steps README row); tests (`tests/behavior/test_tagmode.py` 9 tests
++  incl. one full simulated cycle, `tests/runlog/test_tagmode_report.py`
++  3 tests, 2 executor-knob tests, registry-vocabulary pin updated,
++  shipped-run lint).
++- Validated: full suite **1289 passed**, ruff clean.
++- Deviations: (1) the gather phase has NO deadline — the plan's
++  `gather_seconds` cap was dropped in favor of hold-open-and-nag with
++  periodic write-off re-arming, because "never lose an item" outranks
++  "finish the battery" and clicking keeps the engine's never-idle
++  honest; (2) drops scatter over 4 points (±4 subtiles) so a round is
++  small clusters, not one confounding mega-pile; (3) events grew to
++  `battery.begin/mode/round/loss/end` (the plan named only
++  `battery.round`) so the tabulator needs no side-channel state.
+diff --git a/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/02-live-battery.md b/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/02-live-battery.md
+new file mode 100644
+index 0000000..acece68
+--- /dev/null
++++ b/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/02-live-battery.md
+@@ -0,0 +1,79 @@
++# P2 — live battery and ruling (sm)
++
++Depends on P1 (suite green). Live protocol: bridge, guarded-run,
++watchdog, operator present and tabbed in; ALWAYS read
++`logs/runs/<newest>/events.jsonl` after; the sampler file
++(`logs/samples-*.log`) answers any lost-seconds question.
++
++## Review gate — the launch request IS the gate
++
++Issue one `execute` request (next free R number) carrying the full
++revised protocol: mode interpretation (mode 2 = ALT on + filter tags,
++mode 3 = ALT on + F/default tags — correctable in chat), interleaved
++(1,2,3)×5 cycles, 30 s cap with early finish, undroppables sit out
++(cube/tomes/scrolls/maps/potions), manifest reconciliation between
++rounds, full-floor sweep before `done`, and the named residual risk
++(a client crash mid-round loses that round's floor items). Wait for
++the word.
++
++## Sequence
++
++1. **F-flag probe** (t91 drill, ~2 min, autonomous): if a flag byte
++   survives, add it to `offsets.py` + accessor and re-run the suite
++   before the battery; if none, the battery falls back to chat
++   confirms at mode-3 switches — say which fallback is active in the
++   launch announcement.
++2. **The battery**: guarded-run with `runs/t90-tagmode-battery.toml`,
++   1 game. The step announces the drop manifest in chat before cycle
++   1 — if the droppable whitelisted set is thin (< ~4 items), the
++   operator may abort and restock the inventory, then relaunch.
++3. **Read the event log first**, then tabulate
++   (`python -m pd2bot.runlog <dir> --tagmode`), then reconcile the
++   manifest one last time against the run's end state.
++4. **Register T90/T91** in `docs/drill-log.md`; update
++   project-state's next-test counter.
++5. **Issue the ruling request** (`verify`): the per-mode table plus
++   the raw per-round rows, and the question — which mode becomes the
++   bot's standing label policy (that change is a follow-up commit,
++   not this plan).
++
++## Definition of done
++
++Battery complete (or honestly aborted with everything gathered), table
++delivered, ruling request issued, drill log + instruction log current.
++_DONE.md is written by yona-implement at closeout, covering both
++phases; the teach step belongs to the combat-logistics P6 closeout
++unless the operator asks earlier.
++
++## Reminders
++
++Do not commit unless asked. Confirm operator presence before ANY
++launch. On any mid-battery surprise: gather the floor first, diagnose
++second. Report deviations plainly.
++
++## Implementation Result
++
++Status: done
++Completed: 2026-08-13
++Commit: pending
++
++- Six launches total (drill-log T90 rows 1-6 + T91 row 1). The battery
++  design was rebuilt twice from live findings (R250 operator redesign
++  after the scatter-walk wedge; R251/R252 operator-gathered rounds +
++  loss-tolerant census after the drunk-potion stop) — each launch paid
++  for a defect the next one no longer had.
++- The measurement (15 rounds): A (no tags) 30/30 (100%), mean 12.3 s;
++  B (filter tags) 3/30 (10%); C (default tags) 11/30 (36%). All tagged
++  rounds timed out.
++- Ruling (R254, approved): the executor's label policy INVERTED —
++  labels OFF for pickup. Field-validated: cold-plains run COMPLETE,
++  census 1/1 first-click, zero misses (log 20260813-083614).
++- Collateral hardening shipped along the way: the run abort channel
++  (R250; wiring.run_stop_channel — standing for ALL future runs), the
++  watchdog staleness grace (R253, operator-approved safety change,
++  after reframing five "freezes" as transient stalls with recovery),
++  per-drop floor confirmation, misclick panel recovery in every phase.
++- Deviations from the phase file: the F-flag probe PASSED so the blind
++  fallback never ran live; the ruling request became R254 (numbering
++  moved with the session's extra gates R250-R253); the teach step
++  stays with the combat-logistics P6 closeout as planned.
+diff --git a/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/_DONE.md b/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/_DONE.md
+new file mode 100644
+index 0000000..43001c2
+--- /dev/null
++++ b/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/_DONE.md
+@@ -0,0 +1,95 @@
++---
++kind: implementation-log
++status: done
++repo: 2026-pd2-offline-bot
++plan: plan.md
++completed: 2026-08-13
++commit: see the 2026-08-13 commit series on combat-logistics
++adrs: []
++---
++
++# Done — the tag-mode pickup calibration (R248 detour, T90/T91)
++
++## Outcome
++
++The operator's question is answered decisively, and the answer changed
++the bot: **no name tags is the optimal pickup mode** — 30/30 (100%,
++mean 12.3 s) against 3/30 (10%) under loot-filter tags and 11/30 (36%)
++under default tags, every tagged round timing out. The executor's
++standing label policy (force labels ON before pickup, T63/T66) was
++falsified by the measurement and INVERTED (R254, approved): pickup now
++ensures labels OFF, parity-safe against BH.dll's display flag.
++Field-validated by a complete ordinary cold-plains run (census 1/1,
++first click, zero misses; log `20260813-083614`).
++
++## Completed work
++
++- **T91** (`drills/t91_filter_flag.py`): the "F" default-tags toggle's
++  state flag found on the first probe — `offsets.BH_FILTER_STYLE`
++  (BH.dll+0x14D1CC), reader `perception.units.default_tags_on`. All
++  three display modes machine-verified; F is bound NOWHERE on disk
++  (keyfile/BH.json/ProjectDiablo.cfg all scanned), documented at
++  `input/keys.py::VK_F`.
++- **T90** (`pd2bot/behavior/steps/tagmode.py` + both registries +
++  `runs/t90-tagmode-battery.toml` / `-c.toml`): the battery step —
++  blocks 1A..5A / ALT / 1B..5B / F / 1C..5C, one-pile stand-still
++  drops of everything but the cube and tomes, flag-verified mode
++  transitions with settle windows, 30 s rounds ending early when
++  clean, chat-announced rounds and scores, operator-gathered resets
++  ("resuming."), per-drop floor confirmation (`battery.consumed`),
++  announced-never-fatal census notes (`battery.loss`), stray-panel
++  recovery every tick, `blocks` param for partial reruns.
++- **The run abort channel** (`wiring.run_stop_channel`): `abort` /
++  `abort the test` in game chat, or the drill-cancel file, stops ANY
++  run within a tick — runs had no `should_stop` wired at all before
++  this (found when the agent's abort had no way into launch 1).
++- **The watchdog staleness grace** (`EngineConfig.watchdog_stale_grace_s`
++  = 15 s, operator-approved R253): five "silent freezes" reframed as
++  transient ~4–10 s stalls WITH RECOVERY once guarded-run stopped
++  killing the evidence (it now waits 12 s for the faulthandler dump on
++  a stale heartbeat). `watchdog.stale`/`watchdog.recovered` events.
++- **The executor knob + inversion** (`enforce_label_display`, default
++  True): pickup presses Show Items only when labels provably read ON.
++- **Tabulation**: `python -m pd2bot.runlog <dir> --tagmode`.
++
++## Validation
++
++- `pytest`: **1299 passed** (from 1275 at session start); `ruff` clean.
++- Live: six T90 launches (drill-log rows 1–6) + T91. Full battery
++  data across launches 4 and 5; field validation run 6.
++
++## Deviations from the plan
++
++The battery was redesigned twice mid-cycle by operator instruction
++(R250: one-pile drops + immediate misclick recovery after the
++scatter-walk wedge; R251/R252: operator-gathered rounds +
++loss-tolerant census after a ctrl-slip drank a potion and stopped a
++healthy battery). Each launch's defect is recorded in the drill log
++and was fixed before the next. Three healing potions were consumed by
++ctrl slips across the session (all caught by the floor confirmation).
++
++## Documentation
++
++`docs/architecture/run-log.md` (battery events, abort channel, the
++staleness grace), `pd2bot/behavior/steps/README.md`, `input/keys.py`
++(the corrected label-protocol note), plan `notes.md` (full discovery
++and redesign record), drill log rows T90×6 + T91, instruction log
++R248–R254.
++
++## ADRs
++
++None — test kit plus one measured policy inversion inside existing
++mechanics. The safety-grace change is recorded in `EngineConfig` and
++the run-log doc; it adjusts a threshold within ADR 2026-08-07's
++architecture rather than choosing a new direction.
++
++## Follow-ups (outside this scope)
++
++- The watchdog stall's ROOT CAUSE is still open — the grace is
++  mitigation, and the instrumented dump has yet to catch a stall
++  longer than 10 s. Evidence next occurrence.
++- The tagged-mode failure MECHANISM (labels burying sprites vs
++  displacing click geometry) is measured but not explained; only
++  worth pursuing if tags are ever needed during pickup again.
++- The teach step for this cycle rides the combat-logistics P6
++  closeout, per the phase file.
+diff --git a/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/notes.md b/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/notes.md
+new file mode 100644
+index 0000000..5ff5bd6
+--- /dev/null
++++ b/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/notes.md
+@@ -0,0 +1,246 @@
++# Notes — pickup name-tag calibration battery (R248 detour)
++
++## The request (R248, resolved 2026-08-13 05:35)
++
++The operator's proposal, verbatim in intent:
++
++- Objective: determine the optimal name-tag display setting for
++  whitelisted-item pickup accuracy.
++- Three modes: (1) no tags (ALT off — the game's current state),
++  (2) loot-filter tags (ALT on), (3) default non-filter tags
++  ("F" to toggle; currently off). Double-check the keys against the
++  known hotkey list.
++- Method: drop all inventory items (NEVER the Horadric Cube), pick up
++  whitelisted items only, ~30 s per round, ~5 rounds per mode, all
++  back-to-back in one game. Town chores suspended during the test.
++  Pick everything up between rounds; gather EVERYTHING at the end —
++  no whitelisted item may be lost.
++- Output: tabulate accuracy per mode — whitelisted collected, speed,
++  non-whitelisted accidentally collected per round — and rule.
++- Authorization: review/edit the proposal and run it if reasonable;
++  query only on trouble. (The deferred R244 "(b)" pickup battery is
++  this, defined by the operator as promised.)
++
++## Discovery — the hotkey double-check (operator asked for it)
++
++- **ALT confirmed.** The character keyfile
++  (`C:\Program Files (x86)\Diablo II\Save\ProjectD2\MaqiuDoubing.key`,
++  108 entries, parsed by `pd2bot.input.keyfile`) binds **Show Items =
++  entry 37, primary ALT (0x12)** — the R247 registry already resolves
++  it (`KeyBindings.show_items`). ALT acts as a TOGGLE (not hold)
++  because `BH.json → game.always_show_items: true`; this matches T63's
++  live finding and keys.py's note.
++- **ALT state is READABLE from memory**: `offsets.BH_LABEL_DISPLAY`
++  (BH.dll+0x14D2CA, found by T66; 1 = labels showing), accessor
++  `perception.units.label_display_on`. Mode 1 vs 2/3 is therefore
++  machine-verifiable — no blind toggle parity risk for ALT.
++- **"F" is NOT recorded in any config.** Scanned: the keyfile (no
++  entry binds 0x46 at all — so pressing F cannot fire a game
++  function by accident, a useful safety fact), `BH.json` (all
++  lootfilter hotkeys `"None"`), `ProjectDiablo.cfg` (no F). Best
++  hypothesis: F is a PD2-hardcoded filter-level toggle —
++  `BH.json` carries `filter_level: 0` with `last_filter_level: 8`,
++  the flip-between pair such a toggle would maintain. Consequence:
++  the F toggle must be PROVEN live before the battery trusts it —
++  a T66-shape probe (press F 4×, diff BH.dll writable memory for the
++  alternating byte) makes the F state readable too; if no flag
++  survives, fall back to operator visual confirmation in chat at each
++  mode switch (they are present throughout anyway).
++
++## Discovery — the machinery (all of it already exists)
++
++- **Drop**: `behavior/town/inventory.py::drop_item` — ctrl+right-click
++  one inventory item to the floor, effect-verified ("gone from
++  inventory"), stash must be CLOSED (R64), modifier settled (R113),
++  stop-on-first-failure policy (Stage B run 4's portal incident).
++- **What may be dropped**: the item-exception registry
++  (`offsets.ITEM_EXCEPTIONS` → `RIGHT_CLICK_HAZARD_KINDS`,
++  `UNMOVABLE_KINDS`) already protects the Cube (policy bit), tomes,
++  scrolls, dungeon maps (right-click side effects) and ALL potions (a
++  slipped ctrl drinks one). So "drop everything except the cube"
++  becomes "drop every DROPPABLE item" — strictly safer than the
++  request, and the cube constraint falls out of existing policy. The
++  undroppable jumble members simply sit out the test (reported, not
++  silent).
++- **Whitelist verdicts**: `pickit.Pickit.wants` (ground items, the
++  live pickup's own judge) and `pickit.cleanse_keep` (carried items,
++  permissive mode). The drop phase classifies each dropped item as
++  whitelisted-or-not at drop time, so the per-round denominator is
++  exact.
++- **Pickup**: the engine's real path — `steps` pickup machinery →
++  `execute.py::_pick_up` (sprite-aimed schedule, `_await_interact`,
++  goal-aware sprite escape — all of yesterday's fixes). Measuring
++  anything else (e.g. a T76-style raw click loop) would measure the
++  aim schedule, not the bot; the operator asked for the bot.
++- **The label-policy conflict**: `execute.py::_pick_up` currently
++  FORCES labels ON when `label_display_on()` reads False (the T66
++  policy — "labels must be showing for the small classes to be
++  clickable at all"). Mode 1 (tags off) is impossible until the
++  executor grows a knob to leave the toggle alone. This is the one
++  real code change to production behavior (default unchanged:
++  enforce).
++- **Run architecture**: runs are TOML step lists; town chores are
++  suspended by simply NOT listing `town_preamble`. The run event log
++  (always on) plus `python -m pd2bot.runlog --pickup` is the
++  measurement substrate — per-item `action.pickup_attempt` /
++  `item.collected` (with `attributed_to` for clicked-A-got-B) /
++  `item.abandoned` already exist. The battery adds a small
++  `battery.round` event (mode, round, dropped census, start/end) so
++  the tabulator can cut the existing item stream by round.
++- **Precedent shape**: T76 (archived pickup-reliability plan) staged
++  arrangements and measured per-click outcomes; its lessons are
++  carried (loose staging measured by the floor, not demanded of the
++  operator; out-loud skips; solo-only rounds cannot PASS). T86 shows
++  the drill-drives-town-layer pattern. T89 shows the demonstration
++  kind.
++
++## Design decisions (recorded before implementation)
++
++1. **Engine step, not a freestanding drill.** A new step
++   `tagmode_battery` + run file `runs/t90-tagmode-battery.toml`
++   (steps: battery → done; no preamble). Reasons: the real pickup
++   path comes for free; the run event log and census tooling are the
++   tabulation substrate; the game cycle, safety monitor, watchdog and
++   guarded-run protocol all apply unchanged. The step is test kit,
++   clearly marked, like the pilot run files.
++2. **Mode interpretation** (assumption the operator can correct in
++   chat at zero cost): mode 2 = ALT on + filter tags (F off, the
++   current styling); mode 3 = ALT on + default tags (F pressed);
++   mode 1 = ALT off (F irrelevant — no tags drawn). The battery
++   announces each mode switch in chat and (if the F flag was found)
++   verifies memory state; a wrong interpretation is caught in
++   seconds live.
++3. **Interleaved mode order** — cycles of (1, 2, 3) × 5, not three
++   blocks of five. Item attrition (anything lost or vanished mid-
++   battery) then degrades all modes equally instead of biasing the
++   later blocks. Toggles are cheap (one or two key presses).
++4. **Round = drop phase → test phase (30 s cap, ends EARLY when every
++   droppable whitelisted item is collected — time-to-done is the
++   speed metric) → reset phase (gather ALL ground items, verified
++   against the drop manifest).** The reset gather aims at every
++   dropped item regardless of whitelist (direct PickUpItem actions,
++   no pickit gate), because losing junk clutters the floor for the
++   next round and losing whitelisted items is forbidden outright.
++5. **Loss containment**: floor items vanish when the game ends, so
++   exposure is capped at one round's droppables (~30–90 s window).
++   The battery refuses to advance a round while any manifest item is
++   unaccounted for; on abort/interrupt the standing rule is gather
++   first, and the final act before `done` is a full-floor sweep +
++   manifest reconciliation announced in chat. Residual risk (client
++   crash mid-round) is named to the operator at the launch gate.
++6. **F-flag probe precedes the battery** (same live session): T66's
++   protocol pointed at F — 4 presses, diff BH.dll writable pages,
++   keep the byte that alternates in lockstep. Found → `offsets.py`
++   constant + accessor beside `label_display_on`, and the battery
++   verifies mode 3 by read. Not found → blind toggle + operator
++   visual confirmation at each switch (2 chat confirms per cycle).
++7. **Tabulation** lives in the runlog package (a `--tagmode` report or
++   a small script in the plan dir): per round — mode, dropped
++   whitelisted/junk counts, whitelisted collected within cap,
++   time-to-last-whitelisted, junk collected during test phase
++   (accidental pickups, `attributed_to` cases), abandoned reasons.
++   Per mode — means over its 5 rounds. The ruling stays the
++   operator's (R-numbered verify request when the table is ready).
++
++## Test set caveat (known before launch)
++
++The character stands at the menu, so the inventory census cannot be
++read until a game is up. If the droppable-and-whitelisted subset of
++the jumble turns out thin (maps/scrolls are undroppable by registry;
++potions never drop), the battery announces the manifest in chat
++before round 1 and the operator may abort and restock the inventory.
++The step must not silently run a 15-round battery over 2 items.
++
++## Open items / future work
++
++- If mode 1 scores near zero for small classes (T63 predicts labels
++  are REQUIRED for charms/gems/runes to be clickable), the ruling may
++  be quick — the battery still quantifies it honestly.
++- The winning mode becomes the label policy the executor enforces
++  (today it only enforces ON); wiring that in is a follow-up commit
++  after the operator's ruling, not part of the battery.
++- `filter_level` semantics (0 vs 8) were not needed for the battery
++  design; if the F probe finds the flag, record what the two values
++  mean in offsets.py at that time.
++
++## P1 implemented (2026-08-13, same session)
++
++Suite 1289 green, ruff clean. Deviations recorded in
++01-offline-build.md's Implementation Result: no gather deadline
++(hold-open-and-nag; losing an item outranks finishing the battery),
++4-point drop scatter (a single mega-pile would confound the mode
++comparison), and a fuller event family (`battery.begin/mode/round/
++loss/end`). The engine's own guards were the design constraints: the
++gather keeps clicking (acted) so never-idle stays honest, and the F
++confirm window is ticked waits, so a chat `abort` lands between ticks.
++
++One live-relevant note for P2: the battery anchors wherever the
++character stands at each round's first drop tick — a guarded-run game
++starts at the town spawn, which has NPC traffic nearby. If round 1
++shows bystander interference (click dodges, stolen clicks), abort
++cheaply and reconsider a walk-to-clear-ground preamble tick.
++
++## R250 — the operator's redesign (2026-08-13, after launch 1)
++
++Launch 1 (drill-log T90 row 1): round 1A ran clean — **4/4 whitelisted
++in 5.7 s with labels OFF** — and reconciled; round 1B then exposed the
++scatter-walk design's failure family live (walk clicks re-collect
++labeled drops; a stash misclick wedged the drop-walk; the wedge ticks
++all read "acted" so nothing tripped), and the abort exposed that RUNS
++never wire `should_stop` at all. Nothing was lost.
++
++The operator's edit spec, implemented the same session:
++
++1. "abort the test" (chat) and the cancel file stop RUNS within a tick
++   — `wiring.run_stop_channel`, standing for every future run.
++2. Stray blocking panels (stash/NPC dialog) are closed in any phase and
++   the battery carries on; the chat console is never touched.
++3. Structure per the operator, replacing R248's interleave + scatter:
++   one pile at the feet; drop everything but cube + tomes (potions,
++   scrolls, maps INCLUDED — a deliberate registry override inside this
++   battery, slip risk carried by the R113 settle + reconciliation);
++   blocks 1A..5A / ALT / 1B..5B / F / 1C..5C; announce round before
++   and score after; gather escalates to the operator ("resuming.").
++4. Census reconciles over inventory + belt: a gathered potion routes
++   to the belt (proven by the fake-world test — pile composition
++   drifts by the belt-bound potions after round 1, which is honest
++   client behavior, not loss).
++
++Validation: 1293 tests, ruff clean. The relaunch gate is R250.
++
++## The answer, and the R254 ruling (2026-08-13)
++
++Fifteen measured rounds across four launches (T90 rows 1-5; the two
++data runs are logs 20260813-074021 and -082022):
++
++| mode              | accuracy       | mean time | timeouts |
++|-------------------|----------------|-----------|----------|
++| A - no name tags  | 30/30 (100%)   | 12.3 s    | 0/5      |
++| B - filter tags   | 3/30  (10%)    | 30 s cap  | 5/5      |
++| C - default tags  | 11/30 (36%)    | 30 s cap  | 5/5      |
++
++**No tags wins by a landslide** — and the finding inverts standing
++code: `_pick_up` had FORCED labels ON since T63/T66 ("labels must be
++showing for the small classes to be clickable"), which this battery
++falsified with its own instrument — the executor had been switching
++itself into its worst mode before every pickup.
++
++Operator ruling (R254, approved): invert the policy — pickup ensures
++labels OFF, same parity-safe flag mechanics. The battery suspends
++enforcement in ALL modes now (it owns the display). Field validation:
++one ordinary cold-plains run's census vs the 18/31 (T71) and 5/11
++(R240 smoke) baselines.
++
++Also learned along the way, each now guarded in code:
++- RUNS had no abort channel at all (`should_stop` never wired) — fixed
++  for every future run (`wiring.run_stop_channel`; "abort the test").
++- The watchdog "silent freeze" is a transient ~4-10 s stall WITH
++  RECOVERY (5 occurrences); the engine now gives staleness a 15 s
++  grace (operator-approved safety change), with stale/recovered on the
++  record.
++- A slipped ctrl during a drop DRINKS a potion and reads identically
++  to a successful drop from the inventory side (3 healing potions paid
++  across the session); the battery confirms every drop against the
++  floor.
++- Stackables merging on pickup read as census losses; discrepancies
++  are announced-and-recorded, never fatal, while an operator watches.
+diff --git a/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/plan.md b/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/plan.md
+new file mode 100644
+index 0000000..3bdd495
+--- /dev/null
++++ b/docs/archive/plans/2026-08-13-pickup-tagmode-calibration/plan.md
+@@ -0,0 +1,107 @@
++---
++kind: plan
++size: md
++depth: implementation
++status: done
++repo: 2026-pd2-offline-bot
++created: 2026-08-13
++completed: 2026-08-13
++commit: see the 2026-08-13 commit series on combat-logistics
++adr: none
++---
++
++# Pickup name-tag calibration battery (R248 detour, T90)
++
++## Goal
++
++Measure whitelisted-item pickup accuracy under three name-tag display
++modes — (1) no tags / ALT off, (2) loot-filter tags / ALT on,
++(3) default tags / ALT on + "F" — and hand the operator a per-mode
++table (accuracy, speed, accidental junk pickups) to rule on. The
++operator authorized review-edit-run (R248); the live launch still goes
++through the standard presence gate.
++
++## Size
++
++`md` — two phases: everything buildable offline (step, run file,
++executor knob, probe drill, tabulator, tests), then the live battery.
++One review gate: the live-launch request itself carries the revised
++protocol for the operator's eyes before anything touches the game.
++
++## Acceptance criteria
++
++- The battery runs 5 interleaved cycles of the three modes in ONE
++  game, town chores suspended, on the engine's REAL pickup path.
++- The Horadric Cube is never dropped (enforced by the existing
++  exception registry, verified by test), and no other undroppable
++  kind is aimed at.
++- Every round's drop manifest is reconciled before the next round; the
++  run ends with a full-floor sweep and a chat-announced reconciliation
++  — zero whitelisted items lost on any non-crash path.
++- Mode 1 genuinely runs with labels OFF (the executor's force-on
++  policy is suppressed for the battery, default behavior unchanged —
++  pinned by unit test).
++- ALT state verified by memory read each switch; F state verified by
++  memory read if the probe finds the flag, else by operator confirm.
++- A tabulated per-round + per-mode report exists from the run's own
++  event log, and the ruling is issued as a `verify` request.
++
++## Out of scope
++
++- Changing the bot's standing label policy to the winner (follow-up
++  commit after the operator's ruling).
++- The R246 census gate and P6 closeout of combat-logistics (queued
++  behind this detour).
++- Any pickit rule changes.
++
++## Discovery summary
++
++See [notes.md](notes.md). Key facts: ALT = Show Items (keyfile entry
++37, R247 registry) and acts as a toggle (`BH.json`
++`always_show_items: true`); ALT state readable
++(`offsets.BH_LABEL_DISPLAY`, T66); **F is bound nowhere on disk** —
++plausibly PD2's hardcoded filter-level toggle (`filter_level: 0` /
++`last_filter_level: 8` pair in BH.json), so it gets its own T66-shape
++flag probe before the battery trusts it; drop machinery
++(`drop_item`), protection registry (cube/tomes/scrolls/maps/potions),
++and whitelist verdicts (`pickit.wants` / `cleanse_keep`) all exist;
++the one production change is an executor knob to stop forcing labels
++ON during mode-1 rounds.
++
++## Files expected to change
++
++- `pd2bot/behavior/steps/` — new `tagmode_battery` step + registry row
++- `runs/t90-tagmode-battery.toml` — new run file (no `town_preamble`)
++- `pd2bot/behavior/execute.py` — label-policy knob (default: today's
++  behavior)
++- `pd2bot/offsets.py` — F-flag constant IF the probe finds it
++- `pd2bot/perception/units.py` — F-state accessor beside
++  `label_display_on` (same condition)
++- `drills/t91_filter_flag.py` — the F-flag probe (T66 protocol on key
++  F; test id per drill-log at implementation time)
++- `pd2bot/runlog/` — `battery.round` event kind + the tagmode
++  tabulation report
++- `tests/` — step logic (round/manifest/verdict, mode sequencing),
++  executor knob, event schema
++- Docs: `docs/architecture/run-log.md` (new event),
++  `pd2bot/behavior/steps/README.md` (step row),
++  `docs/drill-log.md` (T90/T91 rows at run time)
++
++## Validation
++
++- `~\.venvs\pd2bot\Scripts\python.exe -m pytest` (1275+ green)
++- `ruff check .`
++- Live: the battery run itself (P2), read
++  `logs/runs/<newest>/events.jsonl` first, standing method.
++
++## Phases
++
++| Phase | Size | Summary | Review gate |
++|---|---|---|---|
++| P1 | sm | Offline build: step, run file, executor knob, F probe drill, run-log event + tabulator, tests, docs | none (all offline, suite-gated) |
++| P2 | sm | Live: F-flag probe, then the battery (15 rounds), tabulate, issue the ruling request | the launch request itself (operator presence + protocol review); the ruling is theirs |
++
++ADR: none — test kit plus one default-preserving knob; no direction
++with lasting architectural consequence is chosen here. (If the ruling
++later changes the standing label policy, that commit cites the data,
++still no ADR.)
+diff --git a/docs/drill-log.md b/docs/drill-log.md
+index 4d080d0..4cb1e29 100644
+--- a/docs/drill-log.md
++++ b/docs/drill-log.md
+@@ -194,3 +194,10 @@ and have one fewer cell; new rows carry milestone/phase.
+ | T88 | 2 | 2026-08-13 04:22 | M6 P5 | DEMONSTRATION: wayward NPC dialog closed briskly (rerun after the goal-aware escape fix) | demonstration | PASS | 6/6 closed, every closure 0.66s (slowest = mean = 0.66s, brisk bar 2.0s); the Charsi approach that killed run 1 crossed the crowd cleanly TWICE under the goal-aware sprite escape; OPERATOR SATISFIED 2026-08-13 ("satisfying and looked good") - the demonstration kind is proven |
+ 
+ | T89 | 1 | 2026-08-13 05:02 | M6 P5 | DEMONSTRATION: bindings read from the client keyfile (R247) | demonstration | PASS | discovery -> parse -> table (I/B, F1-F8, 1-4, Alt) -> toml verification 6/6 OK -> 6/6 skill switches effect-verified live in a game |
++| T91 | 1 | 2026-08-13 06:28 | M6 P4 | F default-tags toggle — find the state flag in memory | bot control | PASS | 1 alternating byte(s); top candidates: BH.dll+0x14d1cc: 1 <-> 0 |
++| T90 | 1 | 2026-08-13 06:33 | M6 P5 | tag-mode battery, first launch (R249) | unattended live | ABORTED | round 1A COMPLETE and reconciled (4/4 whitelisted in 5.7s, labels off); round 1B wedged: walk clicks re-collected labeled drops, then a misclick opened the stash and the drop-walk looped (no panel recovery, no progress budget); operator ESC-exited at 674s; NOTHING LOST. Log 20260813-063257 |
++| T90 | 2 | 2026-08-13 07:10 | M6 P5 | tag-mode battery, R250 rebuild (R250 launch) | unattended live | INTERRUPTED | 4 clean A-rounds banked: 20/20 whitelisted (100%), mean 14.9s, junk 22, assists 5->4->2->0; ended at 351s by the WATCHDOG SILENT-FREEZE (4th occurrence) via require-watchdog enforcement, not vitals; ~8 junk items on the floor lost to the auto-exit, all whitelisted safe; the faulthandler dead-man was KILLED before its 10s dump matured (guarded-run raced it - now fixed: 12s grace on stale heartbeat). Log 20260813-071025 |
++| T90 | 3 | 2026-08-13 07:29 | M6 P5 | tag-mode battery, attempt 3 (R251) | unattended live | SELF-STOPPED | round 1A clean (6/6 whitelisted, 11.3s, 4 junk); battery then refused at the census: 18 verified out of the inventory, 17 landed - a healing potion (605) was DRUNK by a slipped ctrl during the drop; loss-detection worked but over-severe. Fixes: per-drop floor-landing confirmation (battery.consumed, census-excluded), census mismatches announce+record+continue, gather handed to the operator immediately (R251 feedback). Log 20260813-072908 |
++| T90 | 4 | 2026-08-13 07:40 | M6 P5 | tag-mode battery, attempt 4 (R252: operator gathers) | supervised live | PARTIAL | Blocks A+B COMPLETE, 10 rounds, no losses, gathers 6-9s: A (no tags) 30/30 (100%) mean 12.3s; B (filter tags) 3/30 (10%), ALL 5 rounds timed out - the mode effect is enormous. One potion consumed by a ctrl slip in 4B (caught+excluded by the new floor confirm). Block C eaten 1s after its F-verified mode set by watchdog stall #5 - REFRAMED: transient ~4-10s stall then recovery (watchdog log continuous, heartbeat fresh at teardown), which is why every dead-man dump was empty (<10s). Log 20260813-074021 |
++| T90 | 5 | 2026-08-13 08:20 | M6 P5 | tag-mode battery, block C only (R253) | supervised live | PASS | COMPLETE, 5 rounds, clean close, zero stalls (grace untested): C (default tags) 11/30 (36%), all 5 rounds timed out. Two more ctrl-slip potions (3C, 5C) caught+excluded by floor confirm. THE BATTERY IS DONE: A 30/30 (100%) mean 12.3s / B 3/30 (10%) / C 11/30 (36%) - no tags wins by a landslide; the executor's force-labels-ON pickup policy (T63/T66) is contradicted by its own measurement. Log 20260813-082022 |
++| T90 | 6 | 2026-08-13 08:36 | M6 P5 | R254 field validation: ordinary cold-plains run under the INVERTED label policy | unattended live | PASS | COMPLETE 480s, monitor silent, all steps done; census 1/1 collected first-click, zero misses/write-offs (thin sample - one wanted drop rolled; the battery's 30/30 is the statistical basis). Log 20260813-083614 |
+diff --git a/docs/instruction-log.md b/docs/instruction-log.md
+index 7fac307..9ebae69 100644
+--- a/docs/instruction-log.md
++++ b/docs/instruction-log.md
+@@ -438,6 +438,20 @@ with guardrails) — 259 tests green.
+ 
+ | R247 | decision | Hotkey-config plan: read the client's .key file, consolidate all bindings | The yona-plan pass for the operator's detour (plan dir `docs/plans/2026-08-13-hotkey-config/`). Discovery pinned the .key format empirically (per-character file, self-validating 20-byte records, labels cross-checked against live bindings + default.key). Plan md, P1 parser / P2 registry+dedupe / P3 consumers+wiring+verification / P4 live proof+ADR+docs. Design calls recorded in notes.md: toml keeps skill→key shape but is VERIFIED against the file (loud drift refusal); non-skill bindings come from the file; defaults as fallback with notice; per-game re-read. | **PRE-APPROVED at issue** — the operator authorized planning AND implementation in one instruction ("unless there are any questions for me, go ahead… I trust you"); no pressing design decisions found, so no questions were issued. Implementation proceeding same session. |
+ 
++| R248 | inform | Specify the pickup-calibration detour | Session resumed from the 2026-08-13 handoff (branch `combat-logistics`, 1275 tests green, R244–R247 resolved, R246 standing). The operator announced a small detour before the standing queue: **item pickup setting calibrations**, specifics to be supplied by them — the HANDOFF's first OPEN item says to hear the proposal before touching anything else. The deferred R244 (b) item-pickup/whitelist battery (declined in its offered form; operator to define it themselves) likely folds into this. Asked: describe the detour — which settings/calibrations, what the battery should measure, and what "done" looks like. | **Resolved 2026-08-13 05:35** — the operator specified a three-mode name-tag accuracy battery: (1) no tags (ALT off — current state), (2) loot-filter tags (ALT on), (3) default non-filter tags ("F", currently off); bindings to be double-checked against the known hotkey list. Method proposed: drop all inventory (NEVER the Horadric Cube), pick up whitelisted items only, ~30 s per round, ~5 rounds per mode, back-to-back in one game, town chores suspended, gather EVERYTHING at the end (no whitelisted losses). Measure accuracy, speed, and non-whitelisted pickups per round; tabulate and rule. Agent authorized to review/edit the proposal and run it if reasonable, query only if trouble. |
++
++| R249 | execute | Launch the tag-mode battery: T91 F-probe, then T90 (15 rounds) | P1 of `docs/plans/2026-08-13-pickup-tagmode-calibration/` is complete offline (1289 tests green, ruff clean): the `tagmode_battery` step + `runs/t90-tagmode-battery.toml` (no town_preamble — chores suspended by construction), the executor's `enforce_label_display` knob (default unchanged, pinned), `drills/t91_filter_flag.py` (T66's 4-press memory diff on key F), and `runlog --tagmode`. Hotkey double-check delivered: ALT = Show Items (keyfile entry 37, toggle via BH.json `always_show_items`), state readable (T66 flag); **F is bound nowhere on disk** — hence the T91 probe first; blind-parity fallback with chat-announced abort windows if no flag is found. Protocol edits accepted at R248: undroppables (cube/tomes/scrolls/maps/potions) sit out via the exception registry; interleaved (1,2,3)×5 cycles; rounds end early when clean; gather has NO deadline (holds the round open, nags, retries — losing an item outranks finishing). Named risks: a client crash mid-round loses that round's floor items (~1-2 min exposure); the battery anchors at town spawn, so NPC traffic may interfere (abort cheaply if round 1 shows it); the battery refuses if <2 whitelisted droppables are in the inventory. Asked: confirm presence + client at menu, enter a town game for T91 first (agent runs it via the bridge), then say "go" for the battery launch. | **Resolved 2026-08-13** — "ready for the tests". T91 PASS on the first probe: exactly ONE alternating byte in 116 modules, `BH.dll+0x14D1CC` (1 = filter styling, 0 = default names) — wired as `offsets.BH_FILTER_STYLE` + `default_tags_on()` + the battery's `filter_state`; all three modes machine-verified. T90 launch 1 ABORTED by the operator (drill-log row 1): round 1A COMPLETE and reconciled (4/4 whitelisted in 5.7 s, labels off — the first data point), then round 1B exposed two defects live: walk clicks re-collect labeled drops during the drop phase, and a stash misclick wedged the drop-walk (panel recovery covered only the inventory; no progress budget; every wedge tick read "acted" so no engine tripwire could fire). A THIRD defect surfaced during the abort itself: runs never wire `should_stop`, so the agent had no abort channel and the stop needed the operator's ESC. Nothing was lost (the wedge-round floor was re-collected by the bot's own walk clicks; census intact). The operator then ordered the R250 redesign — see R250. |
++
++| R250 | execute | Relaunch the rebuilt tag-mode battery (the operator's redesign) | The operator's edit spec, implemented in full (1293 tests green, ruff clean): (1) **"abort the test" now stops RUNS immediately** — `wiring.run_stop_channel` wires the chat abort words ("abort" / "abort test" / "abort the test") and the drill-cancel file into `should_stop`, polled every tick and from inside every walk; standing for all future runs. (2) **Misclick recovery everywhere**: any stray blocking panel (stash, NPC dialog) is closed and the battery carries on; the chat console is exempt (the human is typing abort). (3) **The R250 structure**: drop ALL inventory except the cube and both tomes (18 items — potions/scrolls/maps now drop, deliberately overriding the registry's no-drop protections inside this battery; the R113 ctrl settle + census reconciliation carry the slip risk) in ONE PILE at the feet (no scatter walking — the orbit/NPC-nudge defect is gone by construction); blocks in order 1A..5A NO NAME TAGS → one ALT press → 1B..5B LOOT FILTER TAGS → one F press → 1C..5C DEFAULT TAGS; round announced before, score announced after ("round 1A score: 3/4 whitelisted, 1 unwanted, 12.3s"); gather retries then ASKS the operator to lift stragglers ("resuming." when clear), hands-off while they do; census reconciles over inventory+belt (gathered potions route to the belt). Everything event-logged with wall clocks; `runlog --tagmode` groups by block. Asked: say "go" when at the machine and ready — same launch method (guarded-run, one game, from wherever the client is). | **"go" (2026-08-13 07:10); INTERRUPTED at 351 s by the watchdog silent-freeze (4th occurrence)** — drill-log T90 row 2. The rebuild itself worked exactly as specified: 18 dropped in one pile, rounds announced, scores announced, operator-assist gathers ("resuming.") — and **4 clean A-rounds banked: 20/20 whitelisted (100%), mean 14.9 s, 22 junk pickups, assists declining 5→4→2→0**. The ending was NOT vitals: the watchdog process froze (heartbeat stale, process alive, its own log stops at 07:15:54) and `--require-watchdog` enforcement ended the game. ~8 junk items on the floor were lost to the auto-exit (all whitelisted items were already collected). The armed faulthandler dead-man wrote NOTHING because guarded-run's cleanup taskkilled the frozen process ~5-8 s into the freeze while the dump matures at 10 s — the instrument could never fire under its own launcher; fixed (12 s grace on a stale heartbeat before the kill). Relaunch gate: R251. |
++
++| R251 | execute | Relaunch the battery after the watchdog freeze (attempt 3) | Nothing in the battery needs changing — run 2 proved the R250 design end-to-end (4 clean rounds, every announcement and assist behaving as specified). The freeze is the standing watchdog mystery, now instrumented properly: guarded-run waits 12 s before killing a frozen watchdog so the faulthandler dump can mature — the NEXT freeze finally writes its stack. Two freezes today clustered at ~5.3-5.8 min of watchdog life (310 s on game 1 of the R244 batch, ~345 s here), which smells like a pattern worth the dump. Loss note for this launch: ~8 junk items (potions/maps/ring-class) went down with run 2's auto-exit; the battery's begin census will simply show the smaller jumble. Asked: say "go" to relaunch; if the freeze recurs, the run ends the same safe way and we finally get the stack. | **"go." (07:29); SELF-STOPPED after round 1A** (drill-log T90 row 3): the round itself was clean (6/6 whitelisted in 11.3 s — the operator had restocked the jumble to 18 with new whitelisted kinds), but the census caught a real discrepancy and ended the battery: 18 items verified out of the inventory, only 17 landed on the floor — **a healing potion was DRUNK by a slipped ctrl during the drop phase**, the exact accepted risk of the R250 drop-everything rule. Right detection, wrong severity (one wasted potion ended 14 remaining rounds). The operator's follow-up feedback (their merge theory + "ask me to do the pickup immediately after each round") became the R252 rebuild — see R252. |
++
++| R252 | execute | Relaunch: operator-gathered rounds + loss-tolerant census (attempt 4) | The operator's follow-up implemented (1294 tests green, ruff clean): (1) **the between-round gather is now the operator's job, immediately** — the moment a round's score is announced the battery says "please pick up all the items (N on the floor); resuming when it is clear", goes hands-off (never clicks alongside them), nags every 20 s, and announces "resuming." when the floor clears; (2) **per-drop floor-landing confirmation** — an item that leaves the inventory but never reaches the ground (launch 3's drunk potion) is announced, logged (`battery.consumed`), excluded from the census, and the battery continues; (3) **census mismatches are announced and recorded, never fatal** (`battery.loss` is a record now, not a stop) — covering the operator's stack-merge theory: merged stacks read as count losses, and a battery under live observation should note them and keep testing. Asked: say "go" for attempt 4 — expect a prompt to pick up the pile after every round's score. | **"go" (07:40); blocks A and B COMPLETE, block C eaten by watchdog stall #5** (drill-log T90 row 4). The R252 design ran flawlessly: 10 rounds, zero losses, operator gathers 6–9 s, one ctrl-slip potion in 4B caught and excluded by the floor confirm. **The measurement is dramatic: A (no tags) 30/30 (100%), mean 12.3 s; B (filter tags) 3/30 (10%), all five rounds timed out.** The stall killed the run 1 s after block C's F-verified mode set (floor clean, nothing lost) — and the grace-fix TEACHING MOMENT: the heartbeat was FRESH again at teardown and the watchdog's own log never gapped, so the "silent freeze" is a TRANSIENT ~4–10 s stall with recovery, invisible to the 10 s dead-man and fatal only because the engine declares the watchdog down after 3 s of staleness. Blocks param added for a C-only rerun; the staleness-grace policy question became R253. |
++
++| R253 | decision | Watchdog staleness grace (safety policy), then the C-only run | Five "freezes" are now one diagnosis: the watchdog transiently stalls ~4–10 s and recovers (evidence: run 4's heartbeat fresh at teardown, its log gap-free, every faulthandler dump empty because the stall never reaches the 10 s dump trigger). The engine declares the watchdog down after 3 s of staleness and ends the run — so a transient in the BACKSTOP kills healthy runs (~1 per 6–8 run-minutes today). Proposal: the engine requires the heartbeat to read stale CONTINUOUSLY for 15 s before declaring the watchdog down. Safety analysis: Track A (in-process poll, 0.100 s chicken latency, ADR 2026-08-07) carries the primary guarantee and is untouched; the watchdog is the independent backstop, and a backstop that reacts to a REAL death of its process within 15 s (instead of 3) still bounds the unguarded window to seconds — versus today, where the backstop's own hiccups end runs. This touches a safety invariant, so it is the operator's call, not the agent's. Q1: approve the 15 s stale-grace (yes/no/other number)? Q2: after implementing (offline + tests), launch the C-only run (`runs/t90-tagmode-battery-c.toml`) to finish the battery — go? | **"OK, go" (08:1x) — both approved.** The 15 s grace implemented (engine `watchdog_stale_grace_s`, `watchdog.stale`/`recovered` events, no-channel case still refuses instantly; 1298 tests green) and the C-only run COMPLETED cleanly (drill-log T90 row 5, zero stalls — the grace went untested): **C (default tags) 11/30 (36%), all rounds timed out.** THE BATTERY IS COMPLETE: A (no tags) 100% @ 12.3 s mean; B (filter tags) 10%; C (default tags) 36%. Two more ctrl-slip potion drinks (3C, 5C) caught and excluded by the floor confirm — 3 healing potions total were the session's tax. The ruling request is R254. |
++
++| R254 | verify | Rule on the tag-mode results: which mode becomes the standing pickup policy | The R248 objective is answered by 15 measured rounds (logs 20260813-074021 + -082022, `runlog --tagmode`): **A (no tags) 30/30 (100%), mean 12.3 s, zero timeouts; B (loot-filter tags) 3/30 (10%), all timeouts; C (default tags) 11/30 (36%), all timeouts.** The implication cuts against standing code: `execute.py::_pick_up` FORCES labels ON before pickup clicks (the T63/T66 "labels must be showing for the small classes to be clickable" policy) — the data says that policy pins the bot in its WORST mode; the jumble's small classes (rings/amulets/gems-class kinds) went 30/30 with labels OFF. Proposed ruling: the executor ensures labels OFF for pickup (invert the enforcement, same parity-safe flag mechanics), field-validated by one ordinary cold-plains run's census. Also for the record: the drop-everything rule cost 3 healing potions to ctrl slips across the session (caught by the floor confirm; acceptable test tax, but worth knowing before any future battery). Asked: confirm the reading and approve the policy inversion (or rule otherwise); the change lands as its own commit with the battery data cited. | **APPROVED 2026-08-13 08:3x** — *"approved - invert the label policy and validate it. Glad we did this."* Inverted (`execute.py::_pick_up` now ensures labels OFF before pickup clicks, same parity-safe flag mechanics; the battery suspends enforcement in all modes since it owns the display; keys.py's stale labels-on-to-pick note corrected; 1299 tests green). **Field validation PASSED**: one ordinary cold-plains run (log 20260813-083614), COMPLETE at 480 s, monitor silent, census 1/1 collected first-click, zero misses/write-offs — a thin sample (one wanted drop rolled), with the battery's 30/30 carrying the statistical weight. The operator also ordered: commit all work, /yona-review, /yona-push. |
++
+ ## Observations so far (for the reduction analysis)
+ 
+ - 12 of 15 resolved requests are `execute`/`verify`, and all of those
+diff --git a/docs/request-index.md b/docs/request-index.md
+index fdda7b8..31a7421 100644
+--- a/docs/request-index.md
++++ b/docs/request-index.md
+@@ -285,3 +285,17 @@ headings, noted in parentheses, say roughly where they fell).
+ - R245 resolved (go; game 1 relaunched after the truncation + restock fixes) · 2026-08-13 02:28
+ - R246 [verify] P5 census gate: review the batch and rule on mandatory_pickup · 2026-08-13 03:07
+ - R247 [decision] Hotkey-config plan (md, P1-P4) - pre-approved with implementation authorization · 2026-08-13 04:42
++- R248 [inform] Specify the pickup-calibration detour (deferred R244 (b) folds in) · 2026-08-13 05:24
++- R248 resolved (three-mode name-tag pickup battery specified; review-edit-run authorized) · 2026-08-13 05:35
++- R249 [execute] Launch the tag-mode battery: T91 F-probe, then T90 (15 rounds) · 2026-08-13 06:12
++- R249 resolved (T91 PASS/flag wired; T90 launch 1 aborted: 1A clean 4/4 in 5.7s, then re-collect + stash-wedge defects; nothing lost) · 2026-08-13 07:07
++- R250 [execute] Relaunch the rebuilt tag-mode battery (operator redesign) · 2026-08-13 07:07
++- R250 resolved (go; 4 clean A-rounds 20/20, then the 4th watchdog silent-freeze ended it; dead-man race found+fixed) · 2026-08-13 07:20
++- R251 [execute] Relaunch the battery after the watchdog freeze (attempt 3) · 2026-08-13 07:20
++- R251 resolved (go; round 1A clean 6/6, then self-stop: a ctrl slip DRANK a potion mid-drop - detection right, severity wrong) · 2026-08-13 07:38
++- R252 [execute] Relaunch: operator-gathered rounds + loss-tolerant census (attempt 4) · 2026-08-13 07:38
++- R252 resolved (go; A+B complete - A 100% vs B 10%!; C eaten by stall #5, now REFRAMED as transient-with-recovery) · 2026-08-13 07:53
++- R253 [decision] Watchdog staleness grace (safety policy), then the C-only run · 2026-08-13 07:53
++- R253 resolved (OK go; grace shipped 1298 green; C-only run COMPLETE - battery done: A 100% / B 10% / C 36%) · 2026-08-13 08:25
++- R254 [verify] Rule on the tag-mode results: which mode becomes the standing pickup policy · 2026-08-13 08:25
++- R254 resolved (approved+inverted; field run COMPLETE, census 1/1 first-click; commit/review/push ordered) · 2026-08-13 08:45
+diff --git a/drills/t91_filter_flag.py b/drills/t91_filter_flag.py
+new file mode 100644
+index 0000000..d4a18c3
+--- /dev/null
++++ b/drills/t91_filter_flag.py
+@@ -0,0 +1,127 @@
++"""T91 — the "F" default-tags toggle: find its state flag in memory.
++
++The R248 tag-mode battery needs to KNOW whether ground labels are
++showing loot-filter styling or the game's default names, and the key
++that flips them — "F", per the operator — is bound NOWHERE on disk:
++the character keyfile has no entry carrying 0x46, BH.json's filter
++hotkeys are all "None", and ProjectDiablo.cfg has no F row (R248 plan
++discovery). A toggle you cannot read is a parity bug waiting to happen
++(T66's exact argument for the ALT flag), so before the battery trusts
++blind parity, this probe hunts the flag.
++
++Protocol: T66's, verbatim, with key F — snapshot every module's
++writable memory, press F, diff; then press three more times and keep
++only the bytes that ALTERNATE in lockstep with the presses. Four
++presses = the display ends in the state it started. Candidates are
++reported as module+offset with both values, ready for offsets.py (the
++expectation is BH.dll, beside BH_LABEL_DISPLAY; T66's flag was the
++single alternating byte in 117 modules).
++
++Found → add the constant to offsets.py, a reader beside
++`label_display_on`, and wire `filter_state` in wiring.py; the battery
++then verifies mode 3 by read. Not found → the battery's blind-parity
++fallback stands (announced F presses with an abort window).
++
++## How it ends
++
++On its own after 4 F presses and the diffs (~1-2 minutes).
++Abort: 'abort' in chat, tools\\drill-cancel.ps1, ESC, or take the mouse.
++"""
++
++import sys
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
++
++from pd2bot.drill import Drill, DrillRun, run_drill  # noqa: E402
++from pd2bot.input.gated import GatedInput  # noqa: E402
++from pd2bot.input.keys import VK_F  # noqa: E402
++from pd2bot.perception.memory import GameSession  # noqa: E402
++
++CHUNK = 1 << 20
++SETTLE_S = 0.4
++MAX_REPORTED = 10
++
++T91 = Drill(
++    test_id="T91",
++    title="F default-tags toggle — find the state flag in memory",
++    kind="bot control",
++    sends_input=True,
++    menu_ok=True,  # the probe is its own gate: four inert key presses
++    instructions=(
++        "AUTONOMOUS: starts immediately. The bot presses F four times,",
++        "diffing module memory between presses to find the default-tags",
++        "flag. The display ends in the state it started. Hands off.",
++        "Abort: 'abort' in chat, drill-cancel, ESC, or take the mouse.",
++    ),
++)
++
++
++def _snapshot(session, modules) -> dict[str, bytes]:
++    out = {}
++    for m in modules:
++        parts = []
++        for off in range(0, m.size, CHUNK):
++            size = min(CHUNK, m.size - off)
++            try:
++                parts.append(session.raw(m.base + off, size))
++            except Exception:
++                parts.append(b"\x00" * size)  # unreadable page: constant
++        out[m.name] = b"".join(parts)
++    return out
++
++
++def t91_body(run: DrillRun) -> str:
++    session = run.session
++    gated = GatedInput(session)
++    modules = session.modules()
++    print(f"diffing {len(modules)} module(s)", flush=True)
++
++    snaps = [_snapshot(session, modules)]
++    for press in range(4):
++        run.check_cancel()
++        gated.press_key(VK_F)
++        run.sleep(SETTLE_S)
++        snaps.append(_snapshot(session, modules))
++        print(f"press {press + 1}: snapshot taken", flush=True)
++
++    # Candidates: bytes that differ between snap0 and snap1, and then
++    # alternate exactly: s0==s2==s4 and s1==s3, with s0 != s1.
++    survivors: list[tuple[str, int, int, int]] = []
++    for name in snaps[0]:
++        s0, s1, s2, s3, s4 = (snaps[i][name] for i in range(5))
++        n = min(len(s0), len(s1), len(s2), len(s3), len(s4))
++        for i in range(n):
++            a, b = s0[i], s1[i]
++            if a != b and s2[i] == a and s3[i] == b and s4[i] == a:
++                survivors.append((name, i, a, b))
++                if len(survivors) > 5000:
++                    break
++        if len(survivors) > 5000:
++            break
++
++    lines = [
++        f"{name}+0x{off:x}: {a} <-> {b}"
++        for name, off, a, b in survivors[:MAX_REPORTED]
++    ]
++    for line in lines:
++        print(f"  FLAG candidate {line}", flush=True)
++    run.say(
++        f"TEST T91 done — {len(survivors)} alternating byte(s). Hands back.",
++        patience_s=15.0,
++    )
++    if not survivors:
++        raise RuntimeError(
++            "no byte alternated with the F presses in any module — either "
++            "F is not a toggle on this client (tell the battery to stay on "
++            "blind parity) or the flag lives outside module memory"
++        )
++    return (
++        f"{len(survivors)} alternating byte(s); top candidates: "
++        + "; ".join(lines)
++    )
++
++
++if __name__ == "__main__":
++    status = run_drill(T91, t91_body, run=DrillRun(GameSession()))
++    raise SystemExit(0 if status == "PASS" else 1)
+diff --git a/pd2bot/behavior/engine.py b/pd2bot/behavior/engine.py
+index d809297..a3b37b3 100644
+--- a/pd2bot/behavior/engine.py
++++ b/pd2bot/behavior/engine.py
+@@ -253,6 +253,17 @@ class EngineConfig:
+     # and must keep working. `tools/live-run.ps1` — the real entry point,
+     # and the one that starts a watchdog — turns it on.
+     require_watchdog: bool = False
++    # How long the heartbeat must read stale CONTINUOUSLY before the
++    # watchdog is declared down (R253, operator-approved). The watchdog
++    # transiently stalls ~4-10 s and RECOVERS (five occurrences before
++    # the 2026-08-13 diagnosis: its own log gap-free, the heartbeat
++    # fresh again at teardown, every 10 s faulthandler dump empty) — and
++    # the old instant declaration meant the backstop's own hiccups ended
++    # healthy runs. Safety analysis: Track A (the in-process poll,
++    # 0.100 s chicken latency, ADR 2026-08-07) is untouched; a backstop
++    # that answers a REAL watchdog death within 15 s still bounds the
++    # unguarded window to seconds. A fresh read resets the clock.
++    watchdog_stale_grace_s: float = 15.0
+ 
+ 
+ @dataclass
+@@ -322,6 +333,9 @@ class BehaviorEngine:
+         # dead-man check is opt-in rather than default-on.
+         self._watchdog_alive = watchdog_alive
+         self._watchdog_latch = watchdog_latch
++        # When the heartbeat FIRST read stale, for the R253 grace; None
++        # while it reads fresh.
++        self._watchdog_stale_since: float | None = None
+         # The narrative channel (R179): step transitions with durations —
+         # the engine is the only thing that knows when a step began.
+         self._narrate = narrate
+@@ -438,19 +452,56 @@ class BehaviorEngine:
+         engine bare have no watchdog and must keep working. A default-on
+         check would either break them or be quietly switched off, and a
+         safety check that is routinely switched off is worse than none.
++
++        Staleness gets a GRACE (`watchdog_stale_grace_s`, R253): the
++        watchdog transiently stalls and recovers, and declaring it down
++        on the first stale read let the backstop's own hiccups end
++        healthy runs — five times before the diagnosis. The first stale
++        read starts the clock and is put on the record once
++        (`watchdog.stale`); a fresh read resets it; only staleness that
++        OUTLASTS the grace is a down watchdog.
+         """
+         if not self.config.require_watchdog:
+             return
+-        if self._watchdog_alive is not None and self._watchdog_alive():
++        if self._watchdog_alive is None:
++            # No channel wired AT ALL — a misconfiguration, not a stall:
++            # nothing can ever recover, so the grace would just delay
++            # the same refusal by 15 s.
++            self._runlog.event("watchdog.down")
++            raise WatchdogDown(
++                "the chicken watchdog is not running (no heartbeat channel "
++                "is wired) and this run requires it — start it with "
++                "`python -m pd2bot.safety.watchdog` and launch again"
++            )
++        if self._watchdog_alive():
++            if self._watchdog_stale_since is not None:
++                self._watchdog_stale_since = None
++                self._runlog.event("watchdog.recovered")
++            return
++        now = self._clock()
++        if self._watchdog_stale_since is None:
++            self._watchdog_stale_since = now
++            # On the record from the FIRST stale read: the transient
++            # stalls were invisible for five runs because nothing spoke
++            # until the run was already being ended.
++            self._runlog.event(
++                "watchdog.stale", grace_s=self.config.watchdog_stale_grace_s
++            )
++            return
++        if now - self._watchdog_stale_since < self.config.watchdog_stale_grace_s:
+             return
+         self._narrate("the watchdog is not answering — standing down")
+         # On the record: the 2026-08-13 stand-down was invisible in the
+         # event stream (the narration lives in a different file), and the
+         # run's log simply STOPPED — indistinguishable from a crash.
+-        self._runlog.event("watchdog.down")
++        self._runlog.event(
++            "watchdog.down",
++            stale_s=round(now - self._watchdog_stale_since, 1),
++        )
+         raise WatchdogDown(
+-            "the chicken watchdog is not running (no fresh heartbeat) and "
+-            "this run requires it — start it with "
++            "the chicken watchdog has not answered for "
++            f"{self.config.watchdog_stale_grace_s:.0f}s and this run "
++            "requires it — start it with "
+             "`python -m pd2bot.safety.watchdog` and launch again"
+         )
+ 
+diff --git a/pd2bot/behavior/execute.py b/pd2bot/behavior/execute.py
+index ffb86e8..00600e8 100644
+--- a/pd2bot/behavior/execute.py
++++ b/pd2bot/behavior/execute.py
+@@ -287,6 +287,18 @@ class GameActionExecutor(ActionLogging):
+     # None = parking off (sims, drills that build the executor bare).
+     park_skill_id: int | None = None
+     park_grace_s: float = 2.0
++    # The label policy (T90, R254 — INVERTED from T63/T66): `_pick_up`
++    # presses Show Items whenever the label display provably reads ON,
++    # because pickup clicks land on SPRITES and the tags bury them: the
++    # tag-mode battery measured the same 18-item pile at 30/30 (100%,
++    # mean 12.3 s) with no tags against 3/30 (10%) under filter tags and
++    # 11/30 (36%) under default tags — every tagged round timed out. The
++    # old policy ("labels must be showing for the small classes to be
++    # clickable", T63) was falsified by its own measurement: rings, gems
++    # and amulet-class kinds went perfect with the labels off.
++    # False exists for exactly one caller — the tag-mode battery, which
++    # sets the display itself and must not be fought over the toggle.
++    enforce_label_display: bool = True
+     trace: list[TraceEntry] = field(default_factory=list)
+     # -- the run event log (the run-event-log plan, P3) ---------------------
+     #
+@@ -556,11 +568,14 @@ class GameActionExecutor(ActionLogging):
+         the raw tile click is the honest fallback — labelled, so the
+         trace shows which aim was actually used.
+         """
+-        # The label policy (T66): labels must be SHOWING for the small
+-        # classes to be clickable at all, and the flag makes the toggle
+-        # parity-safe — read, press only when provably off, re-read next
+-        # attempt. Unknown (None) means do not touch the key.
+-        if label_display_on(self.session) is False:
++        # The label policy (T90, R254): labels must be OFF for pickup —
++        # the tags bury the sprites (100% no-tags vs 10%/36% tagged, 15
++        # measured rounds). The flag makes the toggle parity-safe — read,
++        # press only when provably on, re-read next attempt. Unknown
++        # (None) means do not touch the key. The `enforce_label_display`
++        # gate belongs to the tag-mode battery alone; every real run
++        # leaves it True.
++        if self.enforce_label_display and label_display_on(self.session) is True:
+             try:
+                 # The character's real Show Items key (R247) — ALT unless
+                 # rebound; keyfile-resolved by the wiring.
+diff --git a/pd2bot/behavior/run.py b/pd2bot/behavior/run.py
+index c4b0af0..a4f5bad 100644
+--- a/pd2bot/behavior/run.py
++++ b/pd2bot/behavior/run.py
+@@ -197,6 +197,22 @@ def default_registry() -> StepRegistry:
+     # validates against, and a survey run that lints here but is unknown
+     # to the live registry would refuse to start in Hell.
+     registry.register(StepSpec("survey"))
++    registry.register(
++        StepSpec(
++            "tagmode_battery",  # TEST KIT (R248/R250); must mirror build_registry
++            params=(
++                ParamSpec("rounds", int, required=False, default=5),
++                ParamSpec("blocks", str, required=False, default="ABC"),
++                ParamSpec("round_seconds", int, required=False, default=30),
++                ParamSpec("radius", int, required=False, default=30),
++                ParamSpec("min_wanted", int, required=False, default=2),
++                ParamSpec(
++                    "filter_initially_on", bool, required=False, default=False
++                ),
++                ParamSpec("confirm_seconds", int, required=False, default=6),
++            ),
++        )
++    )
+     registry.register(StepSpec("done"))
+     return registry
+ 
+diff --git a/pd2bot/behavior/steps/README.md b/pd2bot/behavior/steps/README.md
+index cc4fc97..8c40288 100644
+--- a/pd2bot/behavior/steps/README.md
++++ b/pd2bot/behavior/steps/README.md
+@@ -15,6 +15,7 @@ bodies unchanged.
+ | survey.py | survey: operator-steered atlas recording |
+ | traverse.py | traverse: cross an area to its exit |
+ | countess.py | clear_countess: the flagship kill |
++| tagmode.py | tagmode_battery: the R248 name-tag pickup calibration (TEST KIT) |
+ | registry.py | step name -> class; unknown names fail at load |
+ 
+ Import step classes and `build_registry` from `pd2bot.behavior.steps`.
+diff --git a/pd2bot/behavior/steps/__init__.py b/pd2bot/behavior/steps/__init__.py
+index ed8b0ce..626d4ac 100644
+--- a/pd2bot/behavior/steps/__init__.py
++++ b/pd2bot/behavior/steps/__init__.py
+@@ -30,6 +30,7 @@ from pd2bot.behavior.steps.pickup import _PickupMixin
+ from pd2bot.behavior.steps.registry import build_registry
+ from pd2bot.behavior.steps.services import RunServices
+ from pd2bot.behavior.steps.survey import SurveyStep
++from pd2bot.behavior.steps.tagmode import TagModeBatteryStep
+ from pd2bot.behavior.steps.traverse import TraverseStep
+ from pd2bot.behavior.steps.util import _chebyshev, _route_leg
+ 
+@@ -40,6 +41,7 @@ __all__ = [
+     "PickupStep",
+     "RunServices",
+     "SurveyStep",
++    "TagModeBatteryStep",
+     "TownPreambleStep",
+     "TraverseStep",
+     "WaypointStep",
+diff --git a/pd2bot/behavior/steps/registry.py b/pd2bot/behavior/steps/registry.py
+index c32f960..03b890c 100644
+--- a/pd2bot/behavior/steps/registry.py
++++ b/pd2bot/behavior/steps/registry.py
+@@ -16,6 +16,7 @@ from pd2bot.behavior.steps.clear import ClearRadiusStep, PickupStep
+ from pd2bot.behavior.steps.countess import ClearCountessStep
+ from pd2bot.behavior.steps.services import RunServices
+ from pd2bot.behavior.steps.survey import SurveyStep
++from pd2bot.behavior.steps.tagmode import TagModeBatteryStep
+ from pd2bot.behavior.steps.traverse import TraverseStep
+ 
+ 
+@@ -139,6 +140,32 @@ def build_registry(services: RunServices) -> StepRegistry:
+     registry.register(
+         StepSpec("survey", factory=lambda p: SurveyStep(services))
+     )
++    registry.register(
++        StepSpec(
++            "tagmode_battery",  # TEST KIT (R248/R250 tag-mode calibration)
++            params=(
++                ParamSpec("rounds", int, required=False, default=5),
++                ParamSpec("blocks", str, required=False, default="ABC"),
++                ParamSpec("round_seconds", int, required=False, default=30),
++                ParamSpec("radius", int, required=False, default=30),
++                ParamSpec("min_wanted", int, required=False, default=2),
++                ParamSpec(
++                    "filter_initially_on", bool, required=False, default=False
++                ),
++                ParamSpec("confirm_seconds", int, required=False, default=6),
++            ),
++            factory=lambda p: TagModeBatteryStep(
++                services,
++                rounds=p["rounds"],
++                blocks=p["blocks"],
++                round_seconds=p["round_seconds"],
++                radius=p["radius"],
++                min_wanted=p["min_wanted"],
++                filter_initially_on=p["filter_initially_on"],
++                confirm_seconds=p["confirm_seconds"],
++            ),
++        )
++    )
+     registry.register(StepSpec("done", factory=lambda p: DoneStep(services)))
+     return registry
+ 
+diff --git a/pd2bot/behavior/steps/services.py b/pd2bot/behavior/steps/services.py
+index 8f8d767..15c5fd7 100644
+--- a/pd2bot/behavior/steps/services.py
++++ b/pd2bot/behavior/steps/services.py
+@@ -338,6 +338,46 @@ class RunServices:
+     # fires on the TRANSITION into the wanted set, so a rune lying on the
+     # floor for thirty ticks is one event, not thirty.
+     seen_drops: set[int] = field(default_factory=set)
++    # -- the tag-mode battery (R248, TEST KIT) ------------------------------
++    #
++    # Wired closures, every one None/unknown by default so sims, drills
++    # and every existing run are untouched. The battery step REFUSES to
++    # run without the ones it needs rather than improvising around them
++    # — a calibration that silently measured the wrong thing would be
++    # worse than one that refuses (the T72 lesson, applied to test kit).
++    #
++    # One inventory item ctrl+right-clicked to the floor, effect-verified
++    # (TownLayer.drop_item — stash must be CLOSED, inventory OPEN).
++    drop_item: Callable[[object], bool] | None = None
++    # The inventory panel, opened verified (TownLayer.press_inventory_open).
++    open_inventory: Callable[[], None] | None = None
++    # Carried items WITH sockets, for whitelist verdicts on what is about
++    # to be dropped — socket-conditioned keep rules cannot be judged from
++    # the cheap read (`carried`, with_sockets=False), the R132 lesson.
++    carried_with_sockets: Callable[[], CarriedItems] | None = None
++    # The ground-label display state (BH.dll's flag, T66): True/False, or
++    # None = unreadable. The battery refuses on None — the flag lives in
++    # the loot filter's own module, so unreadable means the modes under
++    # test do not exist in this client.
++    label_state: Callable[[], bool | None] | None = None
++    # One press of the character's real Show Items key (R247 bindings).
++    press_show_items: Callable[[], None] | None = None
++    # One press of the default-tags toggle ("F" — bound NOWHERE on disk,
++    # see the R248 plan's discovery; pressed blind until the T91 probe
++    # finds its state flag).
++    press_filter_toggle: Callable[[], None] | None = None
++    # The default-tags state, once T91 pins its flag. None = no reader
++    # wired — the battery then tracks parity blind and says so.
++    filter_state: Callable[[], bool | None] | None = None
++    # Flip the executor's label enforcement (see
++    # GameActionExecutor.enforce_label_display): mode 1 measures pickup
++    # with labels OFF, which the enforcing executor would sabotage one
++    # click in.
++    set_label_enforcement: Callable[[bool], None] | None = None
++    # Operator-facing chat line (Chat.say behind a closure that absorbs
++    # refusals). The battery announces every mode switch and the final
++    # reconciliation; None falls back to `alert`.
++    say: Callable[[str], None] | None = None
+     # -- the countess endgame (M6 P4) --------------------------------------
+     #
+     # Judgement calls that belong to the step, not the run file — the run
+diff --git a/pd2bot/behavior/steps/tagmode.py b/pd2bot/behavior/steps/tagmode.py
+new file mode 100644
+index 0000000..813eaa9
+--- /dev/null
++++ b/pd2bot/behavior/steps/tagmode.py
+@@ -0,0 +1,731 @@
++"""TagModeBatteryStep: the name-tag pickup calibration battery (R248/R250).
++
++TEST KIT, like `deplete_belt` — no real run names it. One step runs the
++operator's three-mode experiment in a single town game, to the R250
++structure (the operator's own, replacing the scatter-walk design that
++wedged on 2026-08-13):
++
++    block A  rounds 1A..5A  NO NAME TAGS      (ALT off)
++    block B  rounds 1B..5B  LOOT FILTER TAGS  (one ALT press)
++    block C  rounds 1C..5C  DEFAULT TAGS      (one F press)
++
++The battery owns the label display for every round — the executor's
++label enforcement is suspended throughout (it would otherwise fight
++the battery for the toggle) and re-armed at each round's end.
++
++Per round: drop every inventory item EXCEPT the Horadric Cube and the
++two tomes in ONE PILE where the character stands (no walking — the
++walk-to-scatter-points design is what orbited NPCs and clicked the
++stash) → announce the round → run the normal whitelisted-pickup
++protocol for at most `round_seconds` → announce the score (collected /
++dropped whitelisted / unwanted collected) → gather EVERYTHING back and
++reconcile the census before the next round may begin.
++
++**The drop list is the operator's, not the exception registry's**
++(R250: "drops all items except the horadric cube, tome of identify,
++and tome of town portal. There should be 18 items total"). That
++deliberately overrides the registry's no-drop protections for potions,
++scrolls and maps INSIDE THIS BATTERY ONLY: the ctrl is settled on both
++sides of the drop click (R113), and the census reconciliation catches
++the consequence if a slip ever fires the bare right-click (a drunk
++potion or a merged scroll shows up as a count mismatch, loudly).
++
++**Misclicks are expected, not fatal** (R250 item 1): every tick, any
++phase, a blocking panel that the phase did not open — a stash, an NPC
++dialog — is closed and the battery carries on. The chat console is
++exempt, always: the human opening it is most likely typing `abort`,
++which now stops RUNS too (wiring.run_stop_channel).
++
++**The gather is the operator's job** (R251 feedback): the moment a
++round is scored the battery asks them to pick everything up and goes
++hands-off — a human with a mouse clears the pile in seconds, and the
++bot clicking alongside would fight them for items. The hold announces
++every ~20 s (a real chat send, so the engine's wait accounting never
++mistakes it for a hang) and says "resuming." when the floor is clear.
++
++**Losses are announced, never fatal** (launch 3's lesson, twice over):
++each drop is confirmed against the FLOOR — an item that left the
++inventory but never landed was consumed by a slipped click (launch 3
++drank a healing potion this way) and is excluded from the census; and
++a census that still fails to reconcile (stackables merge on pickup,
++which a count census reads as loss) is announced and recorded as
++`battery.loss`, then the battery continues. The operator is present by
++mandate; `abort` is theirs.
++
++Measurement rides the run event log: `battery.*` events mark the
++boundaries, the item stream carries the per-item record, and every
++event is wall-clock stamped by the envelope. Tabulate with
++`python -m pd2bot.runlog <dir> --tagmode`.
++"""
++
++from __future__ import annotations
++
++from collections import Counter
++from dataclasses import dataclass, field
++
++from pd2bot import offsets
++from pd2bot.behavior.engine import EngineContext, StepOutcome
++from pd2bot.behavior.steps.pickup import _PickupMixin
++from pd2bot.behavior.steps.util import _chebyshev
++from pd2bot.perception.snapshot import GameSnapshot
++from pd2bot.perception.uistate import blocking_panels
++
++# What NEVER goes on the floor (R250, the operator's exact list). The
++# cube's protection is policy (R172); the tomes' right-click side
++# effects outlive any slip. Everything else in the main inventory drops.
++_BATTERY_KEEP = frozenset({
++    offsets.CUBE_KIND,
++    offsets.TOME_OF_IDENTIFY_KIND,
++    offsets.TOME_OF_TOWN_PORTAL_KIND,
++})
++# The blocks, in the operator's order — NOT interleaved (R250 supersedes
++# the R248 interleave): 5xA, then ALT, 5xB, then F, 5xC.
++_BLOCKS = (
++    ("A", 1, "NO NAME TAGS"),
++    ("B", 2, "LOOT FILTER TAGS"),
++    ("C", 3, "DEFAULT TAGS"),
++)
++# Toggle retries before the battery refuses, and how long a press gets
++# to land before its flag is re-read (the engine ticks faster than the
++# flags settle; re-reading stale is a double press).
++_MODE_PRESSES_MAX = 4
++_TOGGLE_SETTLE_S = 0.6
++# The gather hold's re-announce interval (each announcement is a real
++# chat send, which is what keeps the engine's wait accounting honest).
++# The gather is the OPERATOR'S job by design (R251 feedback: a human
++# with a mouse clears the pile in seconds; the bot took a minute and
++# then asked anyway) — the bot goes hands-off the moment the round is
++# scored.
++_HOLD_NAG_S = 20.0
++# Floor-landing confirmation polls per drop before an item is declared
++# consumed. A just-dropped item takes a beat to enter the unit table
++# (the T43 lesson), so one stale read must not misjudge a good drop.
++_FLOOR_CONFIRM_POLLS = 3
++
++
++@dataclass
++class TagModeBatteryStep(_PickupMixin):
++    """The three-mode battery, R250 structure. See the module docstring."""
++
++    rounds: int = 5
++    round_seconds: int = 30
++    radius: int = 30  # the arena: everything happens within this of the pile
++    min_wanted: int = 2  # refuse to run a 15-round battery over less
++    # Which blocks to run, in order — "ABC" is the full battery; "C"
++    # reruns one mode (added when the 07:40 launch banked complete A
++    # and B blocks and the watchdog stall ate C: re-paying for two
++    # finished blocks to reach the third is operator time wasted).
++    blocks: str = "ABC"
++    # The F parity fallback for environments with no filter_state reader
++    # (the live wiring HAS one since T91). Also the restore target.
++    filter_initially_on: bool = False
++    confirm_seconds: int = 6  # abort window after a BLIND F press
++    name: str = "tagmode_battery"
++
++    # -- phase machine state (one small thing per tick) ---------------------
++    _phase: str = "begin"
++    _block_i: int = 0
++    _round: int = 1  # 1-based within the block
++    _filter_on: bool | None = None  # tracked F parity (blind fallback)
++    _labels_initial: bool | None = None  # restored at the end
++    _mode_presses: int = 0
++    _filter_presses: int = 0
++    _settle_until: float | None = None
++    # -- per-round state ----------------------------------------------------
++    _anchor: tuple[int, int] | None = None
++    _pre_drop_counts: Counter | None = None
++    _dropped: int = 0
++    _drop_total: int | None = None
++    _manifest_kinds: set[int] = field(default_factory=set)
++    # Floor-landing confirmation (launch 3's lesson): drop_item verifies
++    # "gone from the inventory", but a slipped ctrl DRINKS a potion (or
++    # uses a scroll/map) and that also reads as gone — launch 3 dropped
++    # 18, landed 17, and one healing potion was simply drunk. Each drop
++    # is now confirmed against the floor before the next; an item that
++    # never lands is announced, excluded from the census, and the
++    # battery CONTINUES (one wasted potion must not end 15 rounds).
++    # (kind, ground count of that kind before the drop, polls so far).
++    _floor_confirm: tuple[int, int, int] | None = None
++    _consumed: Counter = field(default_factory=Counter)
++    _test_started: float | None = None
++    _test_announced: bool = False
++    _wanted_start: int = 0
++    _junk_start: int = 0
++    _gather_started: float | None = None
++    _last_nag: float = 0.0
++    _rounds_done: int = 0
++
++    # -- small shared helpers ------------------------------------------------
++
++    def _say(self, text: str) -> None:
++        """Operator-facing line: chat when wired, alert otherwise."""
++        if self.services.say is not None:
++            try:
++                self.services.say(text)
++                return
++            except Exception as exc:  # noqa: BLE001 - a refused chat line
++                self.services.log(f"battery: chat refused ({exc})")
++        self.services.alert(text)
++
++    def _block_list(self) -> tuple:
++        return tuple(b for b in _BLOCKS if b[0] in self.blocks.upper())
++
++    def _block(self) -> tuple[str, int, str]:
++        return self._block_list()[self._block_i]
++
++    def _round_label(self) -> str:
++        return f"{self._round}{self._block()[0]}"
++
++    def _fail(self, why: str) -> StepOutcome:
++        """End the battery honestly and loudly (the T72 lesson)."""
++        self._say(f"BATTERY STOPPED: {why}")
++        self.services.runlog.event("battery.end", completed=False, why=why,
++                                   rounds_done=self._rounds_done)
++        self._phase = "done"
++        return StepOutcome(done=True, acted=True, note=f"battery stopped: {why}")
++
++    def _reset_pickup_bookkeeping(self) -> None:
++        """Fresh budgets per phase: round 3 must not inherit round 2's
++        write-offs, nor a spurious inventory-full mark."""
++        s = self.services
++        s.attempts.clear()
++        s.last_try.clear()
++        s.stuck.clear()
++        s.pending_pickup.clear()
++        s.collect_closest.clear()
++        s.collect_stalls.clear()
++        s.wanted_seen.clear()
++        s.inventory_full = False
++        s.last_click = None
++
++    def _droppables(self, carried) -> list:
++        return [
++            i for i in carried.main_inventory if i.kind not in _BATTERY_KEEP
++        ]
++
++    def _census(self) -> Counter:
++        """Kind counts over the main inventory AND the belt: a gathered
++        potion routes to the belt, and a census that only read the grid
++        would report it lost (found in design review, R250)."""
++        carried = self.services.carried()
++        return Counter(
++            i.kind for i in (*carried.main_inventory, *carried.belt)
++        )
++
++    def _inv_open(self, snap: GameSnapshot) -> bool:
++        return snap.ui is not None and offsets.UI_INVENTORY in snap.ui.open_panels
++
++    def _ground_in_arena(self, snap: GameSnapshot, kinds: set[int]) -> list:
++        if self._anchor is None:
++            return []
++        return [
++            g for g in snap.ground_items
++            if g.kind in kinds
++            and _chebyshev(g.position, self._anchor) <= self.radius
++        ]
++
++    def _recover_stray_panels(
++        self, snap: GameSnapshot, expected: frozenset[int]
++    ) -> bool:
++        """Close any blocking panel this phase did not open (R250 item 1:
++        misclicks — a stash, an NPC dialog — are inevitable and must cost
++        one ESC, not the battery). The chat console is exempt, always:
++        a human opening it is most likely typing `abort` (T54 run 4)."""
++        if snap.ui is None or not snap.ui.blocks_input:
++            return False
++        stray = (
++            snap.ui.open_panels
++            & frozenset(blocking_panels())
++            - expected
++            - {offsets.UI_CHAT_CONSOLE}
++        )
++        if not stray or self.services.clear_panels is None:
++            return False
++        names = ", ".join(snap.ui.names) or "an unnamed panel"
++        self.services.log(
++            f"battery: closing a stray panel ({names}) — a misclick, "
++            "recovered and carrying on"
++        )
++        self.services.clear_panels()
++        return True
++
++    # -- the tick ------------------------------------------------------------
++
++    def step(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
++        handler = {
++            "begin": self._tick_begin,
++            "set_mode": self._tick_set_mode,
++            "drop": self._tick_drop,
++            "test": self._tick_test,
++            "gather": self._tick_gather,
++            "final": self._tick_final,
++        }.get(self._phase)
++        if handler is None:
++            return StepOutcome(done=True, note="battery already ended")
++        return handler(snap, ctx)
++
++    # -- begin: refuse early, announce, or go --------------------------------
++
++    def _tick_begin(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
++        s = self.services
++        missing = [
++            what for what, service in (
++                ("drop_item", s.drop_item),
++                ("open_inventory", s.open_inventory),
++                ("carried_with_sockets", s.carried_with_sockets),
++                ("label_state", s.label_state),
++                ("press_show_items", s.press_show_items),
++                ("press_filter_toggle", s.press_filter_toggle),
++                ("set_label_enforcement", s.set_label_enforcement),
++            ) if service is None
++        ]
++        if missing:
++            return self._fail(
++                f"not wired for this environment (missing {', '.join(missing)})"
++            )
++        if not self._block_list():
++            return self._fail(
++                f"blocks={self.blocks!r} names no known block (A, B, C)"
++            )
++        if not snap.in_town:
++            return self._fail("must run in town — no waypoint step belongs "
++                              "in a battery run file")
++        if snap.player is None:
++            return StepOutcome(done=False, waiting=True, note="no player read")
++        labels = s.label_state()
++        if labels is None:
++            return self._fail(
++                "the label flag is unreadable (BH.dll absent?) — the modes "
++                "under test do not exist without the loot filter"
++            )
++        self._labels_initial = labels
++        self._filter_on = (
++            s.filter_state() if s.filter_state is not None else None
++        )
++        if self._filter_on is None:
++            self._filter_on = self.filter_initially_on
++        carried = s.carried_with_sockets()
++        if carried.truncated:
++            return self._fail("the carried-items read is truncated — "
++                              "refusing to judge droppability from it")
++        droppables = self._droppables(carried)
++        wanted = [
++            i for i in droppables
++            if s.pickit.wants(i, None, mode="permissive")
++        ]
++        kept = len(carried.main_inventory) - len(droppables)
++        if len(wanted) < self.min_wanted:
++            return self._fail(
++                f"only {len(wanted)} whitelisted droppable item(s) in the "
++                f"inventory (need {self.min_wanted}) — restock and relaunch"
++            )
++        names = ", ".join(sorted({self._logged_name(i.kind) for i in wanted}))
++        block_names = "/".join(b[0] for b in self._block_list())
++        self._say(
++            f"TAG-MODE BATTERY (R250): {self.rounds} rounds x blocks "
++            f"{block_names}, {self.round_seconds}s each. Dropping "
++            f"{len(droppables)} item(s) in one pile ({len(wanted)} "
++            f"whitelisted: {names}); keeping the cube and the tomes "
++            f"({kept}). 'abort' in chat stops everything."
++        )
++        s.runlog.event(
++            "battery.begin",
++            rounds=self.rounds, blocks=block_names,
++            round_seconds=self.round_seconds,
++            droppable=len(droppables), whitelisted=len(wanted), kept=kept,
++            wanted_kinds=sorted({i.kind for i in wanted}),
++            labels_initial=labels, filter_on=self._filter_on,
++            filter_readable=s.filter_state is not None,
++        )
++        self._phase = "set_mode"
++        return StepOutcome(done=False, acted=True, note="battery begins")
++
++    # -- set_mode: block transitions, flag-verified ---------------------------
++
++    def _tick_set_mode(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
++        s = self.services
++        if self._recover_stray_panels(snap, frozenset()):
++            return StepOutcome(done=False, acted=True, note="closed a stray panel")
++        # A toggle press bought a settle (or abort) window: hold it open.
++        if self._settle_until is not None:
++            if self.services.clock() < self._settle_until:
++                return StepOutcome(done=False, waiting=True,
++                                   note="toggle settling")
++            self._settle_until = None
++        block, mode, described = self._block()
++        target_labels = mode != 1
++        labels = s.label_state()
++        if labels is None:
++            return self._fail("the label flag stopped reading mid-battery")
++        if labels != target_labels:
++            if self._mode_presses >= _MODE_PRESSES_MAX:
++                return self._fail(
++                    f"{self._mode_presses} Show Items presses never moved "
++                    "the label flag — the binding is not doing what the "
++                    "keyfile says"
++                )
++            self._mode_presses += 1
++            s.press_show_items()
++            self._settle_until = self.services.clock() + _TOGGLE_SETTLE_S
++            return StepOutcome(done=False, acted=True,
++                               note=f"labels -> {'on' if target_labels else 'off'}")
++        if mode != 1:
++            target_filter = mode == 3  # default tags ON
++            state = (
++                s.filter_state() if s.filter_state is not None
++                else self._filter_on
++            )
++            if state != target_filter:
++                if self._filter_presses >= _MODE_PRESSES_MAX:
++                    return self._fail(
++                        f"{self._filter_presses} F presses never moved the "
++                        "style flag — F is not doing what T91 measured"
++                    )
++                self._filter_presses += 1
++                s.press_filter_toggle()
++                self._filter_on = target_filter
++                if s.filter_state is None:
++                    # Blind fallback: announce, hold an abort window open.
++                    self._say(
++                        f"pressed F — tags should now read "
++                        f"{'DEFAULT' if target_filter else 'FILTER'}-styled. "
++                        "'abort' if they do not."
++                    )
++                    self._settle_until = (
++                        self.services.clock() + self.confirm_seconds
++                    )
++                else:
++                    self._settle_until = (
++                        self.services.clock() + _TOGGLE_SETTLE_S
++                    )
++                return StepOutcome(done=False, acted=True, note="F pressed")
++        # The battery owns the display for the whole round: enforcement
++        # off in EVERY mode, or the executor would fight the battery for
++        # the toggle (since R254 the standing policy presses tags OFF —
++        # which would sabotage blocks B and C exactly the way the old
++        # force-ON policy sabotaged block A).
++        s.set_label_enforcement(False)
++        s.runlog.event(
++            "battery.mode",
++            block=block, mode=mode,
++            labels_on=labels, filter_on=self._filter_on,
++            filter_readable=s.filter_state is not None,
++            enforcement=False,
++        )
++        self._phase = "drop"
++        return StepOutcome(done=False, acted=True,
++                           note=f"block {block} mode set ({described})")
++
++    # -- drop: one pile, where the character stands ---------------------------
++
++    def _tick_drop(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
++        s = self.services
++        if snap.player is None:
++            return StepOutcome(done=False, waiting=True, note="no player read")
++        if self._recover_stray_panels(snap, frozenset({offsets.UI_INVENTORY})):
++            return StepOutcome(done=False, acted=True, note="closed a stray panel")
++        if self._drop_total is None:
++            # First drop tick of the round: the pile forms HERE.
++            self._anchor = snap.player.position
++            self._pre_drop_counts = self._census()
++            self._dropped = 0
++            self._drop_total = len(
++                self._droppables(s.carried_with_sockets())
++            )
++            self._manifest_kinds = set()
++            self._consumed = Counter()
++            self._floor_confirm = None
++        # Floor-landing confirmation: the previous drop left the
++        # inventory, but did it reach the GROUND? A slipped ctrl fires
++        # the bare right-click — launch 3 drank a healing potion this
++        # way and the census read it as a loss.
++        if self._floor_confirm is not None:
++            kind, prior, polls = self._floor_confirm
++            landed = len(self._ground_in_arena(snap, {kind}))
++            if landed > prior:
++                self._floor_confirm = None
++            elif polls < _FLOOR_CONFIRM_POLLS:
++                self._floor_confirm = (kind, prior, polls + 1)
++                return StepOutcome(done=False, waiting=True,
++                                   note="confirming the drop landed")
++            else:
++                self._floor_confirm = None
++                self._consumed[kind] += 1
++                self._say(
++                    f"note: a {self._logged_name(kind)} left the inventory "
++                    "but never hit the floor — consumed by a slipped "
++                    "click. Excluded from the census; continuing."
++                )
++                s.runlog.event(
++                    "battery.consumed", item_kind=kind,
++                    block=self._block()[0], round_no=self._round,
++                )
++        carried = s.carried_with_sockets()
++        droppables = self._droppables(carried)
++        if not droppables:
++            if self._inv_open(snap):
++                if s.clear_panels is not None:
++                    s.clear_panels()
++                return StepOutcome(done=False, acted=True, note="closing panels")
++            s.runlog.event(
++                "battery.round", stage="drop_end",
++                block=self._block()[0], round_no=self._round,
++                mode=self._block()[1], dropped=self._dropped,
++            )
++            self._reset_pickup_bookkeeping()
++            self._phase = "test"
++            self._test_started = None
++            self._test_announced = False
++            return StepOutcome(done=False, acted=True,
++                               note=f"{self._dropped} item(s) dropped")
++        if not self._inv_open(snap):
++            s.open_inventory()
++            return StepOutcome(done=False, acted=True, note="opening inventory")
++        item = droppables[0]
++        prior = len(self._ground_in_arena(snap, {item.kind}))
++        if not s.drop_item(item):
++            # The inventory.py rule: a drop that did not land means the
++            # gesture is not doing what we asked; more attempts risk bare
++            # right-clicks.
++            return self._fail(
++                f"kind {item.kind} would not drop — not aiming the same "
++                "gesture at more items"
++            )
++        self._dropped += 1
++        self._manifest_kinds.add(item.kind)
++        self._floor_confirm = (item.kind, prior, 0)
++        return StepOutcome(done=False, acted=True,
++                           note=f"dropped kind {item.kind} "
++                           f"({self._dropped}/{self._drop_total})")
++
++    # -- test: the measured phase ---------------------------------------------
++
++    def _wanted_left(self, snap: GameSnapshot) -> int:
++        """Manifest-kind items still on the floor that the pickit wants
++        RIGHT NOW. Kind-based on purpose: ground unit ids churn."""
++        carried = self.services.carried()
++        return sum(
++            1 for g in self._ground_in_arena(snap, self._manifest_kinds)
++            if self.services.pickit.decide(g, carried)[0] != "skip"
++        )
++
++    def _tick_test(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
++        s = self.services
++        if self._recover_stray_panels(snap, frozenset()):
++            return StepOutcome(done=False, acted=True, note="closed a stray panel")
++        now = self.services.clock()
++        if self._test_started is None:
++            block, mode, described = self._block()
++            self._say(f"round {self._round_label()} - mode {described}")
++            ground = self._ground_in_arena(snap, self._manifest_kinds)
++            carried = s.carried()
++            wanted = [g for g in ground
++                      if s.pickit.decide(g, carried)[0] != "skip"]
++            self._wanted_start = len(wanted)
++            self._junk_start = len(ground) - len(wanted)
++            self._test_started = now
++            s.runlog.event(
++                "battery.round", stage="test_start",
++                block=block, round_no=self._round, mode=mode,
++                wanted_on_ground=self._wanted_start,
++                junk_on_ground=self._junk_start,
++                wanted_kinds=sorted({g.kind for g in wanted}),
++            )
++        self.confirm_pickups(snap)
++        elapsed = now - self._test_started
++        wanted_left = self._wanted_left(snap)
++        finished = wanted_left == 0 and not s.pending_pickup
++        timed_out = elapsed >= float(self.round_seconds)
++        if finished or timed_out:
++            ground = self._ground_in_arena(snap, self._manifest_kinds)
++            junk_left = sum(
++                1 for g in ground
++                if s.pickit.decide(g, s.carried())[0] == "skip"
++            )
++            got = self._wanted_start - wanted_left
++            junk_got = max(self._junk_start - junk_left, 0)
++            block, mode, _ = self._block()
++            self._say(
++                f"round {self._round_label()} score: {got}/"
++                f"{self._wanted_start} whitelisted, {junk_got} unwanted, "
++                f"{elapsed:.1f}s"
++            )
++            s.runlog.event(
++                "battery.round", stage="test_end",
++                block=block, round_no=self._round, mode=mode,
++                elapsed_s=round(elapsed, 2), timed_out=timed_out,
++                collected=got, wanted_left=wanted_left,
++                junk_collected=junk_got,
++            )
++            self._reset_pickup_bookkeeping()
++            # The bot's pickup work is over for this round; re-arm the
++            # standing label policy before handing the floor over.
++            s.set_label_enforcement(True)
++            self._phase = "gather"
++            self._gather_started = None
++            return StepOutcome(
++                done=False, acted=True,
++                note=f"round {self._round_label()} over "
++                f"({'timeout' if timed_out else 'clean'}) — over to the operator",
++            )
++        if snap.player is not None:
++            assert self._anchor is not None
++            items = self._draw_order(
++                self.wanted_items(snap, self._anchor, self.radius)
++            )
++            if items and self.collect(snap, ctx, items[0]):
++                return StepOutcome(done=False, acted=True)
++        return StepOutcome(done=False, waiting=True, note="test running")
++
++    # -- gather: the operator's job, immediately (R251 feedback) ----------------
++
++    def _tick_gather(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
++        """The bot never collects between rounds: a human with a mouse
++        clears the pile in seconds, so the ask comes the moment the
++        round is scored, and the bot stays hands-off — clicking now
++        would fight the operator for the same items."""
++        s = self.services
++        if self._recover_stray_panels(snap, frozenset()):
++            return StepOutcome(done=False, acted=True, note="closed a stray panel")
++        now = self.services.clock()
++        if self._gather_started is None:
++            self._gather_started = now
++            self._last_nag = now
++            remaining = self._ground_in_arena(snap, self._manifest_kinds)
++            self._say(
++                f"round {self._round_label()} done — please pick up all "
++                f"the items ({len(remaining)} on the floor); resuming "
++                "when it is clear."
++            )
++            s.runlog.event(
++                "battery.assist", block=self._block()[0],
++                round_no=self._round, remaining=len(remaining),
++            )
++            return StepOutcome(done=False, acted=True, note="asked the operator")
++        self.confirm_pickups(snap)  # closes out the test phase's pendings
++        remaining = self._ground_in_arena(snap, self._manifest_kinds)
++        if not remaining and not s.pending_pickup:
++            counts = self._census()
++            expected = (self._pre_drop_counts or Counter()) - self._consumed
++            reconciled = counts in (expected, self._pre_drop_counts)
++            s.runlog.event(
++                "battery.round", stage="gather_end",
++                block=self._block()[0], round_no=self._round,
++                mode=self._block()[1],
++                elapsed_s=round(now - self._gather_started, 2),
++                reconciled=reconciled,
++                consumed={str(k): n for k, n in self._consumed.items()},
++            )
++            if not reconciled:
++                # Announced and RECORDED, never fatal (R251: launch 3
++                # ended a healthy battery over one drunk potion, and
++                # stackables can merge on pickup, which a count census
++                # reads as loss). The operator is watching; abort is
++                # theirs.
++                missing = expected - counts
++                gained = counts - expected
++                s.runlog.event(
++                    "battery.loss",
++                    block=self._block()[0], round_no=self._round,
++                    missing={str(k): n for k, n in missing.items()},
++                    gained={str(k): n for k, n in gained.items()},
++                )
++                detail = []
++                if missing:
++                    detail.append(
++                        "missing "
++                        + ", ".join(
++                            self._logged_name(k) for k in missing
++                        )
++                    )
++                if gained:
++                    detail.append(
++                        "extra "
++                        + ", ".join(self._logged_name(k) for k in gained)
++                    )
++                self._say(
++                    f"census note ({'; '.join(detail)}) — a stack may "
++                    "have merged or an item was consumed. Recorded; "
++                    "continuing."
++                )
++            self._say("resuming.")
++            self._rounds_done += 1
++            return self._advance()
++        # Keep the hold audible: each nag is a real chat send, so the
++        # engine's wait accounting sees action, never a hang.
++        if now - self._last_nag >= _HOLD_NAG_S:
++            self._last_nag = now
++            spots = ", ".join(str(g.position) for g in remaining[:4])
++            self._say(
++                f"waiting on {len(remaining)} item(s) ({spots}) — "
++                "resuming once the floor is clear."
++            )
++            return StepOutcome(done=False, acted=True, note="hold nag")
++        return StepOutcome(done=False, waiting=True,
++                           note="waiting for the operator")
++
++    def _advance(self) -> StepOutcome:
++        """Next round, next block, or the final restore."""
++        self._drop_total = None
++        self._test_started = None
++        self._gather_started = None
++        self._mode_presses = 0
++        self._filter_presses = 0
++        self._anchor = None
++        label = self._round_label()
++        self._round += 1
++        if self._round > self.rounds:
++            self._round = 1
++            self._block_i += 1
++        if self._block_i >= len(self._block_list()):
++            self._phase = "final"
++        else:
++            # set_mode is a no-op within a block (the flags already
++            # agree); at a block boundary it presses ALT or F once.
++            self._phase = "set_mode"
++        return StepOutcome(done=False, acted=True,
++                           note=f"round {label} reconciled "
++                           f"({self._rounds_done} done)")
++
++    # -- final: restore the client the way we found it --------------------------
++
++    def _tick_final(self, snap: GameSnapshot, ctx: EngineContext) -> StepOutcome:
++        s = self.services
++        s.set_label_enforcement(True)
++        if self._settle_until is not None:
++            if self.services.clock() < self._settle_until:
++                return StepOutcome(done=False, waiting=True,
++                                   note="toggle settling")
++            self._settle_until = None
++        labels = s.label_state()
++        if (
++            self._labels_initial is not None
++            and labels is not None
++            and labels != self._labels_initial
++            and self._mode_presses < _MODE_PRESSES_MAX
++        ):
++            self._mode_presses += 1
++            s.press_show_items()
++            self._settle_until = self.services.clock() + _TOGGLE_SETTLE_S
++            return StepOutcome(done=False, acted=True, note="restoring labels")
++        filter_now = (
++            s.filter_state() if s.filter_state is not None else self._filter_on
++        )
++        if (
++            filter_now != self.filter_initially_on
++            and self._filter_presses < _MODE_PRESSES_MAX
++        ):
++            self._filter_presses += 1
++            s.press_filter_toggle()
++            self._filter_on = self.filter_initially_on
++            self._settle_until = self.services.clock() + _TOGGLE_SETTLE_S
++            return StepOutcome(done=False, acted=True, note="restoring F")
++        self._say(
++            f"TAG-MODE BATTERY COMPLETE: {self._rounds_done} round(s) "
++            "reconciled, nothing left on the floor."
++        )
++        s.runlog.event("battery.end", completed=True,
++                       rounds_done=self._rounds_done)
++        self._phase = "done"
++        return StepOutcome(done=True, acted=True,
++                           note=f"battery complete ({self._rounds_done} rounds)")
+diff --git a/pd2bot/drill.py b/pd2bot/drill.py
+index 783a385..2d63bc1 100644
+--- a/pd2bot/drill.py
++++ b/pd2bot/drill.py
+@@ -50,10 +50,12 @@ PROJECT_STATE = Path("docs/project-state.md")
+ # The in-chat keywords (M5 P6 R169). Deliberately a WHITELIST of exact
+ # tokens, not parsing: acting on read chat is a command channel, and the
+ # recorded decision (chatread's docstring, deferred 2026-07-31) was that
+-# a command channel gets a whitelist or it gets nothing. These two are
+-# the whole vocabulary, matched against the stripped, lowercased line,
+-# and only ever consulted while a test is running or waiting to start.
+-ABORT_WORDS = frozenset({"abort", "abort test"})
++# a command channel gets a whitelist or it gets nothing. This is the
++# whole vocabulary, matched against the stripped, lowercased line, and
++# only ever consulted while a test or run is live or waiting to start.
++# "abort the test" is the operator's own phrasing (R250) — RUNS consult
++# this set too now, via wiring.run_stop_channel.
++ABORT_WORDS = frozenset({"abort", "abort test", "abort the test"})
+ OK_WORDS = frozenset({"ok", "ok!", "okay"})
+ 
+ 
+diff --git a/pd2bot/input/keys.py b/pd2bot/input/keys.py
+index 682abdc..ea4e7a5 100644
+--- a/pd2bot/input/keys.py
++++ b/pd2bot/input/keys.py
+@@ -55,11 +55,21 @@ VK_F7, VK_F8 = 0x76, 0x77
+ VK_1, VK_2, VK_3, VK_4 = 0x31, 0x32, 0x33, 0x34
+ VK_I = 0x49  # the inventory toggle's DEFAULT binding (see KeyBindings)
+ # ALT — in PD2 a TOGGLE of the ground-item label display (user, 2026-08-03),
+-# not vanilla's hold-to-show. Labels are the big click targets for pickup;
+-# the toggle protocol is labels ON to pick, OFF to travel (T63). ALT is
+-# also the inert keystroke window.py uses to satisfy Windows' foreground
+-# rules — that use is OS plumbing, not a game binding, and never remaps.
++# not vanilla's hold-to-show. The pickup protocol keeps labels OFF (T90,
++# R254 — the tags bury the clickable sprites; this INVERTED T63's
++# labels-on-to-pick reading, falsified by the tag-mode battery's 15
++# measured rounds). ALT is also the inert keystroke window.py uses to
++# satisfy Windows' foreground rules — that use is OS plumbing, not a
++# game binding, and never remaps.
+ VK_MENU = 0x12
++# "F" — the default-tags toggle the operator uses (R248): flips ground
++# labels between loot-filter styling and the game's default names. Bound
++# NOWHERE on disk (scanned: the character keyfile has no entry carrying
++# 0x46, BH.json's filter hotkeys are all "None", ProjectDiablo.cfg has no
++# F) — so it is presumed hardcoded in PD2's filter, pressing it cannot
++# collide with any game binding, and its state is unreadable until the
++# T91 probe pins a flag. Used only by the tag-mode battery.
++VK_F = 0x46
+ 
+ # -- tier 2: fixed UI keys (not bindable in D2; constants of the client) -------
+ 
+diff --git a/pd2bot/offsets.py b/pd2bot/offsets.py
+index a66b80c..ef3ca64 100644
+--- a/pd2bot/offsets.py
++++ b/pd2bot/offsets.py
+@@ -689,6 +689,13 @@ PLAYER_HOVER_ITEM = 0xE8
+ # 1 = labels showing, 0 = hidden (semantics as read at T66's start).
+ BH_LABEL_MODULE = "BH.dll"
+ BH_LABEL_DISPLAY = 0x14D2CA
++# The label STYLE toggle ("F" — default names vs loot-filter styling),
++# found by T91 (2026-08-13): 116 modules diffed across four F presses,
++# exactly ONE byte alternated, 90 bytes below the display flag above.
++# Semantics calibrated against the operator's stated state at the probe
++# ("default mode is OFF" while the byte read 1): 1 = loot-filter
++# styling, 0 = the game's default names.
++BH_FILTER_STYLE = 0x14D1CC
+ 
+ # Both live-verified by the T38 probe (64 and 72 charges respectively), and
+ # 534 corroborated at R112 where the bot identified an item by accident.
+diff --git a/pd2bot/perception/units.py b/pd2bot/perception/units.py
+index b180183..3aad0fc 100644
+--- a/pd2bot/perception/units.py
++++ b/pd2bot/perception/units.py
+@@ -452,6 +452,24 @@ def label_display_on(session: GameSession) -> bool | None:
+         return None
+ 
+ 
++def default_tags_on(session: GameSession) -> bool | None:
++    """Are ground labels in the game's DEFAULT styling (the "F" toggle)?
++
++    Reads BH.dll's style flag (T91): 1 = loot-filter styling, 0 =
++    default names — semantics calibrated against the operator's stated
++    state at the probe. None = unreadable (BH.dll absent?) — callers
++    must treat that as 'unknown', never guess a direction.
++    """
++    try:
++        base = next(
++            m.base for m in session.modules()
++            if m.name == offsets.BH_LABEL_MODULE
++        )
++        return not session.u8(base + offsets.BH_FILTER_STYLE)
++    except Exception:
++        return None
++
++
+ def hovered_item_id(session: GameSession) -> int | None:
+     """The unit id of the ground item under the cursor, or None.
+ 
+diff --git a/pd2bot/runlog/__init__.py b/pd2bot/runlog/__init__.py
+index 8041994..954f82d 100644
+--- a/pd2bot/runlog/__init__.py
++++ b/pd2bot/runlog/__init__.py
+@@ -16,6 +16,7 @@ from pd2bot.runlog.events import (
+     pickup_report,
+     render,
+     summarize,
++    tagmode_report,
+ )
+ 
+ __all__ = [
+@@ -29,4 +30,5 @@ __all__ = [
+     "pickup_report",
+     "render",
+     "summarize",
++    "tagmode_report",
+ ]
+diff --git a/pd2bot/runlog/events.py b/pd2bot/runlog/events.py
+index 3d019db..6a4f88f 100644
+--- a/pd2bot/runlog/events.py
++++ b/pd2bot/runlog/events.py
+@@ -520,6 +520,137 @@ def pickup_report(events: list[dict]) -> list[str]:
+     return lines
+ 
+ 
++_BLOCK_NAMES = {"A": "NO NAME TAGS", "B": "LOOT FILTER TAGS",
++                "C": "DEFAULT TAGS"}
++
++
++def tagmode_report(events: list[dict]) -> list[str]:
++    """The tag-mode battery table (R248/R250): accuracy and speed per mode.
++
++    Rounds are windowed by the battery's own `battery.round` boundary
++    events (stage test_start/test_end); the per-item evidence inside a
++    window is the ordinary item stream. Wantedness is judged by the
++    `wanted_kinds` list the round's test_start recorded — kind-based on
++    purpose, because ground unit ids churn. Absent boundaries are
++    reported as absent (a crash mid-round leaves an unclosed window);
++    nothing is defaulted to zero.
++    """
++    rounds: list[dict] = []
++    open_round: dict | None = None
++    for e in events:
++        kind = e.get("kind")
++        if kind == "battery.round" and e.get("stage") == "test_start":
++            open_round = {
++                "block": e.get("block"), "round_no": e.get("round_no"),
++                "mode": e.get("mode"),
++                "start_t": float(e.get("t", 0)),
++                "wanted_start": e.get("wanted_on_ground"),
++                "junk_start": e.get("junk_on_ground"),
++                "wanted_kinds": set(e.get("wanted_kinds") or []),
++                "collected_seen": 0, "junk_collected_seen": 0,
++                "attempts": 0, "abandoned": 0, "last_wanted_t": None,
++            }
++            rounds.append(open_round)
++        elif kind == "battery.round" and e.get("stage") == "test_end":
++            if open_round is not None:
++                open_round["elapsed_s"] = e.get("elapsed_s")
++                open_round["timed_out"] = e.get("timed_out")
++                open_round["collected"] = e.get("collected")
++                open_round["wanted_left"] = e.get("wanted_left")
++                open_round["junk_collected"] = e.get("junk_collected")
++                open_round = None
++        elif open_round is not None:
++            if kind == "item.collected":
++                if e.get("item_kind") in open_round["wanted_kinds"]:
++                    open_round["collected_seen"] += 1
++                    open_round["last_wanted_t"] = float(e.get("t", 0))
++                else:
++                    open_round["junk_collected_seen"] += 1
++            elif kind == "action.pickup_attempt":
++                open_round["attempts"] += 1
++            elif kind == "item.abandoned":
++                open_round["abandoned"] += 1
++    if not rounds:
++        return ["TAGMODE  no battery rounds in this log"]
++
++    lines = ["TAGMODE  per round"]
++    lines.append(
++        f"    {'round':<7}{'mode':<6}{'wanted':<8}{'got':<5}{'left':<6}"
++        f"{'time_s':<8}{'to_last':<9}{'junk+':<7}{'clicks':<8}{'gave up':<8}"
++    )
++    by_mode: dict = {}
++    for r in rounds:
++        complete = "elapsed_s" in r
++        label = f"{r['round_no']}{r['block']}"
++        to_last = (
++            f"{r['last_wanted_t'] - r['start_t']:.1f}"
++            if r["last_wanted_t"] is not None else "-"
++        )
++        time_s = f"{r['elapsed_s']:.1f}" if complete else "OPEN"
++        flag = " TIMEOUT" if complete and r.get("timed_out") else ""
++        got = r.get("collected")
++        got = r["collected_seen"] if got is None else got
++        junk = r.get("junk_collected")
++        junk = r["junk_collected_seen"] if junk is None else junk
++        lines.append(
++            f"    {label:<7}{str(r['mode']):<6}"
++            f"{str(r['wanted_start']):<8}{got:<5}"
++            f"{str(r.get('wanted_left', '?')):<6}{time_s:<8}{to_last:<9}"
++            f"{str(junk):<7}{r['attempts']:<8}{r['abandoned']:<8}{flag}"
++        )
++        if complete:
++            by_mode.setdefault((r["mode"], r["block"]), []).append(r)
++    lines.append("  per mode (complete rounds only)")
++    for mode, block in sorted(by_mode):
++        rows = by_mode[(mode, block)]
++        wanted = sum(r["wanted_start"] or 0 for r in rows)
++        got = sum(
++            r["collected"] if r.get("collected") is not None
++            else r["collected_seen"]
++            for r in rows
++        )
++        mean_t = sum(float(r["elapsed_s"]) for r in rows) / len(rows)
++        junk = sum(
++            r["junk_collected"]
++            if r.get("junk_collected") is not None
++            else r["junk_collected_seen"]
++            for r in rows
++        )
++        timeouts = sum(1 for r in rows if r.get("timed_out"))
++        pct = f"{100 * got // wanted}%" if wanted else "n/a"
++        name = _BLOCK_NAMES.get(block, "?")
++        lines.append(
++            f"    {block} ({name}): {len(rows)} round(s)  "
++            f"accuracy {got}/{wanted} ({pct})  "
++            f"mean time {mean_t:.1f}s  junk picked {junk}  "
++            f"timeouts {timeouts}"
++        )
++    consumed = [e for e in events if e.get("kind") == "battery.consumed"]
++    if consumed:
++        lines.append(
++            f"  CONSUMED BY SLIPPED CLICKS ({len(consumed)}): "
++            + "; ".join(
++                f"kind {e.get('item_kind')} in round "
++                f"{e.get('round_no')}{e.get('block')}"
++                for e in consumed
++            )
++        )
++    losses = [e for e in events if e.get("kind") == "battery.loss"]
++    for e in losses:
++        lines.append(
++            f"  LOSS  round {e.get('round_no')}{e.get('block')} "
++            f"missing {e.get('missing')}"
++        )
++    end = next(
++        (e for e in reversed(events) if e.get("kind") == "battery.end"), None
++    )
++    if end is None:
++        lines.append("  NOTE: no battery.end — the battery did not close")
++    elif not end.get("completed"):
++        lines.append(f"  NOTE: battery stopped early — {end.get('why')}")
++    return lines
++
++
+ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
+     """`python -m pd2bot.runlog [run-dir] [--kind P] [--since S] [--raw]`"""
+     import argparse
+@@ -537,6 +668,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
+         "--pickup", action="store_true",
+         help="the pickup census: wanted vs collected, and why not",
+     )
++    parser.add_argument(
++        "--tagmode", action="store_true",
++        help="the tag-mode battery table (R248): accuracy/speed per mode",
++    )
+     args = parser.parse_args(argv)
+ 
+     run = Path(args.run) if args.run else latest_run()
+@@ -556,6 +691,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
+         for line in pickup_report(events):
+             print(line, flush=True)
+         return 0
++    if args.tagmode:
++        for line in tagmode_report(events):
++            print(line, flush=True)
++        return 0
+     if args.raw:
+         for event in events:
+             print(json.dumps(event, default=str), flush=True)
+diff --git a/pd2bot/wiring.py b/pd2bot/wiring.py
+index d513437..69ada67 100644
+--- a/pd2bot/wiring.py
++++ b/pd2bot/wiring.py
+@@ -64,6 +64,7 @@ from pd2bot.perception.memory import GameSession
+ from pd2bot.perception.player import read_player
+ from pd2bot.perception.snapshot import Perception
+ from pd2bot.perception.uistate import find_ui_array
++from pd2bot.perception.units import default_tags_on, label_display_on
+ from pd2bot.perception.world import read_area, read_map_seed
+ from pd2bot.pickit import Pickit, cleanse_keep, load_item_table, load_pickit
+ from pd2bot.runlog import RunLog
+@@ -490,6 +491,14 @@ class LiveBot:
+                 print(f"  field {line}", flush=True)
+             return dropped
+ 
++        # The battery's operator channel (R248): in-game chat. Refusals
++        # propagate — the step's `_say` catches them and falls back to
++        # `alert`, so a dropped announcement never ends a run.
++        battery_chat = Chat(session)
++
++        def battery_say(text: str) -> None:
++            battery_chat.say(text)
++
+         # The survey service (R175/R176): frontier targets and coverage over
+         # the shared atlas, behind closures so the step never learns what a
+         # MapStore is. The target list is cached per (seed, area,
+@@ -590,6 +599,27 @@ class LiveBot:
+             ),
+             runlog=runlog,
+             frame=frame,
++            # The tag-mode battery's kit (R248, TEST KIT). Wired
++            # unconditionally — the closures are inert until the one run
++            # file that names the step is loaded, and a battery that
++            # discovers a missing service refuses at its first tick.
++            drop_item=self.town.drop_item,
++            open_inventory=self.town.press_inventory_open,
++            carried_with_sockets=lambda: read_carried_items(session),
++            label_state=lambda: label_display_on(session),
++            press_show_items=lambda: self.gated.press_key(
++                bindings.show_items
++            ),
++            # "F" is bound nowhere on disk (see input/keys.py at VK_F),
++            # but its state flag was pinned by T91 (offsets.BH_FILTER_STYLE)
++            # — so the press is blind and the STATE is read, same deal as
++            # Show Items.
++            press_filter_toggle=lambda: self.gated.press_key(keys.VK_F),
++            filter_state=lambda: default_tags_on(session),
++            set_label_enforcement=lambda on: setattr(
++                executor, "enforce_label_display", on
++            ),
++            say=battery_say,
+         )
+         registry = build_registry(services)
+         run = load_run(self.paths.run, registry)
+@@ -864,6 +894,49 @@ def describe(bot: LiveBot) -> list[str]:
+     ]
+ 
+ 
++def run_stop_channel(session: GameSession) -> Callable[[], bool]:
++    """The operator's abort order, for RUNS (R250): the drill-cancel file,
++    or an abort word ("abort" / "abort the test") typed in game chat.
++
++    Drills have had both channels since R79/R95; runs had NEITHER —
++    `main()` never wired `should_stop`, so a real run's only stops were
++    the ESC kill switch and killing the process. Found 2026-08-13 when
++    the tag-mode battery wedged on a stash panel and the agent's abort
++    had no way in. The engine polls this at the top of every tick and
++    `safety_poll_for` raises on it from inside every walk, so an abort
++    lands within a tick wherever the run is.
++
++    Sticky once tripped, like the drill's: an abort means abort. Chat
++    reading is best-effort — the FILE is the channel that always works.
++    """
++    from pd2bot.drill import ABORT_WORDS, CANCEL_FILE
++    from pd2bot.perception.chatread import ChatListener
++
++    try:
++        listener: ChatListener | None = ChatListener(session)
++    except Exception:  # noqa: BLE001 - no chat read: file cancel only
++        listener = None
++    state = {"stop": False}
++
++    def should_stop() -> bool:
++        if state["stop"]:
++            return True
++        if CANCEL_FILE.exists():
++            state["stop"] = True
++            return True
++        if listener is not None:
++            try:
++                line = listener.poll()
++            except Exception:  # noqa: BLE001 - a torn read is not an abort
++                line = None
++            if line is not None and line.strip().lower() in ABORT_WORDS:
++                state["stop"] = True
++                return True
++        return False
++
++    return should_stop
++
++
+ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
+     import argparse
+     import sys
+@@ -900,11 +973,22 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - live only
+ 
+     try:
+         paths = BotPaths() if args.run is None else replace(BotPaths(), run=args.run)
++        session = GameSession()
++        # The run abort channel (R250): 'abort' in chat or the cancel
++        # file, honored mid-walk. A STALE cancel file must not kill the
++        # launch — same rule the drill harness applies on its first run.
++        from pd2bot.drill import CANCEL_FILE, clear_cancel
++
++        if CANCEL_FILE.exists():
++            clear_cancel()
++            print("note: cleared a stale drill-cancel file before launch")
+         bot = build_bot(
++            session,
+             paths=paths,
+             chicken_life_pct=args.chicken,
+             radius_override=args.radius,
+             engine_config=EngineConfig(require_watchdog=args.require_watchdog),
++            should_stop=run_stop_channel(session),
+         )
+     except (GameNotRunning, NeedsAdministrator, WindowNotFound) as exc:
+         print(exc, file=sys.stderr)
+diff --git a/runs/t90-tagmode-battery-c.toml b/runs/t90-tagmode-battery-c.toml
+new file mode 100644
+index 0000000..31b597a
+--- /dev/null
++++ b/runs/t90-tagmode-battery-c.toml
+@@ -0,0 +1,18 @@
++# T90 — block C ONLY (DEFAULT TAGS), for finishing an interrupted
++# battery without re-paying for completed blocks. The 07:40 launch
++# banked complete A and B blocks; the watchdog stall ate C one second
++# into its first drop. Everything else identical to
++# t90-tagmode-battery.toml — see it for the full protocol notes.
++#
++# Tabulate afterwards:  python -m pd2bot.runlog <run-dir> --tagmode
++
++name = "t90-tagmode-battery-c"
++
++[[step]] # 5 rounds of block C (ALT on + F: the game's default name tags)
++name = "tagmode_battery"
++rounds = 5
++blocks = "C"
++round_seconds = 30
++
++[[step]] # run complete; the cycle takes it from here (leave, next game)
++name = "done"
+diff --git a/runs/t90-tagmode-battery.toml b/runs/t90-tagmode-battery.toml
+new file mode 100644
+index 0000000..2e289ad
+--- /dev/null
++++ b/runs/t90-tagmode-battery.toml
+@@ -0,0 +1,29 @@
++# T90 — the tag-mode pickup calibration battery (R248/R250, TEST KIT).
++#
++# One town game, no travel, NO town_preamble — chores are suspended by
++# construction (R250: they would contaminate the measurement). The
++# battery step runs the operator's whole experiment: per round, drop
++# every inventory item EXCEPT the cube and the two tomes in one pile
++# where the character stands, announce the round, run the normal
++# whitelisted-pickup protocol for 30s, announce the score, gather
++# everything back and reconcile the census. Blocks in the operator's
++# order: rounds 1A..5A (no tags), one ALT press, 1B..5B (loot filter
++# tags), one F press, 1C..5C (default tags).
++#
++# Aborts: 'abort' / 'abort the test' in game chat, or
++# tools\drill-cancel.ps1 — both stop the RUN within a tick (R250).
++# Misclicked panels (stash, NPC dialogs) are closed and the battery
++# carries on. If it cannot recollect the floor it asks the operator to
++# lift the stragglers by hand and announces "resuming." when clear.
++#
++# Tabulate afterwards:  python -m pd2bot.runlog <run-dir> --tagmode
++
++name = "t90-tagmode-battery"
++
++[[step]] # 5 rounds x blocks A (no tags) / B (filter tags) / C (default tags)
++name = "tagmode_battery"
++rounds = 5
++round_seconds = 30
++
++[[step]] # run complete; the cycle takes it from here (leave, next game)
++name = "done"
+diff --git a/tests/behavior/test_behavior_engine.py b/tests/behavior/test_behavior_engine.py
+index d0d88dd..576f3b3 100644
+--- a/tests/behavior/test_behavior_engine.py
++++ b/tests/behavior/test_behavior_engine.py
+@@ -1047,3 +1047,66 @@ def test_an_unreadable_latch_does_not_accuse_the_watchdog():
+     )
+     with pytest.raises(StopRequested, match="operator"):
+         eng.tick()
++
++
++def test_a_transient_watchdog_stall_survives_the_grace():
++    """R253: the watchdog transiently stalls ~4-10s and RECOVERS (five
++    healthy runs died to instant declaration before the diagnosis). A
++    stall shorter than the grace must cost nothing, and the stale/
++    recovered pair must be on the record."""
++    from pd2bot.behavior.engine import WatchdogDown  # noqa: F401
++
++    events = []
++
++    class Log:
++        enabled = True
++
++        def event(self, kind, /, **fields):
++            events.append(kind)
++
++        def area(self, *args, **kwargs):
++            pass
++
++    clock = Clock()
++    heartbeat = {"fresh": True}
++    eng = BehaviorEngine(
++        snapshot=lambda: snap(),
++        monitor=ScriptedMonitor(),
++        states=[FakeStep("s", ticks_to_done=50)],
++        executor=RecordingExecutor(),
++        config=EngineConfig(require_watchdog=True),
++        clock=clock,
++        sleep=lambda s: None,
++        watchdog_alive=lambda: heartbeat["fresh"],
++    )
++    eng._runlog = Log()
++    eng.tick()
++    heartbeat["fresh"] = False  # the stall begins
++    for _ in range(4):  # 8s of staleness — under the 15s grace
++        eng.tick()
++        clock.advance(2.0)
++    heartbeat["fresh"] = True  # ...and recovers, like all five did
++    eng.tick()
++    assert "watchdog.stale" in events
++    assert "watchdog.recovered" in events
++    assert "watchdog.down" not in events
++
++
++def test_staleness_that_outlasts_the_grace_is_a_down_watchdog():
++    from pd2bot.behavior.engine import WatchdogDown
++
++    clock = Clock()
++    eng = BehaviorEngine(
++        snapshot=lambda: snap(),
++        monitor=ScriptedMonitor(),
++        states=[FakeStep("s", ticks_to_done=50)],
++        executor=RecordingExecutor(),
++        config=EngineConfig(require_watchdog=True),
++        clock=clock,
++        sleep=lambda s: None,
++        watchdog_alive=lambda: False,
++    )
++    eng.tick()  # first stale read: the clock starts, nothing raises
++    clock.advance(16.0)  # past watchdog_stale_grace_s
++    with pytest.raises(WatchdogDown, match="has not answered"):
++        eng.tick()
+diff --git a/tests/behavior/test_behavior_execute.py b/tests/behavior/test_behavior_execute.py
+index 7b70160..08e9600 100644
+--- a/tests/behavior/test_behavior_execute.py
++++ b/tests/behavior/test_behavior_execute.py
+@@ -504,3 +504,48 @@ def test_a_walker_that_returns_nothing_is_not_an_error(monkeypatch):
+     executor.runlog = CapturingLog()
+     executor.execute(MoveTo((150, 100)))
+     assert walked == [(150, 100)]
++
++
++# -- the label policy and its one licensed exception (R254) ---------------------
++
++
++def test_pickup_presses_show_items_when_labels_read_on(monkeypatch):
++    """The standing behavior (T90/R254 — inverted from T63/T66): labels
++    provably ON -> one press of the character's Show Items key before
++    the click, because the tags bury the clickable sprites (the battery
++    measured 100% no-tags against 10%/36% tagged)."""
++    executor, gated, _, _ = make(monkeypatch)
++    monkeypatch.setattr(
++        "pd2bot.behavior.execute.label_display_on", lambda session: True
++    )
++    executor.execute(PickUpItem(50, (1002, 1000)))
++    assert executor.bindings.show_items in gated.pressed
++    assert gated.screen_clicks, "the pickup click itself must still happen"
++
++
++def test_pickup_leaves_labels_alone_when_already_off(monkeypatch):
++    """The policy state (off) already holds: no press, parity preserved."""
++    executor, gated, _, _ = make(monkeypatch)
++    monkeypatch.setattr(
++        "pd2bot.behavior.execute.label_display_on", lambda session: False
++    )
++    executor.execute(PickUpItem(50, (1002, 1000)))
++    assert executor.bindings.show_items not in gated.pressed
++
++
++def test_battery_knob_suspends_the_label_press(monkeypatch):
++    """`enforce_label_display=False` (the tag-mode battery's knob) leaves
++    the toggle alone even when labels provably read on — the battery
++    owns the display and must not be fought for it. The default is
++    True — the field exists for exactly one caller."""
++    executor, gated, _, _ = make(monkeypatch)
++    assert executor.enforce_label_display is True, (
++        "the default must stay the standing behavior"
++    )
++    monkeypatch.setattr(
++        "pd2bot.behavior.execute.label_display_on", lambda session: True
++    )
++    executor.enforce_label_display = False
++    executor.execute(PickUpItem(50, (1002, 1000)))
++    assert executor.bindings.show_items not in gated.pressed
++    assert gated.screen_clicks, "suspending the policy must not suppress the click"
+diff --git a/tests/behavior/test_behavior_run.py b/tests/behavior/test_behavior_run.py
+index 9b2ef3a..c372e43 100644
+--- a/tests/behavior/test_behavior_run.py
++++ b/tests/behavior/test_behavior_run.py
+@@ -196,5 +196,5 @@ def test_declared_but_unimplemented_step_refuses_to_build():
+ def test_default_registry_vocabulary():
+     assert default_registry().names() == [
+         "clear_countess", "clear_radius", "deplete_belt", "done", "pickup",
+-        "survey", "town_preamble", "traverse", "waypoint",
+-    ]  # deplete_belt is an R241 test fixture (belt-depletion for restock)
++        "survey", "tagmode_battery", "town_preamble", "traverse", "waypoint",
++    ]  # deplete_belt (R241) and tagmode_battery (R248) are test fixtures
+diff --git a/tests/behavior/test_tagmode.py b/tests/behavior/test_tagmode.py
+new file mode 100644
+index 0000000..29c14c8
+--- /dev/null
++++ b/tests/behavior/test_tagmode.py
+@@ -0,0 +1,596 @@
++"""The tag-mode battery (R248/R250): refusals, protection, recovery,
++and a full block sequence.
++
++The battery is TEST KIT, and test kit gets the same discipline as the
++bot: the things it must never do (drop the Cube or a tome, advance past
++an unreconciled floor, measure mode A through an executor that
++re-lights the labels, fight the operator for items it asked them to
++lift) each get a test, and one end-to-end run proves the phase machine
++converges through all three blocks.
++"""
++
++from collections import Counter
++
++from pd2bot import offsets
++from pd2bot.behavior.actions import MoveTo, PickUpItem
++from pd2bot.behavior.engine import EngineContext
++from pd2bot.behavior.steps import RunServices, build_registry
++from pd2bot.perception.items import CarriedItem, CarriedItems
++from pd2bot.perception.player import Player
++from pd2bot.perception.snapshot import GameSnapshot
++from pd2bot.perception.uistate import UIState
++from pd2bot.perception.units import GroundItem
++from pd2bot.perception.world import Area
++from pd2bot.pickit import Pickit, Rule
++from pd2bot.runlog import NullRunLog
++
++TOWN = 1  # the Rogue Encampment
++HOME = (1000, 1000)
++RARE, JUNK_QUALITY = 6, 2
++LOOT_KIND, JUNK_KIND = 999, 555
++POTION_KIND = next(iter(offsets.HEALING_POTION_KINDS))
++
++
++class Clock:
++    def __init__(self):
++        self.now = 100.0
++
++    def __call__(self):
++        return self.now
++
++    def advance(self, s):
++        self.now += s
++
++
++class EventLog(NullRunLog):
++    def __init__(self):
++        self.events = []
++
++    def event(self, kind, /, **fields):
++        # The envelope tripwire (2026-08-10): the real log's record merge
++        # would let a field named after an envelope key clobber the event
++        # kind on disk. Fail here the way the real log cannot.
++        assert not {"seq", "at", "t", "kind"} & fields.keys(), (
++            f"event field collides with the envelope: {sorted(fields)}"
++        )
++        self.events.append((kind, fields))
++
++    def of(self, kind, **match):
++        return [
++            f for k, f in self.events
++            if k == kind and all(f.get(mk) == mv for mk, mv in match.items())
++        ]
++
++
++TEST_PICKIT = Pickit(
++    rules=(
++        Rule(name="quality loot", action="keep",
++             qualities=frozenset({5, 6, 7, 8})),
++    )
++)
++
++
++def inv_item(uid, kind, quality=RARE):
++    return CarriedItem(uid, kind, quality, offsets.ITEM_MODE_IN_STORAGE,
++                       offsets.STORAGE_INVENTORY, offsets.NODE_STORAGE,
++                       (uid % 10, 0), 1)
++
++
++def belt_item(uid, kind):
++    return CarriedItem(uid, kind, 2, offsets.ITEM_MODE_IN_BELT, 0,
++                       offsets.NODE_BELT, (0, 0), 1)
++
++
++def player_at(pos):
++    return Player(
++        name="N", level=91, act=1, position=pos, mode=1,
++        hp=1000, max_hp=1000, mana=200, max_mana=400,
++        stamina=0, max_stamina=0, experience=0, gold=0, gold_stash=0,
++        strength=0, dexterity=0, vitality=0, energy=0,
++    )
++
++
++class World:
++    """Scripted town: carried items, the floor, panels, and the toggles."""
++
++    def __init__(self, items):
++        self.items = list(items)
++        self.ground: list[GroundItem] = []
++        self.pos = HOME
++        self.next_uid = 500
++        self.labels = False  # the client's label flag (BH.dll's byte)
++        self.label_presses = 0
++        self.filter_presses = 0
++        self.enforcement = []
++        self.panels: set[int] = set()
++        self.said = []
++
++    # -- the wired services -------------------------------------------------
++    def carried(self):
++        return CarriedItems(items=tuple(self.items), skipped=0)
++
++    def drop_item(self, item):
++        self.items = [i for i in self.items if i.unit_id != item.unit_id]
++        self.next_uid += 1
++        self.ground.append(GroundItem(
++            unit_id=self.next_uid, kind=item.kind,
++            position=self.pos, quality=item.quality,
++        ))
++        return True
++
++    def open_inventory(self):
++        self.panels.add(offsets.UI_INVENTORY)
++
++    def clear_panels(self):
++        self.panels.clear()
++
++    def press_show_items(self):
++        self.label_presses += 1
++        self.labels = not self.labels
++
++    def press_filter_toggle(self):
++        self.filter_presses += 1
++
++    # -- test plumbing ------------------------------------------------------
++    def pick(self, ground_item):
++        """A pickup lands: potions route to the BELT, like the client."""
++        self.ground = [g for g in self.ground
++                       if g.unit_id != ground_item.unit_id]
++        self.next_uid += 1
++        if ground_item.kind in offsets.POTION_KINDS:
++            self.items.append(belt_item(self.next_uid, ground_item.kind))
++        else:
++            self.items.append(
++                inv_item(self.next_uid, ground_item.kind, ground_item.quality)
++            )
++
++    def snapshot(self):
++        return GameSnapshot(
++            in_game=True, taken_at=0.0, player=player_at(self.pos),
++            area=Area(level_no=TOWN, position=(0, 0), size=(500, 500)),
++            monsters=(), ground_items=tuple(self.ground), allies=(),
++            objects=(),
++            ui=UIState(open_panels=frozenset(self.panels)),
++            corpses=(),
++        )
++
++
++class Reactor:
++    """An executor whose sends actually happen in the World."""
++
++    def __init__(self, world):
++        self.world = world
++        self.actions = []
++
++    def execute(self, action):
++        self.actions.append(action)
++        if isinstance(action, MoveTo):
++            self.world.pos = action.target
++        elif isinstance(action, PickUpItem):
++            hit = next(
++                (g for g in self.world.ground
++                 if g.unit_id == action.unit_id), None,
++            )
++            if hit is not None:
++                self.world.pick(hit)
++
++
++class DeafReactor(Reactor):
++    """Walks land; pickup clicks never do. The stubborn-floor case."""
++
++    def execute(self, action):
++        self.actions.append(action)
++        if isinstance(action, MoveTo):
++            self.world.pos = action.target
++
++
++def battery_services(world, clock, *, alerts=None, wire=True):
++    svc = RunServices(
++        run_preamble=lambda: None,
++        travel_to=lambda dest: None,
++        combat=object(),
++        pickit=TEST_PICKIT,
++        carried=world.carried,
++        clock=clock,
++        alert=(alerts.append if alerts is not None else lambda r: None),
++        runlog=EventLog(),
++        clear_panels=world.clear_panels,
++    )
++    if wire:
++        svc.drop_item = world.drop_item
++        svc.open_inventory = world.open_inventory
++        svc.carried_with_sockets = world.carried
++        svc.label_state = lambda: world.labels
++        svc.press_show_items = world.press_show_items
++        svc.press_filter_toggle = world.press_filter_toggle
++        svc.set_label_enforcement = world.enforcement.append
++        svc.say = world.said.append
++    return svc
++
++
++def make_battery(svc, params=None):
++    registry = build_registry(svc)
++    spec = registry.spec("tagmode_battery")
++    merged = {p.name: p.default for p in spec.params if not p.required}
++    merged.update(params or {})
++    return spec.factory(merged)
++
++
++def drive(step, world, clock, ctx, *, ticks=600):
++    """Tick until the step reports done, with a scripted OPERATOR who
++    clears the floor during gather holds (the R251 design makes the
++    between-round pickup a human job). The tick budget is a tripwire,
++    not a tuning knob — a battery that needs more is looping."""
++    outcome = None
++    for _ in range(ticks):
++        outcome = step.step(world.snapshot(), ctx)
++        clock.advance(2.0)  # past pickup_retry_s, so budgets keep moving
++        if step._phase == "gather" and step._gather_started is not None:
++            for g in list(world.ground)[:2]:  # the operator hoovers
++                world.pick(g)
++        if outcome.done:
++            return outcome
++    raise AssertionError(f"battery never finished; last: {outcome}")
++
++
++def loaded_world():
++    """Two whitelisted droppables, junk, a potion, a map and a scroll —
++    ALL of which drop under the R250 rule — plus the cube and the two
++    tomes, which never do."""
++    return World([
++        inv_item(1, LOOT_KIND), inv_item(2, LOOT_KIND),
++        inv_item(3, JUNK_KIND, JUNK_QUALITY),
++        inv_item(4, POTION_KIND, JUNK_QUALITY),
++        inv_item(5, offsets.MAP_KIND_UNCODED, JUNK_QUALITY),
++        inv_item(6, offsets.SCROLL_OF_IDENTIFY_KIND, JUNK_QUALITY),
++        inv_item(7, offsets.CUBE_KIND),
++        inv_item(8, offsets.TOME_OF_TOWN_PORTAL_KIND),
++        inv_item(9, offsets.TOME_OF_IDENTIFY_KIND),
++    ])
++
++
++# -- refusals: a battery that cannot run says so and stops ---------------------
++
++
++def test_refuses_unwired_environment():
++    world = loaded_world()
++    clock = Clock()
++    svc = battery_services(world, clock, wire=False)
++    step = make_battery(svc)
++    outcome = step.step(world.snapshot(), EngineContext(executor=Reactor(world)))
++    assert outcome.done
++    assert "not wired" in outcome.note
++    assert svc.runlog.of("battery.end", completed=False)
++
++
++def test_refuses_thin_whitelist():
++    world = World([inv_item(1, LOOT_KIND), inv_item(3, JUNK_KIND, JUNK_QUALITY)])
++    clock = Clock()
++    svc = battery_services(world, clock)
++    step = make_battery(svc)
++    outcome = step.step(world.snapshot(), EngineContext(executor=Reactor(world)))
++    assert outcome.done
++    assert "restock" in outcome.note
++    assert world.ground == [], "a refused battery must not have dropped anything"
++
++
++def test_refuses_outside_town():
++    world = loaded_world()
++    clock = Clock()
++    svc = battery_services(world, clock)
++    step = make_battery(svc)
++    snap = world.snapshot()
++    field_snap = GameSnapshot(
++        in_game=True, taken_at=0.0, player=snap.player,
++        area=Area(level_no=3, position=(0, 0), size=(500, 500)),
++        monsters=(), ground_items=(), allies=(), objects=(), ui=snap.ui,
++        corpses=(),
++    )
++    outcome = step.step(field_snap, EngineContext(executor=Reactor(world)))
++    assert outcome.done
++    assert "town" in outcome.note
++
++
++# -- the full battery, one round per block ---------------------------------------
++
++
++def test_full_block_sequence_reconciles_and_restores():
++    world = loaded_world()
++    clock = Clock()
++    svc = battery_services(world, clock)
++    step = make_battery(svc, {"rounds": 1, "confirm_seconds": 2})
++    ctx = EngineContext(executor=Reactor(world))
++    before = Counter(i.kind for i in world.items)
++
++    outcome = drive(step, world, clock, ctx)
++
++    assert outcome.done and "complete" in outcome.note
++    log = svc.runlog
++    # Three rounds ran (1A, 1B, 1C), every one reconciled.
++    starts = log.of("battery.round", stage="test_start")
++    assert [(f["round_no"], f["block"], f["mode"]) for f in starts] == [
++        (1, "A", 1), (1, "B", 2), (1, "C", 3),
++    ]
++    ends = log.of("battery.round", stage="gather_end")
++    assert len(ends) == 3 and all(f["reconciled"] for f in ends)
++    assert log.of("battery.end", completed=True)
++    assert not log.of("battery.loss")
++    # The R250 drop rule: cube + tomes NEVER dropped, everything else
++    # was — potion, map and scroll included. Round 1A drops six; the
++    # gather then routes the potion to the BELT (client behavior), so
++    # later rounds drop five. Composition drift, not loss: the census
++    # counts inventory + belt, and potions are not whitelisted, so the
++    # scores are untouched.
++    drops = log.of("battery.round", stage="drop_end")
++    assert [f["dropped"] for f in drops] == [6, 5, 5]
++    protected_left = {
++        i.kind for i in world.items
++        if i.kind in {offsets.CUBE_KIND, offsets.TOME_OF_TOWN_PORTAL_KIND,
++                      offsets.TOME_OF_IDENTIFY_KIND}
++    }
++    assert protected_left == {offsets.CUBE_KIND,
++                              offsets.TOME_OF_TOWN_PORTAL_KIND,
++                              offsets.TOME_OF_IDENTIFY_KIND}
++    # NOTHING lost: the census (inventory + belt) matches the start.
++    after = Counter(i.kind for i in world.items)
++    assert after == before
++    assert world.ground == []
++    # Blocks set their modes once, flag-verified: labels off for A
++    # (initial state), one ALT press into B, none into C, one back at
++    # the restore; F pressed once into C and once back. Enforcement is
++    # suspended for EVERY round — the battery owns the display (R254).
++    modes = log.of("battery.mode")
++    assert [(f["block"], f["mode"], f["enforcement"]) for f in modes] == [
++        ("A", 1, False), ("B", 2, False), ("C", 3, False),
++    ]
++    assert world.labels is False
++    assert world.label_presses == 2
++    assert world.filter_presses == 2
++    assert world.enforcement[-1] is True, (
++        "the battery must not leave the executor's label policy suspended"
++    )
++    # The operator's announcements, verbatim shapes (R250).
++    assert any("round 1A - mode NO NAME TAGS" in t for t in world.said)
++    assert any("round 1B - mode LOOT FILTER TAGS" in t for t in world.said)
++    assert any("round 1C - mode DEFAULT TAGS" in t for t in world.said)
++    assert any("score:" in t for t in world.said)
++
++
++# -- misclick recovery (R250 item 1) ---------------------------------------------
++
++
++def test_stray_panel_is_closed_and_the_round_continues():
++    """A misclicked stash (the 2026-08-13 wedge) costs one ESC now."""
++    world = loaded_world()
++    clock = Clock()
++    svc = battery_services(world, clock)
++    step = make_battery(svc, {"rounds": 1})
++    ctx = EngineContext(executor=Reactor(world))
++    step._phase = "test"
++    step._anchor = HOME
++    step._manifest_kinds = {LOOT_KIND}
++    world.panels.add(offsets.UI_STASH)  # the misclick
++    outcome = step.step(world.snapshot(), ctx)
++    assert outcome.acted and "stray panel" in outcome.note
++    assert world.panels == set(), "the stash must be closed"
++    assert step._phase == "test", "and the round must carry on"
++
++
++def test_the_chat_console_is_never_closed():
++    """The human opening chat is most likely typing `abort` (T54 run 4)."""
++    world = loaded_world()
++    clock = Clock()
++    svc = battery_services(world, clock)
++    step = make_battery(svc, {"rounds": 1})
++    ctx = EngineContext(executor=Reactor(world))
++    step._phase = "test"
++    step._anchor = HOME
++    step._manifest_kinds = {LOOT_KIND}
++    step._test_started = clock()  # mid-round
++    step._wanted_start = 0
++    world.panels.add(offsets.UI_CHAT_CONSOLE)
++    step.step(world.snapshot(), ctx)
++    assert offsets.UI_CHAT_CONSOLE in world.panels
++
++
++# -- the operator gather (R251: theirs immediately) --------------------------------
++
++
++def test_gather_asks_the_operator_immediately_and_never_clicks():
++    world = loaded_world()
++    clock = Clock()
++    svc = battery_services(world, clock)
++    step = make_battery(svc, {"rounds": 1})
++    reactor = DeafReactor(world)
++    ctx = EngineContext(executor=reactor)
++    step._phase = "gather"
++    step._anchor = HOME
++    step._manifest_kinds = {LOOT_KIND}
++    step._pre_drop_counts = Counter(i.kind for i in world.items)
++    stubborn = GroundItem(unit_id=999, kind=LOOT_KIND,
++                          position=HOME, quality=RARE)
++    world.ground.append(stubborn)
++    step._pre_drop_counts[LOOT_KIND] += 1  # it belongs in the census
++
++    # The ask comes on the FIRST gather tick, and the bot never clicks.
++    step.step(world.snapshot(), ctx)
++    assert svc.runlog.of("battery.assist")
++    assert any("please pick up all" in t for t in world.said)
++    for _ in range(30):
++        step.step(world.snapshot(), ctx)
++        clock.advance(2.0)
++    assert not any(isinstance(a, PickUpItem) for a in reactor.actions), (
++        "the gather is the operator's job — the bot must not fight them"
++    )
++    assert any("waiting on 1 item" in t for t in world.said), (
++        "the hold must stay audible"
++    )
++
++    # The operator lifts it -> reconcile -> "resuming."
++    world.pick(stubborn)
++    outcome = step.step(world.snapshot(), ctx)
++    assert not outcome.done
++    assert any(t == "resuming." for t in world.said)
++    ends = svc.runlog.of("battery.round", stage="gather_end")
++    assert len(ends) == 1 and ends[0]["reconciled"] is True
++
++
++def test_census_mismatch_is_announced_and_recorded_never_fatal():
++    """Launch 3 ended a healthy battery over one drunk potion, and
++    stackables merge on pickup — a count census reads both as loss.
++    R251: announce, record, continue."""
++    world = loaded_world()
++    clock = Clock()
++    svc = battery_services(world, clock)
++    step = make_battery(svc, {"rounds": 1})
++    ctx = EngineContext(executor=Reactor(world))
++    step._phase = "gather"
++    step._anchor = HOME
++    step._manifest_kinds = {LOOT_KIND}
++    step._pre_drop_counts = Counter(i.kind for i in world.items)
++    step._pre_drop_counts[LOOT_KIND] += 1  # one more than exists anywhere
++    step.step(world.snapshot(), ctx)  # tick 1: the ask (floor is empty)
++    outcome = step.step(world.snapshot(), ctx)  # tick 2: reconcile
++    assert not outcome.done, "a census note must not end the battery"
++    assert svc.runlog.of("battery.loss")
++    ends = svc.runlog.of("battery.round", stage="gather_end")
++    assert len(ends) == 1 and ends[0]["reconciled"] is False
++    assert any("census note" in t for t in world.said)
++    assert any(t == "resuming." for t in world.said)
++
++
++def test_a_consumed_drop_is_excluded_from_the_census():
++    """Launch 3's root cause: a slipped ctrl DRANK a healing potion
++    during the drop — gone from the inventory, never on the floor. The
++    floor-landing confirmation catches it at cause and the battery
++    completes with the census adjusted."""
++
++    class SlippingWorld(World):
++        def drop_item(self, item):
++            if item.kind == POTION_KIND:  # the slip: drunk, not dropped
++                self.items = [
++                    i for i in self.items if i.unit_id != item.unit_id
++                ]
++                return True
++            return super().drop_item(item)
++
++    world = SlippingWorld(loaded_world().items)
++    clock = Clock()
++    svc = battery_services(world, clock)
++    step = make_battery(svc, {"rounds": 1, "confirm_seconds": 2})
++    ctx = EngineContext(executor=Reactor(world))
++
++    outcome = drive(step, world, clock, ctx)
++
++    assert outcome.done and "complete" in outcome.note
++    consumed = svc.runlog.of("battery.consumed")
++    assert len(consumed) == 1 and consumed[0]["item_kind"] == POTION_KIND
++    assert any("never hit the floor" in t for t in world.said)
++    assert not svc.runlog.of("battery.loss"), (
++        "a caught consumption reconciles cleanly — no loss records"
++    )
++    ends = svc.runlog.of("battery.round", stage="gather_end")
++    assert all(f["reconciled"] for f in ends)
++
++
++def test_timed_out_round_reports_what_is_left():
++    world = loaded_world()
++    clock = Clock()
++    svc = battery_services(world, clock)
++    step = make_battery(svc, {"rounds": 1, "round_seconds": 4})
++    ctx = EngineContext(executor=DeafReactor(world))
++    step._phase = "test"
++    step._anchor = HOME
++    step._manifest_kinds = {LOOT_KIND}
++    world.ground.append(
++        GroundItem(unit_id=901, kind=LOOT_KIND, position=HOME, quality=RARE)
++    )
++    for _ in range(10):
++        step.step(world.snapshot(), ctx)
++        clock.advance(2.0)
++        if step._phase != "test":
++            break
++    ends = svc.runlog.of("battery.round", stage="test_end")
++    assert len(ends) == 1
++    assert ends[0]["timed_out"] is True
++    assert ends[0]["wanted_left"] == 1
++    assert ends[0]["collected"] == 0
++
++
++def test_wired_filter_reader_is_settled_not_double_pressed():
++    """A toggle press gets _TOGGLE_SETTLE_S to land before the flag is
++    re-read — the engine ticks faster than the flags settle."""
++    world = loaded_world()
++    clock = Clock()
++    svc = battery_services(world, clock)
++    filter_flag = {"on": False}
++    svc.filter_state = lambda: filter_flag["on"]
++
++    def press_f():
++        world.filter_presses += 1
++        filter_flag["on"] = not filter_flag["on"]
++
++    svc.press_filter_toggle = press_f
++    step = make_battery(svc, {"rounds": 1})
++    ctx = EngineContext(executor=Reactor(world))
++    world.labels = True  # block C's label target, already satisfied
++    step._phase = "set_mode"
++    step._block_i = 2  # block C: default tags ON
++    step._labels_initial = True
++    step._filter_on = False
++    for _ in range(6):
++        step.step(world.snapshot(), ctx)
++        clock.advance(0.2)  # the real tick rate — FASTER than the settle
++        if step._phase != "set_mode":
++            break
++    assert world.filter_presses == 1, "one press, verified after the settle"
++    assert step._phase == "drop"
++
++
++# -- the shipped run file ---------------------------------------------------------
++
++
++def test_the_shipped_battery_run_validates():
++    from pathlib import Path
++
++    from pd2bot.behavior.run import default_registry, load_run
++
++    repo = Path(__file__).resolve().parents[2]
++    run = load_run(repo / "runs" / "t90-tagmode-battery.toml",
++                   default_registry())
++    assert run.name == "t90-tagmode-battery"
++    assert [s.name for s in run.steps] == ["tagmode_battery", "done"]
++    # No town_preamble ON PURPOSE: chores are suspended by construction.
++    assert run.steps[0].params["rounds"] == 5
++    assert run.steps[0].params["round_seconds"] == 30
++
++
++def test_blocks_param_runs_a_single_block():
++    """blocks="C" reruns one mode without re-paying for finished blocks
++    (the 07:40 launch banked A and B; the watchdog stall ate C)."""
++    world = loaded_world()
++    clock = Clock()
++    svc = battery_services(world, clock)
++    step = make_battery(svc, {"rounds": 1, "blocks": "C",
++                              "confirm_seconds": 2})
++    ctx = EngineContext(executor=Reactor(world))
++    outcome = drive(step, world, clock, ctx)
++    assert outcome.done and "complete" in outcome.note
++    starts = svc.runlog.of("battery.round", stage="test_start")
++    assert [(f["round_no"], f["block"], f["mode"]) for f in starts] == [
++        (1, "C", 3),
++    ]
++    # C needs labels ON and F pressed; both restored afterwards.
++    assert world.labels is False
++    assert world.label_presses == 2
++    assert world.filter_presses == 2
++
++
++def test_unknown_blocks_refuse():
++    world = loaded_world()
++    clock = Clock()
++    svc = battery_services(world, clock)
++    step = make_battery(svc, {"blocks": "XYZ"})
++    outcome = step.step(world.snapshot(), EngineContext(executor=Reactor(world)))
++    assert outcome.done
++    assert "blocks" in outcome.note
+diff --git a/tests/runlog/test_tagmode_report.py b/tests/runlog/test_tagmode_report.py
+new file mode 100644
+index 0000000..42a1a78
+--- /dev/null
++++ b/tests/runlog/test_tagmode_report.py
+@@ -0,0 +1,74 @@
++"""The tag-mode battery table (R250): windows, wantedness, honest absence."""
++
++from pd2bot.runlog import tagmode_report
++
++
++def _round(block, round_no, mode, t0, *, wanted=3, junk=1, kinds=(999,),
++           collected=(), junk_collected_seen=(), end=None):
++    events = [{
++        "kind": "battery.round", "stage": "test_start", "t": t0,
++        "block": block, "round_no": round_no, "mode": mode,
++        "wanted_on_ground": wanted, "junk_on_ground": junk,
++        "wanted_kinds": list(kinds),
++    }]
++    for dt in collected:
++        events.append({"kind": "item.collected", "t": t0 + dt,
++                       "item_kind": kinds[0], "unit_id": 1})
++        events.append({"kind": "action.pickup_attempt", "t": t0 + dt,
++                       "unit_id": 1})
++    for dt in junk_collected_seen:
++        events.append({"kind": "item.collected", "t": t0 + dt,
++                       "item_kind": 555, "unit_id": 2})
++    if end is not None:
++        events.append({
++            "kind": "battery.round", "stage": "test_end",
++            "t": t0 + end["elapsed_s"], "block": block,
++            "round_no": round_no, "mode": mode, **end,
++        })
++    return events
++
++
++def test_rounds_window_the_item_stream_and_aggregate_by_block():
++    events = (
++        _round("A", 1, 1, 10.0, collected=(2.0, 5.0),
++               junk_collected_seen=(6.0,),
++               end={"elapsed_s": 30.0, "timed_out": True, "collected": 2,
++                    "wanted_left": 1, "junk_collected": 1})
++        + _round("B", 1, 2, 50.0, collected=(2.0, 3.0, 8.0),
++                 end={"elapsed_s": 9.0, "timed_out": False, "collected": 3,
++                      "wanted_left": 0, "junk_collected": 0})
++    )
++    # Wanted collections OUTSIDE any window must not be attributed.
++    events.append({"kind": "item.collected", "t": 45.0,
++                   "item_kind": 999, "unit_id": 9})
++    text = "\n".join(tagmode_report(events))
++    assert "TIMEOUT" in text
++    assert "A (NO NAME TAGS): 1 round(s)  accuracy 2/3" in text
++    assert "B (LOOT FILTER TAGS): 1 round(s)  accuracy 3/3 (100%)" in text
++    assert "junk picked 1" in "\n".join(
++        line for line in text.splitlines() if "NO NAME TAGS" in line
++    )
++
++
++def test_unclosed_rounds_consumption_and_early_stops_are_reported():
++    events = _round("C", 2, 3, 100.0)  # a crash mid-round: no test_end
++    events.append({"kind": "battery.consumed", "t": 115.0, "block": "C",
++                   "round_no": 2, "item_kind": 605})
++    events.append({"kind": "battery.loss", "t": 130.0, "block": "C",
++                   "round_no": 2, "missing": {"999": 1}})
++    events.append({"kind": "battery.end", "t": 131.0, "completed": False,
++                   "why": "an item was lost"})
++    text = "\n".join(tagmode_report(events))
++    assert "OPEN" in text
++    assert "CONSUMED BY SLIPPED CLICKS (1)" in text and "round 2C" in text
++    assert "LOSS" in text
++    assert "stopped early" in text
++    assert "DEFAULT TAGS" not in text.split("per mode")[1].split("CONSUMED")[0], (
++        "an unclosed round must not enter the aggregates"
++    )
++
++
++def test_no_rounds_is_said_plainly():
++    assert tagmode_report([{"kind": "tick", "t": 1.0}]) == [
++        "TAGMODE  no battery rounds in this log"
++    ]
+diff --git a/tests/test_wiring.py b/tests/test_wiring.py
+index d0208ff..9c15904 100644
+--- a/tests/test_wiring.py
++++ b/tests/test_wiring.py
+@@ -352,3 +352,45 @@ def test_a_navigator_built_without_a_monitor_still_walks(monkeypatch):
+     nav = navigate.live_navigator(None, None, 2)
+     assert nav._safety_poll is None
+     nav._safety()  # the no-op path, exercised rather than assumed
++
++
++# -- the run abort channel (R250) -------------------------------------------------
++
++
++class _NoChat:
++    """A session no ChatListener can read: forces the file-only path."""
++
++
++def test_run_stop_channel_trips_on_the_cancel_file(tmp_path, monkeypatch):
++    from pd2bot import drill
++    from pd2bot.wiring import run_stop_channel
++
++    cancel = tmp_path / "drill-cancel"
++    monkeypatch.setattr(drill, "CANCEL_FILE", cancel)
++    stop = run_stop_channel(_NoChat())
++    assert stop() is False
++    cancel.write_text("cancel", encoding="utf-8")
++    assert stop() is True
++    cancel.unlink()
++    assert stop() is True, "an abort is sticky — abort means abort"
++
++
++def test_run_stop_channel_trips_on_chat_abort(tmp_path, monkeypatch):
++    from pd2bot import drill
++    from pd2bot.perception import chatread
++    from pd2bot.wiring import run_stop_channel
++
++    monkeypatch.setattr(drill, "CANCEL_FILE", tmp_path / "absent")
++
++    class FakeListener:
++        def __init__(self, session, **kw):
++            self.lines = ["hello there", "abort the test"]
++
++        def poll(self):
++            return self.lines.pop(0) if self.lines else None
++
++    monkeypatch.setattr(chatread, "ChatListener", FakeListener)
++    stop = run_stop_channel(_NoChat())
++    assert stop() is False, "ordinary chat is not an abort"
++    assert stop() is True, "the operator's own phrase must stop the run"
++    assert stop() is True, "and it is sticky"
+diff --git a/tools/guarded-run.ps1 b/tools/guarded-run.ps1
+index 5dad5a1..9f03440 100644
+--- a/tools/guarded-run.ps1
++++ b/tools/guarded-run.ps1
+@@ -99,6 +99,17 @@ try {
+             Write-Warning "the watchdog had ALREADY EXITED (code $($watchdog.ExitCode)) - it did not survive the run"
+         } else {
+             Write-Output 'watchdog process was still alive at the end'
++            # A live process with a STALE heartbeat is the silent freeze
++            # (4th occurrence 2026-08-13). Its faulthandler dead-man dumps
++            # all stacks 10 s into a freeze (FREEZE_DUMP_AFTER_S) - but the
++            # bot reacts to staleness in 3 s and this block used to kill
++            # the watchdog ~5-8 s in, so the dump could NEVER mature. Give
++            # it time to speak before the kill; the .err.log is the whole
++            # point of the instrumentation.
++            if (-not (Test-HeartbeatFresh)) {
++                Write-Output 'heartbeat is STALE (freeze suspected) - waiting 12s for the faulthandler dump before the kill'
++                Start-Sleep -Seconds 12
++            }
+         }
+         # /T because the pid we hold is a LAUNCHER SHIM, not the watchdog:
+         # the venv's python.exe re-execs (measured 2026-08-07 - a latch
