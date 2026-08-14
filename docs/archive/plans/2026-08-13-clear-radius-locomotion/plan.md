@@ -1,10 +1,10 @@
----
+﻿---
 kind: plan
 size: md
 depth: implementation
 status: done
 completed: 2026-08-14
-commit: pending
+Commit: 4e9be26 (docs; code landed 13d0c6b..bd0cde4)
 repo: 2026-pd2-offline-bot
 created: 2026-08-13
 adr: accepted (docs/adr/2026-08-14-bounded-pathfinding.md)
@@ -23,25 +23,25 @@ list, all undesirable: small movement bursts, walking back and forth,
 retracing steps, dithering, wandering, backtracking, standing still.
 
 **Acceptance (R256 QB, operator-set): Cold Plains segment < 180 s,
-zero ticks over 4 s, idle < 45 s** — measured by
+zero ticks over 4 s, idle < 45 s** â€” measured by
 `python -m pd2bot.runlog.compare` and the new locomotion report,
 against BOTH standing benchmarks:
 
 - bot baseline `logs/runs/20260813-083614-cold-plains` (454 s CP,
   178 s idle, 6.0 st/s)
 - human benchmark `logs/runs/20260813-192249-human-coldplains`
-  (53 s CP, 16 s idle, 16.5 st/s — same character/build/gear)
+  (53 s CP, 16 s idle, 16.5 st/s â€” same character/build/gear)
 
 ## Why md
 
 Three independent fix families (pathfinding bound, posture default,
 leg pacing), each individually small, plus a live acceptance battery
-that needs the operator present — natural phase boundaries, one review
+that needs the operator present â€” natural phase boundaries, one review
 gate (P4's numbers).
 
 ## Discovery summary (full record: notes.md)
 
-- **The 47 s stall is `pathing.astar` unbounded**: reproduced offline —
+- **The 47 s stall is `pathing.astar` unbounded**: reproduced offline â€”
   the baseline's failing 8-subtile query answers NO PATH in **20.15 s**
   on the atlas alone (healthy control: 3 ms). The cells are walkable
   but in different connected components of the atlas; unknown ground is
@@ -50,11 +50,11 @@ gate (P4's numbers).
   (combat dash) / 12 st (patrol), character stands during each tick's
   decision. Effective 6.0 st/s vs the character's real 16.5.
 - **Back-and-forth**: the cautious skirmish beat retreats 12 subtiles
-  after EVERY strike then dashes back in 8s — dominant cost (combat
+  after EVERY strike then dashes back in 8s â€” dominant cost (combat
   exposure 388 s of 454). Operator RULED (R256 QA): **berserk becomes
   the default posture henceforth**; skirmish stays defined, unused.
 - The repo's standing warning applies to every change here: the last
-  four confident navigation fixes were wrong — measure before AND
+  four confident navigation fixes were wrong â€” measure before AND
   after, no exceptions.
 
 ## Phases
@@ -63,11 +63,11 @@ gate (P4's numbers).
 |---|---|---|---|
 | P1 | 01-telemetry-and-report.md | `nav.plan` events + offline locomotion report; re-price the existing logs | none |
 | P2 | 02-bounded-astar.md | Distance-scaled node budget in A*; regression test; live replay probe | none |
-| P3 | 03-berserk-default-and-legs.md | `default_posture` knob (= berserk) + `patrol_step` 12→20 | none |
+| P3 | 03-berserk-default-and-legs.md | `default_posture` knob (= berserk) + `patrol_step` 12â†’20 | none |
 | P4 | 04-live-acceptance-battery.md | 3 live Cold Plains runs vs both benchmarks; QB targets | **operator verifies numbers + impression** |
 | P5 | 05-closeout.md | Docs, performance-notes re-price, ADR decision, cleanup | none |
 
-P1–P3 are offline and may be implemented back-to-back in one session;
+P1â€“P3 are offline and may be implemented back-to-back in one session;
 P4 needs the operator at the machine (standing mandate: confirm
 presence before any launch; bridge + guarded-run as always).
 
@@ -98,7 +98,7 @@ presence before any launch; bridge + guarded-run as always).
 
 ## ADR
 
-`possible` — one candidate: bounded pathfinding ("no path found within
+`possible` â€” one candidate: bounded pathfinding ("no path found within
 budget" as an honest fast answer). Decide in P5 by the CLAUDE.md ADR
 bar; the posture default is config, not architecture.
 
@@ -109,3 +109,4 @@ report re-prices the two existing logs (no live run). P2 has a hard
 regression bound (<100 ms on the replayed no-path case). P4 is the
 live gate with the QB numbers. Every live run: operator present,
 watchdog, abort channel.
+
