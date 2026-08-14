@@ -193,3 +193,28 @@ noted for the record; out of this plan's scope.
   duty cycle still lagging the human after longer legs.
 - The town_preamble 17.1 s tick and waypoint 5.6 s tick (baseline log)
   — outside this plan; candidates for a later town pass.
+
+## P4 battery record (2026-08-13 evening, runs at logs/runs/)
+
+| run | config | CP | CP idle | ticks>4s (CP) | stuck walks | note |
+|---|---|---|---|---|---|---|
+| baseline | pre-pass | 454s | 178s | 2 (21s each) | - | 20260813-083614 |
+| 1 (211224) | P1-P3 | 473s | 162s | 0 | 88 / 183s | blocked dashes found -> R259 |
+| 2 (213311) | +walk-in | 219s | 86s | 0 | 23 / 48s | huge gain; rune picked |
+| 3 (213927) | same | 128s* | 30s* | 0 | 37 / 78s | *LEAKED 202s into Blood Moor -> R260 |
+| 4 (215438) | +seam gate | 233s | 100s | 0 | 37 / ~78s | far-dash 13s spans |
+| 5 (220121) | +dash 16 (tuning 1) | 278s | 81s | 0 | 41 / 85s | knob useless -> REVERTED |
+
+Standing results: A* floods gone every run (192-356 plans, worst
+0.69s); zero CP ticks over 4s every run; berserk endurance perfect
+(hp min 1009-1249 of 1335 across five full clearances, monitor
+silent, reflex 5-15 fires/run); seam gate held in runs 4-5.
+
+Residual family, present in ALL runs and grown with attack volume:
+~2s capped walks with near-zero movement across ALL leg types (13
+dashes + 28 patrol/closing legs in run 5). Hypothesis with the best
+fit: MOVE-CLICKS EATEN BY THE ATTACK SWING - berserk swings nearly
+continuously (105-199 attacks/run), a move-click landing mid-swing
+no-ops exactly like the known CastInFlight contention
+(performance-notes, T70), and nothing guards walks against SWING
+animations. Un-fixed cost: 50-85s/run of idle plus route inflation.

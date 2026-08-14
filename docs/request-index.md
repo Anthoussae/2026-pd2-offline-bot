@@ -309,3 +309,6 @@ headings, noted in parentheses, say roughly where they fell).
 - R258 resolved (commit+go; P1-P3 at 13d0c6b; run 1: floods GONE but CP 473s/idle 162s MISS - 88 blocked dashes = 183s -> R259) · 2026-08-13 21:28
 - R259 [decision] Charge should attack at range, not walk-then-stab · 2026-08-13 21:26
 - R259 resolved (approved; walk-in AttackUnit + charge_attack_range 16 shipped, 1339 green; battery resumes) · 2026-08-13 21:32
+- R260 [decision] Combat must not chase across the area seam · 2026-08-13 21:52
+- R260 resolved (approved; seam gate in _hostiles + clear in_radius, 1340 green; acceptance series restarts) · 2026-08-13 21:58
+- R261 [verify] P4 gate: judge the battery, rule on the swing-contention fix · 2026-08-13 22:08

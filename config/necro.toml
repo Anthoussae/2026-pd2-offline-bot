@@ -319,3 +319,8 @@ style = "charge"
 armor_recast_below_pct = 60.0
 restrike_s = 0.5
 linger = true
+# P4 tuning iteration 1 tried dash_step = 16 here (run 4's ~13 s
+# no-op dash spans read as clicks landing inside the revive crowd) and
+# run 5 MEASURED it useless: stuck walks 37 -> 41, route 1017 -> 1750.
+# Reverted — the block family spans all leg lengths, which points at
+# the swing-eats-click contention instead (see the battery record).
