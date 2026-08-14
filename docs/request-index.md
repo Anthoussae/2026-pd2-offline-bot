@@ -318,3 +318,4 @@ headings, noted in parentheses, say roughly where they fell).
 - R262 amended (1s walk budget REVERTED - run 8 died in town: budget expired before the walk's graceful blocked-by-NPC exits; chase gate + ring give-up stay) · 2026-08-14 00:20
 - R262 resolved (validated: runs 9-10 CP 178/149 PASS; 11b 246 with by-design sighting re-walk) · 2026-08-14 00:55
 - R261 resolved (operator: "Looked pretty good"; "accept and close" - P4 accepted at revised idle, P5 closeout run) · 2026-08-14 01:02
+- R246 resolved (promote: mandatory_pickup armed in countess.toml; every census since the batch perfect; P5 gate CLOSED) · 2026-08-14 01:35

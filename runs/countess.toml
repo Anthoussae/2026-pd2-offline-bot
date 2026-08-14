@@ -15,6 +15,15 @@
 # runs is 35% (R212 Q8, config default).
 
 name = "countess"
+# The order book (R241 item 7), PROMOTED here by the R246 census gate
+# (operator ruling 2026-08-14): the three-game cold-plains pilot proved
+# the full order lifecycle — open, resight-through-combat, id-churn
+# rebind, expiry, full-inventory, queued + mid-field cleanse, budget
+# close — with every miss either an honest refusal (belt full) or a
+# mode since fixed (labels-OFF pickup R254, the locomotion pass R257).
+# Runes are this run's point; a wanted drop on any floor becomes an
+# order the run must resolve before it ends.
+mandatory_pickup = true
 
 [[step]]
 name = "town_preamble"
@@ -68,8 +77,8 @@ neighborhood_radius = 30
 chamber_radius = 25
 posture = "aggressive"
 
-[[step]] # adopts the chamber circle off the blackboard; labels ensured on
-name = "pickup"
+[[step]] # adopts the chamber circle off the blackboard; labels ensured
+name = "pickup"  # OFF for pickup clicks since R254 (the T90 measurement)
 
 [[step]]
 name = "done"
